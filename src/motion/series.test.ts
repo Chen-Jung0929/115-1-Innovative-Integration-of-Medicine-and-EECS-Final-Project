@@ -1,9 +1,10 @@
+import { makeSample } from '../test/fixtures';
 import { expect, it } from 'vitest';
 import { sampleTimes, matchingSample, coverage } from './series';
 import type { Sample } from '../domain/analysis';
 const samples: Sample[] = [
-  {sampleIndex:0,requestedTimeMs:0,sourceTimeMs:0,landmarks:[],left:{valid:true,rawAngleDeg:0,invalidReasons:[]},right:{valid:false,rawAngleDeg:null,invalidReasons:['missing-landmark']}},
-  {sampleIndex:1,requestedTimeMs:200,sourceTimeMs:200,landmarks:[],left:{valid:false,rawAngleDeg:null,invalidReasons:['low-confidence']},right:{valid:false,rawAngleDeg:null,invalidReasons:['missing-landmark']}},
+  makeSample({sampleIndex:0,requestedTimeMs:0,sourceTimeMs:0,landmarks:[],left:{valid:true,rawAngleDeg:0,invalidReasons:[]},right:{valid:false,rawAngleDeg:null,invalidReasons:['missing-landmark']}}),
+  makeSample({sampleIndex:1,requestedTimeMs:200,sourceTimeMs:200,landmarks:[],left:{valid:false,rawAngleDeg:null,invalidReasons:['low-confidence']},right:{valid:false,rawAngleDeg:null,invalidReasons:['missing-landmark']}}),
 ];
 it('samples a deterministic fixed grid, excludes duration boundary', () => {
   expect(sampleTimes(1,5)).toEqual([0,.2,.4,.6,.8]);

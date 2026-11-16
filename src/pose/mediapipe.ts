@@ -4,14 +4,14 @@ import pkg from '../../package.json';
 export const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
 export const PROJECT_MODEL_URL = `${import.meta.env.BASE_URL}models/pose_landmarker_lite.task`;
 export const MODEL_VERSION = pkg.dependencies['@mediapipe/tasks-vision'];
-export interface PoseEngine { detect(frame: HTMLCanvasElement, timeMs: number): Landmark[]; close(): void }
+export interface PoseEngine { detect(frame: HTMLCanvasElement, timeMs: number): Landmark[][]; close(): void }
 export async function createPoseEngine(bytes: Uint8Array): Promise<PoseEngine> {
   const files = await FilesetResolver.forVisionTasks(`${import.meta.env.BASE_URL}mediapipe/wasm`);
   const pose = await PoseLandmarker.createFromOptions(files, {
     baseOptions: { modelAssetBuffer: bytes, delegate: 'CPU' }, runningMode: 'VIDEO', numPoses: 1,
     minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.5, minTrackingConfidence: 0.5,
   });
-  return { detect: (frame, timeMs) => pose.detectForVideo(frame, timeMs).landmarks[0]?.map(p => ({ x: p.x, y: p.y, visibility: p.visibility, ...(p.presence !== undefined ? { presence: p.presence } : {}) })) ?? [], close: () => pose.close() };
+  return { detect: (frame, timeMs) => pose.detectForVideo(frame, timeMs).landmarks.map(candidate => candidate.map(p => ({ x: p.x, y: p.y, z: p.z, visibility: p.visibility, ...(p.presence !== undefined ? { presence: p.presence } : {}) }))), close: () => pose.close() };
 }
 export async function modelBytes(file: File | null, signal: AbortSignal, allowOfficialDownload = false): Promise<{ bytes: Uint8Array; hash: string; id: string }> {
   let buffer: ArrayBuffer;

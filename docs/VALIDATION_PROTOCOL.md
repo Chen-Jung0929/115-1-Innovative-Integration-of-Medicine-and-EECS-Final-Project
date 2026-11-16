@@ -46,3 +46,12 @@ Bland–Altman 可描述 bias 及 agreement limits，但相鄰影格不獨立，
 雙鏡頭即使互相一致也可能同時偏誤；不得自動當 ground truth。
 Task 2 已加入 computational correctness 單元測試與合成輸入瀏覽器整合測試；
 不把這些測試當量測效度結果。真實模型／人體影片驗收尚待執行；Python 分析尚未開始。
+
+## 人物可靠性 follow-up
+
+團隊已回報真實影片初步分析成功但有多人錯選；不能把原有角度計算測試當身份驗證。
+本次實作逐樣本 Correct target／Wrong target／Mixed landmarks／Uncertain 與人工身份代碼。
+按 SUBJECT_TRACKING.md 的分母計算 Target Accuracy、False-Valid Rate、Usable Coverage 與
+Subject Switch Count。保存自動與人工覆核後 validity，避免標註修改後掩蓋原本漏放的錯誤。
+以同片、同模型 hash、同目標時間網格作前後比較；先規約標註、報未知／缺失比例與樣本交集。
+人工參考須考慮標註者一致性與重疊不可判定影格，不以模型輸出自動建立身份 ground truth。

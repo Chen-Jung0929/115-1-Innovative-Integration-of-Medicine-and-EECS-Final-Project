@@ -26,3 +26,11 @@
   WASM 從 lockfile 中同版本 npm 套件複製、本機提供；不使用未知鏡像。模型不入 Git。
 - ADR-013：原始 2D 內角與 180°−內角 proxy 使用不同 definition ID；無效角度為 null，CSV 空欄並記原因。
 - ADR-014：V0 候選實作與真實模型／資料集驗收分開呈現；沒有正式人體推論證據就不標記 V0 完成。
+
+## Subject selection follow-up — 2026-11-17
+
+- ADR-015：正式課程名稱統一為「醫學電資創意整合專題」，更新目前文件與網頁，保留 Git 歷史。
+- ADR-016：先採 single-pose 固定手動 ROI＋保守連續性篩檢；不增加 numPoses，保留候選／TargetTracker 介面。
+- ADR-017：人物遺失／疑慮後在同 session 鎖定無效，避免自動接人；犧牲 coverage 的門檻為未驗證工程值。
+- ADR-018：raw／automatic／人工覆核後結果分離，人工判錯使最終角度無效，自動決策保留以分析漏放。
+- ADR-019：人為 ID 只來自標註，不來自模型候選 index。人工指標分母與未知狀態須明示，未標註不假定正確。

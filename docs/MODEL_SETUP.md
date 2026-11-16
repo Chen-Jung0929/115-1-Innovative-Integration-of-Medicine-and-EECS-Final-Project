@@ -33,3 +33,10 @@ https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_
 「離線」是本地檔案分析，非 PWA 離線安裝承諾。需要網路的選用下載只傳模型 GET，
 不傳影片、landmarks 或量測值。專案沒有分析上傳 API 或遙測。
 如把模型放 public，build 會複製到 dist，發布靜態站點前須先確認模型再分發條款。
+
+## 0.3.0 follow-up（2026-11-17）
+
+團隊回報已取得官方 Lite 並成功分析真實 Squat；本環境仍未持有相同資產。
+numPoses 仍為 1；adapter 改為回傳候選陣列並保留可用 z，沒有跨人合併。
+輸入改為手動 ROI 實際裁切畫布；候選映射與保守追蹤介面見 SUBJECT_TRACKING.md。
+來源時間、同版本本機 WASM、官方／本機模型載入規則不變。

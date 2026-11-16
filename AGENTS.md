@@ -39,3 +39,12 @@ Use the existing checkout. Do not create worktrees unless explicitly requested.
   completed work, exact checks/results, limitations and next steps; update decisions as needed.
 - Commit and push authorized work; report SHA and PR URL if a PR actually exists. Never fabricate
   test results, license details, push success or clinical validity. Preserve unrelated user changes.
+
+## Subject tracking rules
+- Formal course name: 醫學電資創意整合專題. Preserve Git history.
+- Read docs/SUBJECT_TRACKING.md before changing ROI, tracking or annotation metrics.
+- Never equate landmark visibility, temporal consistency or candidate index with verified identity.
+- Preserve per-candidate raw crop landmarks and source-mapped points; never stitch people.
+- Version thresholds, record ROI/source timestamps, and keep raw, automatic and human-reviewed outcomes separate.
+- Wrong/mixed/uncertain human review must invalidate final angles without erasing automatic decisions.
+- Distinguish user-reported real-video evidence, synthetic regression and independently rerun measurements.

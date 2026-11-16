@@ -1,6 +1,6 @@
 # Architecture
 
-狀態：V0 候選實作已串接；自動軟體測試通過，真實人體模型推論尚待驗收。
+狀態：團隊已完成初步真實影片分析；本次新增固定 ROI＋人物追蹤 QC，真實同片修正效果待驗證。
 
 ```mermaid
 flowchart TD
@@ -50,8 +50,8 @@ AngleValue 為 discriminated union：valid=true 有 raw angle；valid=false 時 
 目前無後端、資料庫或遠端上傳；靜態 Vite app 在瀏覽器內分析 MP4。
 未來 camera 需要 HTTPS 或受信任的本機 origin 及使用者授權；onboarding 不提供預覽連結。
 模型已記錄套件版本、模型來源／asset ID、SHA-256、CPU delegate；設定見 docs/MODEL_SETUP.md。
-CSV 每側每取樣一列，無效角度空欄附 validity/reasons；JSON 攜帶 metadata 與 normalized xy、visibility、可用的 presence（沒有 z／world landmarks）。
-目前 schemaVersion=2；不把 sample_index 冒充來源 frame index。CSV 所有欄位加引號，文字公式前綴轉義。
+CSV 每側每取樣一列，無效角度空欄附 validity/reasons；JSON 攜帶 metadata 與 normalized xy、visibility、可用的 presence 與 crop-relative z（沒有 world landmarks）。
+目前 schemaVersion=3；不把 sample_index 冒充來源 frame index。CSV 所有欄位加引號，文字公式前綴轉義。
 
 
 ## V0 offline sampling and playback contract
@@ -75,3 +75,19 @@ VFR／低 FPS 可能少於預計取樣；不做全影格解碼或穩健視角分
 幾何計算前乘來源寬高；visibility 或可用 presence <0.5、出框、非有限值、
 confidence 不在 [0,1]、缺點或任一向量 <1e-6 px 判為無效。0° 本身是有效幾何結果，不能與退化向量混淆。
 未做濾波、峰值、ROM 或 3D 分析。推論在主執行緒，可能影響 UI 流暢度，尚未訂效能門檻。
+
+## Subject ROI / tracking / human review（0.3.0）
+
+Input seek 原圖 → canvas 裁切 ROI → PoseEngine 的獨立候選陣列 → fromCrop 原圖映射 →
+TargetTracker 四維篩檢 → rawAngles／automaticAngles → 人工 review → 最終角度、圖表、CSV。
+ROI 固定且 referenceTimeMs=0；所有來源時間與 5 Hz 目標網格不變。
+
+新增 src/tracking（純 TS：ROI、可替換 TargetTracker、identity gate），
+src/validation（純指標、人工覆核及 React review panel）。核心 knee.ts 仍只處理幾何與點位 QC，
+不能靠 knee visibility 推論人物身份。具體門檻、鎖定策略與指標分母見 SUBJECT_TRACKING.md。
+
+Sample.candidates 保留每組 crop 與原圖 landmarks（若有 z，仍為 crop-relative 模型深度，沒有還原為原圖 z）；
+不跨候選拼骨架、不以 candidate index 當 identity。trackingPolicy 與 subjectSelection 進 session JSON，
+CSV 附 ROI／自動與最終 validity／人工標籤／政策版本。原始模型結果不因人工覆核被覆寫。
+
+0.3.0 的 crop-relative z 只供受限研究查核，不做 3D 計算。
