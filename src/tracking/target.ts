@@ -1,12 +1,12 @@
 import type { Landmark } from '../domain/analysis';
-import type { Roi, TrackingQuality } from '../domain/tracking';
+import type { Roi, TrackingQuality, TrackingState } from '../domain/tracking';
 export const TRACKING_POLICY = {
-  version: 'fixed-roi-conservative-v1', minConfidence: 0.5, roiMargin: 0.02,
+  version: 'roi-temporal-recovery-v2', minConfidence: 0.5, roiMargin: 0.02,
   maxInitialCenterOffset: 0.35, minTorsoPx: 8, minSegmentPx: 2, maxLegSegmentRatio: 5,
   maxCenterTorsoPerSecond: 3, maxSegmentScaleChange: 2,
-  latchAfterUncertainty: true,
+  recoveryGapMs: 650, recoveryConfirmations:2, recoveryCenterTorso:.5, recoveryScaleChange:1.25,
 } as const;
-export interface TargetTracker { assess(candidates: readonly Landmark[][], sourceTimeMs: number, roi?:Roi): TrackingQuality }
+export interface TargetTracker { assess(candidates: readonly Landmark[][], sourceTimeMs: number, roi?:Roi): TrackingQuality; requireManual(reason:string):void }
 const core = [11,12,23,24];
 const legs = [[23,25],[25,27],[24,26],[26,28]] as const;
 export function confident(p: Landmark | undefined): p is Landmark {
@@ -14,15 +14,23 @@ export function confident(p: Landmark | undefined): p is Landmark {
 }
 /** A consistency screen, never an identity classifier or calibrated probability. */
 export function createTargetTracker(initialRoi: Roi, sourceWidth: number, sourceHeight: number): TargetTracker {
-  let latched = false;
+  let state:TrackingState='TRACKING';
+  let recovery=0;
+  let manualReason='';
   let previous: { x:number; y:number; torso:number; lengths:(number|null)[]; time:number } | undefined;
   const distance = (a:Landmark,b:Landmark) => Math.hypot((a.x-b.x)*sourceWidth,(a.y-b.y)*sourceHeight);
-  return { assess(candidates, time, roi=initialRoi) {
-    const q: TrackingQuality = {accepted:false, identity:'identity-uncertain',landmarkConfidence:'insufficient',plausibility:'unassessed',continuity:'unassessed',reasons:[]};
+  function reject(q:TrackingQuality,time:number,kind:'lost'|'soft'|'hard'):TrackingQuality {
+    recovery=0;
+    if(state==='MANUAL_REVIEW_REQUIRED'||kind==='hard'||!previous||time-previous.time>TRACKING_POLICY.recoveryGapMs)state='MANUAL_REVIEW_REQUIRED';
+    else state=kind==='lost'?'LOST':'UNCERTAIN';
+    return {...q,state,reasons:[...q.reasons,...(manualReason?[manualReason]:[]),state==='MANUAL_REVIEW_REQUIRED'?'manual-reselection-required':'recovery-gated']};
+  }
+  return {requireManual(reason){state='MANUAL_REVIEW_REQUIRED';manualReason=reason;},assess(candidates, time, roi=initialRoi) {
+    const q: TrackingQuality = {state,accepted:false, identity:'identity-uncertain',landmarkConfidence:'insufficient',plausibility:'unassessed',continuity:'unassessed',reasons:[]};
     if (candidates.length === 0 || !candidates.some(p => p.length)) {
-      latched = true; return {...q,identity:'target-lost',reasons:['no-pose-in-roi','manual-reselection-required']};
+      return reject({...q,identity:'target-lost',reasons:['no-pose-in-roi']},time,'lost');
     }
-    if (candidates.length !== 1) { latched=true; return {...q,reasons:['ambiguous-candidates','manual-reselection-required']}; }
+    if (candidates.length !== 1) return reject({...q,reasons:['ambiguous-candidates']},time,'hard');
     const p = candidates[0]!;
     const anchors = core.map(i=>p[i]);
     if (anchors.some(a=>!confident(a))) q.reasons.push('unreliable-torso-anchors');
@@ -53,11 +61,24 @@ export function createTargetTracker(initialRoi: Roi, sourceWidth: number, source
           q.continuity='discontinuous'; q.reasons.push('temporal-jump-or-scale-change');
         }
       }
-      if (!latched && q.reasons.length===0) previous={x,y,torso,lengths,time};
+      if(q.reasons.length===0) {
+        if(state==='MANUAL_REVIEW_REQUIRED')return {...q,state,reasons:[manualReason||'manual-reselection-required','manual-reselection-required']};
+        if(state!=='TRACKING' && previous) {
+          const close=Math.hypot(x-previous.x,y-previous.y)/Math.max(torso,previous.torso)<=TRACKING_POLICY.recoveryCenterTorso;
+          const scale=Math.max(torso/previous.torso,previous.torso/torso)<=TRACKING_POLICY.recoveryScaleChange;
+          if(time-previous.time>TRACKING_POLICY.recoveryGapMs||!close||!scale||lengths.some((v,i)=>v!==null&&previous!.lengths[i]!=null&&Math.max(v/previous!.lengths[i]!,previous!.lengths[i]!/v)>TRACKING_POLICY.recoveryScaleChange))return reject({...q,reasons:['recovery-not-identity-consistent']},time,'hard');
+          recovery++;
+          if(recovery<TRACKING_POLICY.recoveryConfirmations){state='UNCERTAIN';return {...q,state,reasons:['recovery-confirmation-pending']};}
+        }
+        previous={x,y,torso,lengths,time};state='TRACKING';recovery=0;
+      }
     }
-    if (latched) q.reasons.push('manual-reselection-required');
-    if (q.reasons.length) { latched=true; if (!q.reasons.includes('manual-reselection-required')) q.reasons.push('manual-reselection-required'); }
-    else { q.accepted=true; q.identity='consistent-unverified'; }
+    if(q.reasons.length) {
+      const boundary=q.reasons.includes('roi-boundary-or-extrapolation');
+      const hard=q.reasons.some(r=>['implausible-projected-geometry','temporal-jump-or-scale-change','initial-target-not-centered'].includes(r));
+      return reject({...q,identity:boundary?'target-lost':'identity-uncertain'},time,hard?'hard':boundary?'lost':'soft');
+    }
+    q.accepted=true;q.identity='consistent-unverified';q.state=state;
     return q;
   }};
 }

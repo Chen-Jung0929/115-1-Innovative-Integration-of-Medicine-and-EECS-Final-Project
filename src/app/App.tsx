@@ -3,7 +3,7 @@ import type { Session } from '../domain/analysis';
 import { MODEL_URL, PROJECT_MODEL_URL } from '../pose/mediapipe';
 import { checkFile, loadVideo, seekFrame, observePresentedFrame } from '../input/video';
 import { analyze } from '../motion/analyze';
-import { coverage, matchingSample } from '../motion/series';
+import { coverage, matchingSample, displayedRoi } from '../motion/series';
 import { flexionProxy } from '../biomechanics/knee';
 import { downloadFile, toCsv } from '../export/csv';
 import { Overlay } from '../visualization/Overlay';
@@ -30,6 +30,7 @@ export function App() {
   const [draftMode,setDraftMode]=useState<SubjectSelection['method']>('manual-fixed-roi');
   const [editTimeMs,setEditTimeMs]=useState(0);
   const [navigation,setNavigation]=useState(0);
+  const previousDraft=useRef<Roi>({x:0,y:0,width:640,height:360});
   const [drawNew,setDrawNew]=useState(true);
   const [busy, setBusy] = useState(false);
   const session=stale||busy?null:storedSession;
@@ -109,7 +110,7 @@ export function App() {
     if (!info || !video.current) return;
     const time=selection?Math.min(video.current.currentTime,info.duration-.001):0;setEditTimeMs(time*1000);void seekPlayback(time);setDraftMode(selection?.method??'manual-fixed-roi');
     setSelecting(true);setError('');setDrawNew(!selection);
-    setDraft(selection?roiAt(selection,time*1000,info.width,info.height).roi:{x:0,y:0,width:info.width,height:info.height});
+    const applied=selection?(displayedRoi(session?.samples??[],time*1000)??roiAt(selection,time*1000,info.width,info.height).roi):{x:0,y:0,width:info.width,height:info.height};previousDraft.current={...applied};setDraft({...applied});
     setNotice('編輯只變更草稿；Apply 前保留既有分析。請保留完整髖、膝、踝與活動空間。');
   }
   function confirmSelection() {
@@ -119,7 +120,7 @@ export function App() {
       const key={id:crypto.randomUUID(),timeMs:time,roi,source:'manual-target-confirmation' as const};
       const initial=selection?.keyframes.length?selection.keyframes:[{...key,timeMs:0,roi:selection?.roi??roi}];
       const keyframes=draftMode==='manual-fixed-roi'?[{...key,timeMs:0}]:[...initial.filter(k=>Math.abs(k.timeMs-time)>.001),key].sort((a,b)=>a.timeMs-b.timeMs);
-      setSelection({id:crypto.randomUUID(),roi:{...keyframes[0]!.roi},method:draftMode,referenceTimeMs:0,keyframes:structuredClone(keyframes),interpolation:'linear-source-pixels-v1',revision:(selection?.revision??0)+1,parentSelectionId:selection?.id??null,correctionSource:!selection?'initial-selection':draftMode==='manual-keyframes'?'manual-keyframe':'manual-roi-edit'});
+      setSelection({id:crypto.randomUUID(),roi:{...keyframes[0]!.roi},method:draftMode,referenceTimeMs:0,keyframes:structuredClone(keyframes),interpolation:'linear-source-pixels-v1',revision:(selection?.revision??0)+1,parentSelectionId:selection?.id??null,correctionSource:!selection?'initial-selection':selection.method!==draftMode?'mode-change':draftMode!=='manual-fixed-roi'?'manual-keyframe':'manual-roi-edit'});
       if(storedSession)setStale(true);
       setSelecting(false);setError('');
     }catch(e){setError(message(e));}
@@ -146,13 +147,13 @@ export function App() {
       {busy && <div role="status"><p>{progress.phase} · {progress.done} / {progress.total || '準備中'}</p><progress max={progress.total || 1} value={progress.done} /></div>}
       {error && <p role="alert" className="error">{error}</p>}{notice && <p role="status">{notice}</p>}
     </section>
-    {info && <section><h2>受測者選擇與 ROI 時間校正</h2><p>先回到影片起點，框選單一受測者。ROI 只能降低其他人物干擾，無法保證分開重疊人物。高 visibility 不是身分正確的證據。</p>
+    {info && <section><h2>受測者選擇與 ROI 時間校正</h2><p>首次請在片頭選取單一受測者；之後可在目前暫停時間微調或新增 keyframe。ROI 只能降低其他人物干擾，無法保證分開重疊人物。高 visibility 不是身分正確的證據。</p>
       <label>前往影片時間（秒）<input type="number" min={0} max={info.duration} step={0.2} value={navigation} disabled={busy||selecting} onChange={e=>setNavigation(Number(e.target.value))} /></label><button disabled={busy||selecting} onClick={()=>void seekPlayback(Math.max(0,Math.min(info.duration-.001,navigation)))}>跳轉影片時間</button>
       <button disabled={busy||seeking} onClick={beginSelection}>{selection?'重新選擇受測者／微調 ROI':'框選受測者'}</button>
-      {selecting && <><label>ROI 方法<select aria-label="ROI 方法" value={draftMode} onChange={e=>setDraftMode(e.target.value as SubjectSelection['method'])}><option value="manual-fixed-roi">Fixed ROI（固定框）</option><option value="manual-keyframes">Manual Keyframes（手動時間框）</option></select></label><p>編輯位置：{(editTimeMs/1000).toFixed(3)} 秒。選用 Keyframes 時，Apply 代表在此時間人工重新確認受測者；相鄰框以原圖像素線性插值，只插值 ROI，不插值角度。</p><p>可拖曳矩形內部移動、四角／四邊縮放，或輸入來源像素座標（至少 32 × 32）。固定 ROI 不會隨人移動，請保留活動空間。</p>
+      {selecting && <><label>ROI 方法<select aria-label="ROI 方法" value={draftMode} onChange={e=>setDraftMode(e.target.value as SubjectSelection['method'])}><option value="manual-fixed-roi">Fixed ROI（固定框）</option><option value="manual-keyframes">Manual Keyframes（手動時間框）</option><option value="adaptive-roi">Adaptive ROI（保守自動跟隨）</option></select></label><p>編輯位置：{(editTimeMs/1000).toFixed(3)} 秒。選用 Keyframes 或 Adaptive 時，Apply 代表在此時間人工重新確認受測者；相鄰框以原圖像素線性插值，只插值 ROI，不插值角度。</p><p>可拖曳矩形內部移動、四角／四邊縮放，或輸入來源像素座標（至少 32 × 32）。Fixed 模式不會自動移動；Adaptive 只依先前通過 QC 的姿態更新，仍需保留活動空間。</p>
       <div className="roi-fields">{(['x','y','width','height'] as const).map(key=><label key={key}>ROI {key}<input type="number" value={draft[key]} onChange={e=>setDraft(fitRoi({...draft,[key]:Number(e.target.value)},info.width,info.height))} /></label>)}</div>
       <button disabled={seeking} onClick={confirmSelection}>確認 ROI（Apply）</button>
-      <button onClick={()=>setDraft(selection?roiAt(selection,editTimeMs,info.width,info.height).roi:{x:0,y:0,width:info.width,height:info.height})}>Restore Previous</button>
+      <button onClick={()=>setDraft({...previousDraft.current})}>Restore Previous</button>
       <button onClick={()=>setDraft({x:0,y:0,width:info.width,height:info.height})}>Reset</button>
       <button onClick={()=>setDrawNew(true)}>重新畫框</button>
       <button onClick={()=>setSelecting(false)}>取消編輯</button></>}
@@ -165,7 +166,7 @@ export function App() {
     <section aria-labelledby="review-title"><h2 id="review-title">2. 影格與角度檢查</h2>
       <label>顯示側別<select value={side} onChange={e => setSide(e.target.value as typeof side)}><option value="both">左右膝 Both</option><option value="left">左膝 Left Knee</option><option value="right">右膝 Right Knee</option></select></label>
       <label><input type="checkbox" checked={diagnostic} onChange={e=>setDiagnostic(e.target.checked)} />顯示被拒絕骨架供人工檢查（紅色，不代表有效量測）</label>
-      {sample && <p role="status">人工判斷：{sample.review?.label??'尚未標註'} · 人物一致性：{sample.tracking.identity}（未經人工確認） · 點位信心：{sample.tracking.landmarkConfidence} · 幾何：{sample.tracking.plausibility} · 連續性：{sample.tracking.continuity} · 原因：{sample.tracking.reasons.join(', ')||'未觸發篩檢警示；仍可能選錯或混合人物'}</p>}
+      {sample && <p role="status">人工判斷：{sample.review?.label??'尚未標註'} · 追蹤狀態：{sample.tracking.state} · 人物一致性：{sample.tracking.identity}（未經人工確認） · 點位信心：{sample.tracking.landmarkConfidence} · 幾何：{sample.tracking.plausibility} · 連續性：{sample.tracking.continuity} · 原因：{sample.tracking.reasons.join(', ')||'未觸發篩檢警示；仍可能選錯或混合人物'}</p>}
       <div className="workspace"><div><div className="video-stage"><video ref={video} controls={!selecting} playsInline onPlay={()=>{if(selecting)video.current?.pause();}} onSeeking={() => setSeeking(true)} onSeeked={() => {
         const v = video.current;
         if (!v) return;
@@ -175,7 +176,7 @@ export function App() {
         setTimeMs(known?.sourceTimeMs ?? v.currentTime * 1000); setSeeking(false);
       }} onError={() => { if (info) { setError('影片播放解碼失敗，請改用 H.264 MP4。'); setSession(null); } }} /><Overlay sample={sample} width={info?.width ?? 640} height={info?.height ?? 360} side={side} diagnostic={diagnostic} />
       {selecting && info && !seeking && <RoiSelector width={info.width} height={info.height} roi={draft} onChange={setDraft} drawNew={drawNew} onDrawEnd={()=>setDrawNew(false)} />}
-      {selection && info && !selecting && <svg className="roi-border" viewBox={`0 0 ${info.width} ${info.height}`} aria-label="受測者 ROI 範圍"><rect {...(sample?.roi??roiAt(selection,timeMs,info.width,info.height).roi)} fill="none" stroke="#ffda57" strokeWidth={Math.max(2,info.width/250)} /></svg>}</div>
+      {selection && info && !selecting && <svg className="roi-border" viewBox={`0 0 ${info.width} ${info.height}`} aria-label="受測者 ROI 範圍"><rect {...(sample?.roi??displayedRoi(session?.samples??[],timeMs)??roiAt(selection,timeMs,info.width,info.height).roi)} fill="none" stroke="#ffda57" strokeWidth={Math.max(2,info.width/250)} /></svg>}</div>
         <p>來源影格時間：{(timeMs/1000).toFixed(3)} 秒。{sample ? `對應取樣 #${sample.sampleIndex}（${sample.decode.timeBasis}）` : '此影格沒有對應分析結果，骨架與角度不顯示。'}</p>
         {session && <label>檢查已分析取樣 #{sampleIndex}<input aria-label="已分析取樣" type="range" min={0} max={session.samples.length-1} disabled={selecting} value={sampleIndex} onChange={e => jump(Number(e.target.value))} /></label>}
       </div><div className="measurements">
@@ -186,6 +187,8 @@ export function App() {
       </div></div>
       <p>定義：髖–膝–踝於膝點的影像平面內角（0–180°）。暫定屈曲 proxy = 180° − 內角；不是已確認的臨床屈曲角。左右為人體解剖側，影片不鏡像。</p>
     </section>
+    {sample?.search && <aside>全畫面搜尋：{sample.search.status}（候選不代表確認身分）。{sample.search.error && <p>全畫面搜尋不可用，請改用 Manual Keyframes 並人工確認；本次搜尋不作身分放行依據。</p>}
+      {sample.search.suggestedRoi && <button disabled={busy||seeking} onClick={()=>{beginSelection();setDraft(sample.search!.suggestedRoi!);setDraftMode('adaptive-roi');}}>檢查搜尋建議 ROI（仍需人工 Apply）</button>}</aside>}
     <section><h2>3. 角度時間曲線與匯出</h2>
       {session ? <><p>已分析 {session.samples.length} 個取樣；每秒 5 次目標取樣，不代表全部影格。可辨識的重複呈現時間已排除；無效取樣保留為曲線斷點。</p><AngleChart samples={session.samples} side={side} timeMs={timeMs} /><div className="actions">
         <button onClick={() => downloadFile(`knee-${session.metadata.sessionId}.csv`, toCsv(session), 'text/csv;charset=utf-8')}>下載 CSV</button>

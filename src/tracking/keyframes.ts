@@ -12,7 +12,7 @@ export function roiAt(selection:SubjectSelection,timeMs:number,width:number,heig
   const frames=selection.keyframes;
   const before=[...frames].reverse().find(k=>k.timeMs<=timeMs)??frames[0]!;
   const after=frames.find(k=>k.timeMs>timeMs);
-  if(timeMs===before.timeMs || !after)return {roi:{...before.roi},roiSource:timeMs===before.timeMs?'manual-keyframe':'manual-hold',roiUpdateReason:'manual-target-confirmation',manualKeyframeId:before.id};
+  if(selection.method==='adaptive-roi' || timeMs===before.timeMs || !after)return {roi:{...before.roi},roiSource:timeMs===before.timeMs?'manual-keyframe':'manual-hold',roiUpdateReason:'manual-target-confirmation',manualKeyframeId:before.id};
   const t=(timeMs-before.timeMs)/(after.timeMs-before.timeMs);
   const roi=Object.fromEntries((['x','y','width','height'] as const).map(key=>[key,before.roi[key]+t*(after.roi[key]-before.roi[key])])) as unknown as Roi;
   return {roi:fitRoi(roi,width,height),roiSource:'keyframe-interpolated',roiUpdateReason:'linear-source-pixels-v1',manualKeyframeId:before.id};

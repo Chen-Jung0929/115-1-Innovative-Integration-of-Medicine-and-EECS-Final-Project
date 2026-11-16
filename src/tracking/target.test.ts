@@ -11,7 +11,7 @@ it('accepts stable single-person consistency without claiming verified identity'
 it('target disappearance latches invalidity rather than auto-attaching another person',()=>{
  const t=tracker();t.assess([humanPose()],0);
  const lost=t.assess([],200);expect(lost.identity).toBe('target-lost');expect(gateAngle({valid:true,rawAngleDeg:180,invalidReasons:[]},lost).rawAngleDeg).toBeNull();
- expect(t.assess([humanPose()],400).reasons).toContain('manual-reselection-required');
+ expect(t.assess([humanPose()],400).state).toBe('UNCERTAIN');expect(t.assess([humanPose()],600).accepted).toBe(true);
 });
 it('rejects high-visibility sudden subject switching',()=>{
  const t=tracker();t.assess([humanPose()],0);const q=t.assess([humanPose(.3)],200);

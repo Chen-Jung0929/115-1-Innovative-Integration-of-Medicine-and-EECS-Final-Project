@@ -5,10 +5,10 @@ export const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/pose_l
 export const PROJECT_MODEL_URL = `${import.meta.env.BASE_URL}models/pose_landmarker_lite.task`;
 export const MODEL_VERSION = pkg.dependencies['@mediapipe/tasks-vision'];
 export interface PoseEngine { detect(frame: HTMLCanvasElement, timeMs: number): Landmark[][]; close(): void }
-export async function createPoseEngine(bytes: Uint8Array): Promise<PoseEngine> {
+export async function createPoseEngine(bytes: Uint8Array, numPoses = 1): Promise<PoseEngine> {
   const files = await FilesetResolver.forVisionTasks(`${import.meta.env.BASE_URL}mediapipe/wasm`);
   const pose = await PoseLandmarker.createFromOptions(files, {
-    baseOptions: { modelAssetBuffer: bytes, delegate: 'CPU' }, runningMode: 'VIDEO', numPoses: 1,
+    baseOptions: { modelAssetBuffer: bytes, delegate: 'CPU' }, runningMode: 'VIDEO', numPoses,
     minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.5, minTrackingConfidence: 0.5,
   });
   return { detect: (frame, timeMs) => pose.detectForVideo(frame, timeMs).landmarks.map(candidate => candidate.map(p => ({ x: p.x, y: p.y, z: p.z, visibility: p.visibility, ...(p.presence !== undefined ? { presence: p.presence } : {}) }))), close: () => pose.close() };

@@ -13,7 +13,9 @@ async function mockPose(page:Page) {
     export const MODEL_VERSION='synthetic-adapter-test';
     export const PROJECT_MODEL_URL='/models/pose_landmarker_lite.task';
     export async function modelBytes(){return {bytes:new Uint8Array(),hash:'synthetic',id:'synthetic'};}
-    export async function createPoseEngine(){let count=0,previous=-1;return {close(){},detect(canvas,time){
+    export async function createPoseEngine(bytes,numPoses=1){
+      if(numPoses===2&&new URLSearchParams(location.search).get('case')==='adaptive-search-error')throw new Error('synthetic search unavailable');
+      let count=0,previous=-1;return {close(){},detect(canvas,time){
       if(time<=previous)throw new Error('non-monotonic timestamp'); previous=time;
       const i=count++,scenario=new URLSearchParams(location.search).get('case');
       if(i===1&&scenario==='lost')return [];
@@ -21,6 +23,8 @@ async function mockPose(page:Page) {
       for(const [n,x,y]of [[11,.4,.2],[12,.6,.2],[23,.4,.5],[24,.6,.5],[25,.4,.7],[26,.6,.7],[27,.4,.9],[28,.6,.9]])p[n]={x,y,visibility:1};
       if(i===1&&scenario==='switch')p.forEach(p=>p.x+=.3);
       if(i===1&&scenario==='mixed')p[25].y=.51;
+      if(scenario==='adaptive'&&numPoses===1)p.forEach(p=>p.x+=i*.02);
+      if(numPoses===2&&scenario==='adaptive-ambiguous')return [p,p.map(p=>({...p,x:p.x+.04}))];
       if(i===1&&!scenario){p[25].visibility=.1;p[26].visibility=.1;}
       return [p];
     }}};
@@ -151,7 +155,7 @@ for(const scenario of ['lost','switch','mixed']) {
     await page.getByLabel('MP4 影片').setInputFiles(synthetic);await selectRoi(page);
     await page.getByRole('button',{name:'開始分析',exact:true}).click();
     await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
-    await expect(page.locator('.measurements')).toContainText('20.0%');
+    await expect(page.locator('.measurements')).toContainText(scenario==='lost'?'60.0%':'20.0%');
     await page.getByLabel('已分析取樣',{exact:true}).fill('1');
     await expect(page.locator('.measurements')).toContainText(scenario==='lost'?'target-lost':'identity-uncertain');
     await page.getByLabel('已分析取樣',{exact:true}).fill('2');
@@ -269,3 +273,28 @@ test('manual ROI keyframe reanalysis creates a new version and recovers only at 
  expect(newer.analysisRevision.parentSessionId).toBe(old.metadata.sessionId);expect(newer.subjectSelection.revision).toBe(2);
  expect(old.subjectSelection.keyframes).toHaveLength(1);expect(newer.samples[2].roiUpdateReason).toContain('new-model');
 });
+
+
+for(const scenario of ['adaptive','adaptive-ambiguous','adaptive-search-error']) {
+ test(`${scenario}: exports actual per-sample ROI, state and independent full-frame evidence`,async({page})=>{
+  await mockPose(page);await page.goto(`/?case=${scenario}`);await page.getByLabel('MP4 影片').setInputFiles(synthetic);
+  await page.getByRole('button',{name:'框選受測者',exact:true}).click();
+  await page.getByLabel('ROI 方法',{exact:true}).selectOption('adaptive-roi');
+  await page.getByLabel('ROI width',{exact:true}).fill('200');await page.getByLabel('ROI x',{exact:true}).fill('80');
+  await page.getByRole('button',{name:'確認 ROI（Apply）',exact:true}).click();await page.getByRole('button',{name:'開始分析',exact:true}).click();
+  await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
+  const pending=page.waitForEvent('download');await page.getByRole('button',{name:/下載研究 JSON/}).click();
+  const result=JSON.parse(readFileSync((await(await pending).path())!,'utf8'));
+  expect(result.metadata.schemaVersion).toBe('6');expect(result.subjectSelection.method).toBe('adaptive-roi');
+  expect(result.samples[0].search.numPoses).toBe(2);expect(result.samples[0].roi.width).toBe(200);
+  if(scenario==='adaptive'){
+   expect(result.samples.some((s:{roi:{x:number}})=>s.roi.x>80)).toBe(true);
+   expect(result.samples.every((s:{tracking:{state:string};left:{valid:boolean}})=>s.tracking.state==='TRACKING'&&s.left.valid)).toBe(true);
+  }else{
+   expect(result.samples.every((s:{tracking:{state:string};left:{valid:boolean}})=>s.tracking.state==='MANUAL_REVIEW_REQUIRED'&&!s.left.valid)).toBe(true);
+   expect(result.samples[0].search.status).toContain(scenario==='adaptive-ambiguous'?'ambiguous':'search-error');
+  }
+  const csvPending=page.waitForEvent('download');await page.getByRole('button',{name:'下載 CSV',exact:true}).click();
+  const csv=readFileSync((await(await csvPending).path())!,'utf8');expect(csv).toContain('tracking_state');expect(csv).toContain('roi_update_reason');
+ });
+}

@@ -1,10 +1,12 @@
 import type { FrameRead } from './video';
-import type { TrackingQuality, SubjectSelection, HumanReview, RoiProposal } from './tracking';
+import type { TrackingQuality, SubjectSelection, HumanReview, RoiProposal, Roi } from './tracking';
 import type { AngleValue, AnalysisMetadata } from './measurement';
 export interface Landmark { x: number; y: number; visibility: number; presence?: number; z?: number }
+export interface SearchObservation {roi:Roi;candidates:Landmark[][];status:string;suggestedRoi:Roi|null;numPoses:number;error?:string}
 export interface Sample extends RoiProposal {
   sampleIndex: number;
   requestedTimeMs: number;
+  search:SearchObservation|null;
   decode: FrameRead;
   sourceTimeMs: number; // Decoded frame presentation timestamp, from requestVideoFrameCallback.
   landmarks: Landmark[];
@@ -28,6 +30,6 @@ export interface Session {
 }
 export const ANGLE_DEFINITION = 'knee-image-interior-v1';
 export const PROXY_DEFINITION = 'knee-flexion-proxy-180-minus-interior-v1';
-export const QC_POLICY = 'pixel-xy-visible-present-0.5-and-roi-tracking-v2';
+export const QC_POLICY = 'pixel-xy-visible-present-0.5-and-roi-controller-v3';
 export const SAMPLING_HZ = 5;
 export const MAX_DURATION_SECONDS = 600;

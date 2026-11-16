@@ -11,3 +11,8 @@ export function coverage(samples: readonly Sample[], side: AnatomicalSide): numb
 export function matchingSample(samples: readonly Sample[], timeMs: number): Sample | undefined {
   return samples.find(s => s.decode.timeBasis === 'presentation' && Math.abs(s.sourceTimeMs - timeMs) <= 1); // 1 ms timestamp tolerance
 }
+/** Display only: hold the last actually used crop between analyzed frames, never interpolate angles. */
+export function displayedRoi(samples:readonly Sample[],timeMs:number) {
+  for(let i=samples.length-1;i>=0;i--){const s=samples[i]!;const t=s.decode.timeBasis==='presentation'?s.sourceTimeMs:s.requestedTimeMs;if(t<=timeMs+.001)return s.roi;}
+  return undefined;
+}

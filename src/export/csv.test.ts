@@ -31,3 +31,10 @@ it('exports human-rejected angles as invalid while retaining automatic decisions
  expect(csv).toContain('"synthetic-selection"');expect(reviewed.automaticAngles.left.valid).toBe(true);
  expect(csv.split('\r\n')[0]).toContain('ungated_geometric_angle_deg');
 });
+it('serializes actual per-sample ROI and state rather than reusing the initial session crop',()=>{
+ const second=makeSample({sampleIndex:1,requestedTimeMs:200,sourceTimeMs:200,roi:{x:20,y:10,width:160,height:100},roiSource:'adaptive',roiUpdateReason:'bounded-torso-margin-smoothed'});
+ const rows=toCsv({...session,samples:[session.samples[0]!,second]}).replace(/^\uFEFF/,'').trim().split('\r\n').map(line=>[...line.matchAll(/"((?:[^"]|"")*)"(?:,|$)/g)].map(match=>match[1]!.replaceAll('""','"')));
+ const header=rows[0]!;const row=Object.fromEntries(header.map((name,i)=>[name,rows[3]![i]]));
+ expect(row.roi_x).toBe('20');expect(row.roi_width).toBe('160');expect(row.roi_source).toBe('adaptive');expect(row.tracking_state).toBe('TRACKING');
+ expect(row.source_time_ms).toBe('200');expect(row.timestamp_basis).toBe('presentation');
+});
