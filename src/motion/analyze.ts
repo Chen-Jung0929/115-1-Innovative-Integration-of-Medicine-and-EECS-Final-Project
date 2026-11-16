@@ -11,7 +11,7 @@ import type { SubjectSelection } from '../domain/tracking';
 import { checkedKeyframes,roiAt } from '../tracking/keyframes';
 import { checkedRoi, fromCrop } from '../tracking/roi';
 import { createRoiController, FOLLOW_POLICY } from '../tracking/controller';
-import { TRACKING_POLICY } from '../tracking/target';
+import { TRACKING_POLICY, JOINT_POLICY } from '../tracking/policy';
 import { gateAngle } from '../tracking/gate';
 import pkg from '../../package.json';
 
@@ -75,9 +75,9 @@ export async function analyze(url: string, filename: string, model: File | null,
       const fullResult=cropping?null:identity.observe(detected,sourceTimeMs,reference.roi);
       const {tracking,search}=fullResult?{tracking:fullResult.tracking,search:null}:controller.observe(detected,sourceTimeMs,proposal,searchCandidates,searchUnavailable);
       const landmarks = fullResult?fullResult.landmarks:candidates.length===1?candidates[0]!.landmarks:[];
-      const subjectDecision=fullResult?.decision??{selectedIndex:tracking.accepted?0:null,proposedIndex:candidates.length===1?0:null,reason:'legacy-roi-controller'};
+      const subjectDecision=fullResult?.decision??{selectedIndex:tracking.accepted?0:null,proposedIndex:candidates.length===1?0:null,reason:'roi-primary-single-candidate'};
       const rawAngles = {left:kneeAngle(landmarks,'left',decoder.videoWidth,decoder.videoHeight),right:kneeAngle(landmarks,'right',decoder.videoWidth,decoder.videoHeight)};
-      const automaticAngles = {left:gateAngle(rawAngles.left,tracking),right:gateAngle(rawAngles.right,tracking)};
+      const automaticAngles = {left:gateAngle(rawAngles.left,tracking,'left'),right:gateAngle(rawAngles.right,tracking,'right')};
       samples.push({ sampleIndex: samples.length, requestedTimeMs: time * 1000, sourceTimeMs, decode, ...proposal, targetReferenceRoi:reference.roi, subjectDecision, search, landmarks, candidates, tracking, rawAngles, automaticAngles, ...automaticAngles });
       previous = sourceTimeMs;
       progress(index + 1, times.length, '分析中');
@@ -86,8 +86,8 @@ export async function analyze(url: string, filename: string, model: File | null,
     if (!samples.length) throw new Error('沒有可分析的影格。');
     completed={
       run:{pipeline,inputSpace:cropping?'roi-crop':'full-frame',sourceSha256:options.sourceSha256??null,comparisonId:options.comparisonId??null,analysisDurationMs:performance.now()-started,modelPreparationMs,requestedSamples:times.length},
-      analysisRevision:{parentSessionId:null,selectionRevision:selection.revision,correctionSource:selection.correctionSource},trackingPolicy:{...TRACKING_POLICY,identityPolicy:cropping?'legacy-roi-controller':IDENTITY_POLICY,landmarkQualityPolicy:cropping?'legacy-roi-qc':LANDMARK_QUALITY_POLICY.version,...Object.fromEntries(Object.entries(FOLLOW_POLICY).map(([key,value])=>[`follow_${key}`,value]))}, subjectSelection: {...selection,roi}, sourceFilename: filename, durationMs: decoder.duration * 1000, samplingHz: SAMPLING_HZ, samples,
-      metadata: { schemaVersion: '7', sessionId: crypto.randomUUID(), sourceId: crypto.randomUUID(), inputKind: 'video',
+      analysisRevision:{parentSessionId:null,selectionRevision:selection.revision,correctionSource:selection.correctionSource},trackingPolicy:{...TRACKING_POLICY,identityPolicy:IDENTITY_POLICY,jointPolicy:JOINT_POLICY.version,jointRecoveryConfirmations:JOINT_POLICY.recoveryConfirmations,...Object.fromEntries(Object.entries(JOINT_POLICY).map(([key,value])=>[`joint_${key}`,value])),landmarkQualityPolicy:LANDMARK_QUALITY_POLICY.version,...Object.fromEntries(Object.entries(FOLLOW_POLICY).map(([key,value])=>[`follow_${key}`,value]))}, subjectSelection: {...selection,roi}, sourceFilename: filename, durationMs: decoder.duration * 1000, samplingHz: SAMPLING_HZ, samples,
+      metadata: { schemaVersion: '8', sessionId: crypto.randomUUID(), sourceId: crypto.randomUUID(), inputKind: 'video',
         sourceWidthPx: decoder.videoWidth, sourceHeightPx: decoder.videoHeight, inferenceMirrored: false, displayMirrored: false,
         model: { packageVersion: MODEL_VERSION, assetId: asset.id, assetSha256: asset.hash, delegate: 'CPU' },
         angleDefinitionVersion: ANGLE_DEFINITION, qcPolicyVersion: QC_POLICY, applicationVersion: pkg.version, createdAtUtc: new Date().toISOString() },

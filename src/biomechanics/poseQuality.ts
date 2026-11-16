@@ -1,7 +1,7 @@
 import type {Landmark} from '../domain/analysis';
 export const LANDMARK_QUALITY_POLICY={version:'source-pose-quality-v1',minConfidence:.5,minTorsoPx:8,minSegmentPx:2,maxLegSegmentRatio:5} as const;
 const POLICY=LANDMARK_QUALITY_POLICY;
-function confident(p:Landmark|undefined):p is Landmark {
+export function confident(p:Landmark|undefined):p is Landmark {
  return !!p&&[p.x,p.y,p.visibility,p.presence??1].every(Number.isFinite)&&p.visibility>=POLICY.minConfidence&&p.visibility<=1&&(p.presence??1)>=POLICY.minConfidence&&(p.presence??1)<=1;
 }
 export interface Torso {x:number;y:number;length:number}

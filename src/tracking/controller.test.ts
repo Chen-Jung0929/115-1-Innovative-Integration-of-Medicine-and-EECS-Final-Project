@@ -79,3 +79,9 @@ it('permanent manual-review state limits full-frame search to the periodic budge
  const c=make();c.observe([humanPose()],0,c.propose(0),[humanPose(),humanPose(.05)]);
  expect(c.propose(200).searchDue).toBe(false);expect(c.propose(1000).searchDue).toBe(true);
 });
+it('local knee failure holds crop updates without turning torso continuity into an identity lock',()=>{
+ const c=make();c.observe([humanPose()],0,c.propose(0));
+ const plan=c.propose(200),bad=humanPose();bad[25]!.y=.57;
+ const q=c.observe([bad],200,plan).tracking;expect(q.accepted).toBe(true);expect(q.joints!.left.valid).toBe(false);
+ const held=c.propose(400);expect(held.roi).toEqual(plan.roi);expect(held.roiSource).toBe('held-invalid');
+});

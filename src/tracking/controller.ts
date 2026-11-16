@@ -37,6 +37,7 @@ function suggestion(points:Landmark[],width:number,height:number):Roi|null {
 /** Stateful coordinator. Proposals use only previous accepted source-space observations. */
 export function createRoiController(selection:SubjectSelection,width:number,height:number) {
   let previousRoi={...selection.roi},lastAccepted:Landmark[]|null=null;
+  let canFollow=true;
   let state:TrackingState='TRACKING',lastManualId:string|null=null,lastSearch=-Infinity;
   let seed:{roi:Roi;body:Body}|null=null;
   let tracker=createTargetTracker(previousRoi,width,height);
@@ -49,7 +50,7 @@ export function createRoiController(selection:SubjectSelection,width:number,heig
       if(manualChanged){tracker=createTargetTracker(manual.roi,width,height);state='TRACKING';lastAccepted=null;seed=null;lastManualId=manual.manualKeyframeId;}
       let plan=manual;
       if(selection.method==='adaptive-roi'&&!manualChanged) {
-        const following=state==='TRACKING'&&lastAccepted&&seed;
+        const following=state==='TRACKING'&&canFollow&&lastAccepted&&seed;
         plan={...manual,roi:following?boundedFollow(previousRoi,lastAccepted!,seed!,width,height):{...previousRoi},roiSource:following?'adaptive':'held-invalid',roiUpdateReason:following?'bounded-torso-margin-smoothed':'hold-until-identity-confirmed'};
       }
       previousRoi={...plan.roi};
@@ -68,7 +69,8 @@ export function createRoiController(selection:SubjectSelection,width:number,heig
       }
       const tracking=tracker.assess(candidates,timeMs,plan.roi);
       state=tracking.state;
-      if(tracking.accepted){lastAccepted=structuredClone(candidates[0]!);const b=body(lastAccepted,width,height);if(!seed&&b)seed={roi:{...plan.roi},body:b};}
+      canFollow=tracking.accepted&&(!tracking.joints||Object.values(tracking.joints).every(j=>j.valid));
+      if(canFollow){lastAccepted=structuredClone(candidates[0]!);const b=body(lastAccepted,width,height);if(!seed&&b)seed={roi:{...plan.roi},body:b};}
       return {tracking,search};
     },
   };

@@ -1,5 +1,7 @@
 # Full-frame vs application ROI cropping — comparison protocol v1
 
+> v0.5.1：下列為先前策略／比較規約；目前 QC 與恢復以 [QC_REPLAY.md](QC_REPLAY.md) 為準。裁切／取樣／候選契約保留，腿段不再單獨永久鎖定身分。
+
 2026-11-17 · app 0.5.0 · schema 7 · pipeline-metrics-v1。
 
 ## 問題與待驗證假說

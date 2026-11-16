@@ -7,16 +7,28 @@
 
 ## 目前成果與驗證狀態
 
-v0.5.0 為**姿態估計架構比較版本**。已暫停擴充 ROI Tracking，保留 v0.4.0 程式與操作模式，
-新增全畫面單人、全畫面多人選取，以及同源 A/B/C 比較。
+v0.5.1 聚焦於**追蹤 QC 診斷與安全恢復**，保留 A/B/C 分析、5 Hz 取樣與既有操作介面。
 
-團隊回報 Adaptive ROI 在真實影片未明顯改善、可能更不穩定。裁切資訊不完整、尺度變動、
-模型 temporal tracking 與錯誤回饋累積均為**待驗證假說**，目前沒有證實原因或決定最佳架構。
-本環境沒有有效模型／`subject_002_squat_good_side.mp4`，沒有捏造人體實測或準確度結果。
+團隊已回報使用真實 Mendeley Squat 影片比較三種方法：各只有 4/155 個自動有效取樣，
+在 0.8 秒因腿段尺度變動進入人工鎖定，後續 151 筆被拒絕。本環境未取得該研究 JSON，
+這些是**團隊回報的實測數字**，尚未由本環境獨立重播。A/B 可計算 155 個、C 可計算 149 個
+原始左膝幾何角，也不代表人物或角度正確。
 
-驗證：109 個單元測試、typecheck、build 通過；Chromium 23 通過、2 個真實資產測試跳過。
-原有 ROI 流程保留並通過回歸，build 仍有 bundle 大小警告。
-詳見 [研究方法](docs/PIPELINE_COMPARISON.md) 與 [本次迭代](docs/updates/iteration-09-pipeline-comparison.md)。
+程式檢查確認舊版會把局部腿段跳變升級為永久身分鎖定。新版分開處理：
+
+- **身分一致性**：以可信軀幹與候選歧義判定；多人交錯、明顯軀幹跳換、長時間失去目標仍要求人工確認。
+- **各側關節品質**：缺點、低信心、退化或不合理腿段只拒絕該側量測，不單獨鎖住整段身分。
+- **關節時間一致性**：腿段跳變後先拒絕，需連續兩次可靠且尺度穩定的觀測才恢復；等待期間顯示 N/A。
+
+沒有降低整體門檻、插補角度或無條件解除人工鎖定。Tracking 狀態與綠色骨架只表示身分規則通過，
+不保證每一側關節有效，更不是人工確認。仍須查看角度 N/A 與輸出中的各側 QC。
+裁切是否使模型不穩定仍是待驗證假說，沒有因此選出最佳架構。
+
+本次驗證：128 個單元測試、typecheck、build 通過；Chromium 25 通過、2 個真實資產測試跳過。
+另實際執行 CLI 處理三組合成研究 session、產生九份派生結果並核對輸入檔未改變。
+以上合成結果只驗證程式邏輯，不是人體準確度證據；build 仍有 bundle 大小警告。
+詳見 [QC 診斷與重播方法](docs/QC_REPLAY.md)、[本次迭代](docs/updates/iteration-10-qc-recovery.md)
+與 [A/B/C 研究方法](docs/PIPELINE_COMPARISON.md)。
 
 ## 安裝與啟動
 
@@ -71,7 +83,7 @@ npm ci --cache /workspace/.cache/npm
 | 管線 | 送入 MediaPipe 的影像 | 如何選人／限制 |
 | --- | --- | --- |
 | A · Full Frame + Single Pose | 完整原始影格，numPoses=1 | 參考框確認初始人；模型只回一人，若選錯而沒有目標候選只能拒絕 |
-| B · ROI Cropping + Adaptive Tracking | 裁切後的動態 ROI，保留 v0.4.0 | 可能缺少上下文、尺度變動；仍需驗證，沒有刪除或進一步調參擴充 |
+| B · ROI Cropping + Adaptive Tracking | 裁切後的動態 ROI，保留裁切／跟隨設計，採新版 QC | 可能缺少上下文、尺度變動；仍需驗證，沒有刪除或進一步調參擴充 |
 | C · Full Frame + Multi-Pose + Subject Selection | 完整原始影格，numPoses=2 或 3 | 由初始位置、軀幹與時間連續性選候選；重疊或多人皆合理時拒絕，候選編號不是固定人物 ID |
 
 1. 選擇短、可清楚看到人體的 MP4，準備官方模型。預設先選 A；可從「分析管線」改選 B 或 C。
@@ -109,6 +121,35 @@ A/C 也可更新選人參考與人工 keyframe，但模型輸入維持全畫面�
 A/C 後續追蹤使用來源影像座標的連續性；即使走出初始參考框也不會因此裁掉人體。
 相似人物平滑交錯仍可能漏判，本版沒有已驗證的 re-identification。
 [v0.4.0 操作與限制](docs/ROI_TRACKING.md) 保留供既有流程查核。
+
+## 使用既有研究 JSON 離線重播 QC
+
+不需影片或模型，也不會再執行 MediaPipe。先在終端機進入專案並完成 `npm ci`，再執行：
+
+```sh
+npm run qc:replay -- --input "/Users/你的帳號/Downloads/comparison-你的檔案.json" --output outputs/qc-replay-01
+```
+
+把 `--input` 改成自己下載的「研究 JSON」或「A/B/C 比較 JSON」路徑，包含空白時保留引號。
+輸出必須是 `outputs/` 下**尚未存在**的新資料夾；下次改成 `qc-replay-02`，避免覆寫。
+支援原始 schema 7/8；缺少候選、時間或來源座標時會拒絕，不會用單一已選骨架猜測其他人物。
+
+工具會同時計算三種策略：凍結 v0.5.0、分離 QC＋兩次確認、分離 QC＋三次確認。
+打開輸出資料夾的 `report.json`，依序查看：
+
+1. `original` 與各 `strategies[].summary`：原始姿態可用數、身分通過數、左右膝有效數及人工鎖定數，分母為 `samples`。
+2. `originalWindow06to14`／`window06to14`：0.6–1.4 秒來源時間、腿段長度、身分狀態、關節 QC、恢復計數與原始角度。
+3. `failureEpisodes`：已恢復、人工重選終止、或到檔案結束仍未恢復的區間；未恢復不自動解釋成永遠無法恢復。
+4. `artificiallyAcceptedSamplesAfterQcChanges`：相較原策略新增自動放行的樣本，逐筆列出時間、側別與人工判讀適用性。
+   人工 Wrong/Mixed、Uncertain、僅確認正確人物、未標註分開列出；**新增放行不是 Accuracy 改善**。
+
+派生 session 另存為 `session-1-separated-2.json` 等檔案，保留模型、原始候選、時戳與 parent session。
+原始 JSON 不修改，報告記錄輸入 JSON 的 hash；這與影片 hash 是不同的識別資訊。
+若重播選到不同候選，不會沿用原候選的人工標籤。原有 Wrong/Mixed/Uncertain 否決仍會阻止最終有效角度。
+
+對 B 的重播固定使用**當時實際裁切區域與候選**，不重跑自動跟隨或搜尋，因此不能直接代表新版重新分析影片的結果。
+三份策略報告只是規則對照；要判斷人物與角度是否更正確，仍需原片與人工標註。
+輸出含人體特徵，只保存在受限空間，勿提交 Public GitHub。本版沒有增加新的畫面功能。
 
 ## 常見問題
 

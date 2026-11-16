@@ -24,6 +24,7 @@ export interface Sample extends RoiProposal {
   right: AngleValue;
 }
 export interface Session {
+  qcReplay?:{strategy:string;originalSessionId:string;usesSavedObservations:true;detectionRun?:NonNullable<Session['run']>};
   run?:{pipeline:PipelineConfig;inputSpace:'full-frame'|'roi-crop';sourceSha256:string|null;comparisonId:string|null;analysisDurationMs:number;modelPreparationMs:number;requestedSamples:number};
   metadata: AnalysisMetadata;
   analysisRevision:{parentSessionId:string|null;selectionRevision:number;correctionSource:string};
@@ -36,6 +37,6 @@ export interface Session {
 }
 export const ANGLE_DEFINITION = 'knee-image-interior-v1';
 export const PROXY_DEFINITION = 'knee-flexion-proxy-180-minus-interior-v1';
-export const QC_POLICY = 'multi-pipeline-observation-and-identity-v4';
+export const QC_POLICY = 'separate-identity-joint-recovery-v5';
 export const SAMPLING_HZ = 5;
 export const MAX_DURATION_SECONDS = 600;

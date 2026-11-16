@@ -51,3 +51,12 @@
 - ADR-028：新完整流程分離Detection／Initial Selection／Temporal Identity／Landmark QC／Angles；B保留舊行為作對照。
 - ADR-029：同源batch共用模型bytes與File hash，獨立依序A/B Adaptive/C，保留單法失敗；不把未知真實影格對齊假裝為零偏移。
 - ADR-030：人工標籤逐法獨立，提供common/all分母與runtime；三法pipeline比較不視為cropping因果實驗。
+
+## QC diagnosis and recovery — 2026-11-17
+
+- ADR-031：分離 subject identity、joint observation 與 joint temporal QC；局部腿段跳變／退化不再單獨造成永久 identity failure（修正 ADR-023／028 中仍耦合的部分）。
+- ADR-032：torso 的原始門檻、歧義／跳換／長期遺失人工鎖定保留；局部異常時可靠 torso 仍可更新人物歷史，不以膝踝幾何推定身分。
+- ADR-033：左右膝獨立確認與 baseline，預設兩次連續穩定觀測、gap≤300ms、段長相對上一筆及窗口首筆≤1.25；等待時不補值、不 retroactive 接受。三次規則只供 replay 比較，尚未人體校準。
+- ADR-034：保存凍結 v0.5.0 實作供 offline replay；不覆寫原 session，保存來源 hash／parent，逐筆列新增放行及人工適用性，coverage 不是 accuracy。
+- ADR-035：Replay 固定原候選、實際 ROI、timestamps 與搜尋歧義／失敗紀錄；B 不重建 crop feedback，不能冒充新版本完整重分析。
+- ADR-036：schema8 明確記錄各側 observation／temporal／recovery state；派生 session 的舊 detection run 保存於 qcReplay.detectionRun，與新推論耗時區別。

@@ -95,11 +95,13 @@ test('synthetic pose adapter: pipeline, gaps, chart, CSV, reanalysis and selecti
   await page.getByRole('button', { name:'開始分析' }).click();
   await expect(page.getByText('分析完成；', { exact:false })).toBeVisible();
   await expect(page.getByText('已分析 5 個取樣', { exact:false })).toBeVisible();
-  await expect(page.locator('.measurements')).toContainText('80.0%');
+  await expect(page.locator('.measurements')).toContainText('60.0%');
   await expect(page.getByRole('img', { name: /左右膝影像/ })).toBeVisible();
   await page.getByLabel('已分析取樣', { exact:true }).fill('1');
   await expect(page.locator('.measurements')).toContainText('low-confidence');
   await page.getByLabel('已分析取樣', { exact:true }).fill('2');
+  await expect(page.locator('.measurements')).toContainText('joint-recovery-pending');
+  await page.getByLabel('已分析取樣', { exact:true }).fill('3');
   await expect(page.locator('.measurements')).toContainText('180.0°');
   await expect(page.locator('.recharts-line-curve')).toHaveCount(2);
   expect(await page.locator('canvas.overlay').evaluate((canvas: HTMLCanvasElement) => {
@@ -162,13 +164,13 @@ test('missing local model keeps app usable and never downloads without opt-in', 
   expect(remote).toBe(0);
 });
 
-for(const scenario of ['lost','switch','mixed']) {
+for(const scenario of ['lost','switch']) {
   test(`synthetic multi-person ${scenario}: reject, retain raw evidence, annotate and reselect`,async({page})=>{
     await mockPose(page);await page.goto(`/?case=${scenario}`);
     await page.getByLabel('MP4 影片').setInputFiles(synthetic);await selectRoi(page);
     await page.getByRole('button',{name:'開始分析',exact:true}).click();
     await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
-    await expect(page.locator('.measurements')).toContainText(scenario==='lost'?'60.0%':'20.0%');
+    await expect(page.locator('.measurements')).toContainText(scenario==='lost'?'40.0%':'20.0%');
     await page.getByLabel('已分析取樣',{exact:true}).fill('1');
     await expect(page.locator('.measurements')).toContainText(scenario==='lost'?'target-lost':'identity-uncertain');
     await page.getByLabel('已分析取樣',{exact:true}).fill('2');
@@ -202,7 +204,7 @@ for(const scenario of ['lost','switch','mixed']) {
 }
 
 test('human wrong-target annotation suppresses final CSV validity but counts auto false-valid',async({page})=>{
- await mockPose(page);await page.goto('/');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await selectRoi(page);
+ await mockPose(page);await page.goto('/?case=human-review');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await selectRoi(page);
  await page.getByRole('button',{name:'開始分析',exact:true}).click();await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
  await page.getByLabel('已分析取樣',{exact:true}).fill('2');
  await page.getByLabel('人工人物判斷').selectOption('wrong-target');await page.getByLabel('人工人物代碼',{exact:false}).fill('person-B');
@@ -298,7 +300,7 @@ for(const scenario of ['adaptive','adaptive-ambiguous','adaptive-search-error'])
   await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
   const pending=page.waitForEvent('download');await page.getByRole('button',{name:/下載研究 JSON/}).click();
   const result=JSON.parse(readFileSync((await(await pending).path())!,'utf8'));
-  expect(result.metadata.schemaVersion).toBe('7');expect(result.subjectSelection.method).toBe('adaptive-roi');
+  expect(result.metadata.schemaVersion).toBe('8');expect(result.subjectSelection.method).toBe('adaptive-roi');
   expect(result.samples[0].search.numPoses).toBe(2);expect(result.samples[0].roi.width).toBe(200);
   if(scenario==='adaptive'){
    expect(result.samples.some((s:{roi:{x:number}})=>s.roi.x>80)).toBe(true);
@@ -393,3 +395,21 @@ test('actual A/B/C comparison with approved local assets (mechanism smoke, not i
  expect(result.report.complete).toBe(true);expect(result.report.provenanceConsistent).toBe(true);
  expect(result.bundle.entries.every((entry:any)=>entry.session.samples.some((s:any)=>s.candidates.length>0))).toBe(true);
 });
+
+for(const pipeline of ['full-frame-single','roi-crop','full-frame-multi']){
+ test(`${pipeline}: local knee anomaly recovers independently; raw evidence and human veto survive export`,async({page})=>{
+  await mockPose(page);await page.goto('/?case=mixed');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await selectRoi(page);
+  await page.getByLabel('分析管線',{exact:true}).selectOption(pipeline);
+  await page.getByRole('button',{name:'開始分析',exact:true}).click();await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
+  const pending=page.waitForEvent('download');await page.getByRole('button',{name:/下載研究 JSON/}).click();const r=JSON.parse(readFileSync((await(await pending).path())!,'utf8'));
+  expect(r.metadata.applicationVersion).toBe('0.5.1');expect(r.metadata.schemaVersion).toBe('8');
+  expect(r.samples.map((s:any)=>s.tracking.state)).toEqual(Array(5).fill('TRACKING'));
+  expect(r.samples.map((s:any)=>s.left.valid)).toEqual([true,false,false,true,true]);
+  expect(r.samples.every((s:any)=>s.right.valid)).toBe(true);expect(r.samples[1].rawAngles.left.valid).toBe(true);
+  expect(r.samples[1].tracking.joints.left.reasons).toContain('implausible-projected-geometry');expect(r.samples[2].tracking.joints.left.state).toBe('RECOVERING');
+  await page.getByLabel('已分析取樣',{exact:true}).fill('3');await page.getByLabel('人工人物判斷').selectOption('mixed-landmarks');
+  const after=page.waitForEvent('download');await page.getByRole('button',{name:/下載研究 JSON/}).click();const reviewed=JSON.parse(readFileSync((await(await after).path())!,'utf8'));
+  expect(reviewed.samples[3].automaticAngles.left.valid).toBe(true);expect(reviewed.samples[3].left.valid).toBe(false);
+  const csv=page.waitForEvent('download');await page.getByRole('button',{name:'下載 CSV',exact:true}).click();const text=readFileSync((await(await csv).path())!,'utf8');expect(text).toContain('joint_qc_state');expect(text).toContain('subject_tracking_accepted');
+ });
+}

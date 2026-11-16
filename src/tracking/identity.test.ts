@@ -16,7 +16,7 @@ it('does not limit an accepted subject to the initial reference rectangle',()=>{
 });
 it('keeps landmark QC distinct from identity, rejecting degenerate bones and low torso confidence',()=>{
  const p=humanPose();p[25]={...p[23]!};const t=createFullFrameIdentity(640,360);
- const q=t.observe([p],0,ref);expect(q.tracking.accepted).toBe(false);expect(q.tracking.plausibility).toBe('implausible');
+ const q=t.observe([p],0,ref);expect(q.tracking.accepted).toBe(true);expect(q.tracking.joints!.left.valid).toBe(false);expect(q.tracking.joints!.right.valid).toBe(true);expect(q.tracking.plausibility).toBe('implausible');
 });
 it('short loss recovery needs two stable returns, while a distant person is never attached',()=>{
  const t=createFullFrameIdentity(640,360);t.observe([humanPose()],0,ref);expect(t.observe([],200,ref).tracking.state).toBe('LOST');
@@ -31,5 +31,6 @@ it('manual reconfirmation uses a new identity state, not the old candidate index
 it('full-frame recovery does not waive limb-scale QC when the torso alone looks stable',()=>{
  const t=createFullFrameIdentity(640,360);t.observe([humanPose()],0,ref);t.observe([],200,ref);
  const p=humanPose();p[25]!.y=.65;
- const result=t.observe([p],400,ref);expect(result.tracking.accepted).toBe(false);expect(result.tracking.reasons).toContain('recovery-not-identity-consistent');
+ const result=t.observe([p],400,ref);expect(result.tracking.accepted).toBe(false);expect(result.tracking.reasons).toContain('identity-recovery-confirmation-pending');expect(result.tracking.joints!.left.valid).toBe(false);
+ const returned=t.observe([p],600,ref);expect(returned.tracking.accepted).toBe(true);expect(returned.tracking.joints!.left.valid).toBe(false);expect(returned.tracking.joints!.left.state).toBe('RECOVERING');
 });

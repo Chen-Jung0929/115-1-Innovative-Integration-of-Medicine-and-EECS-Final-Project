@@ -78,3 +78,13 @@ raw landmark不連續、可比較配對、實際分析耗時與失敗原因；�
 人工標註每法獨立，不能複製另一法的模型身份結果；比較整個pipeline不能單獨證實cropping因果。
 先用無中途校正的初始框作基準，人工輔助校正另立條件；重跑／控制順序檢查暖機及裝置差異。
 本環境真實影片未提供，不以合成測試替代人體結果或選出勝出方法。
+
+## v0.5.1 QC replay 與新增放行稽核
+
+依 [QC_REPLAY.md](QC_REPLAY.md) 對原始 schema7/8 研究 JSON 進行 frozen-v0.5.0、separated-2、separated-3 對照。
+保留原檔 bytes hash，先檢查凍結策略與原紀錄是否一致，再逐筆核對0.6–1.4秒段長、候選、身分及各側狀態。
+報 raw pose availability、subject acceptance、joint automatic validity、manual required、失敗區間結局，分母為各 run samples。
+新增自動放行逐筆列出，不以 Valid Frame Rate 提升推定 Accuracy；人工 Wrong/Mixed、Uncertain、Correct 與未判讀分開。
+對換選候選不沿用舊標籤；Correct target 也不足以確認 angle accuracy，需要獨立點位／角度參考。
+B 重播只在 saved crop observations 條件下有效，不能代表新版 ROI feedback；必要時另跑原片比較。
+團隊回報真人各4/155／0.8秒人工鎖定；本環境未收到 JSON，修正後真實指標待驗收。合成155筆僅驗證狀態機。

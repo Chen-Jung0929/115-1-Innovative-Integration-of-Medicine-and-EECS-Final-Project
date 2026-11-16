@@ -1,6 +1,6 @@
 # Architecture
 
-狀態：v0.5.0 為可操作 A/B/C 架構比較；v0.4 ROI 保留並暫停擴充，效果與根因尚待真實資料。
+狀態：v0.5.1 保留 A/B/C 架構比較並分離身分與各側關節 QC；目前行為見文末及 [QC_REPLAY.md](QC_REPLAY.md)。真實修正效果待原始 JSON／人工驗收。
 
 ```mermaid
 flowchart TD
@@ -130,3 +130,30 @@ A/C 的 inference ROI 永遠為全圖；targetReferenceRoi 不是裁切範圍，
 完整raw候選保留，subjectDecision 記 selected／proposed index（不當固定身分）。
 同源 runner 固定影片／模型hash、selection與5Hz，獨立依序執行三法並保留單法失敗。
 不直接宣稱每法 decoder 取得相同呈現影格；輸出 common target grid、timing basis、已知偏移及完整分母。
+
+## v0.5.1 QC 分離（目前行為）
+
+本節取代上文以全身幾何 gate 身分的描述，詳見 [QC_REPLAY.md](QC_REPLAY.md)。
+Detection／ROI／5Hz 工作流不擴充；A/C 完整影格、B 原裁切設計維持。
+`identity.ts` 只用 torso／候選證據做 identity state 與歷史更新；`target.ts` 為 B 包裝 crop 的 torso 約束。
+`biomechanics/jointQuality.ts` 為每側純觀測 QC；`tracking/jointQuality.ts` 為每側 temporal state／確認序列。
+
+```mermaid
+flowchart LR
+  D[原始候選與 source timestamp] --> S[選人與 torso identity]
+  D --> O[各側關節 observation QC]
+  S --> T[各側 temporal confirmation]
+  O --> T
+  D --> G[raw kneeAngle]
+  S --> Gate[subject 與 side gate]
+  T --> Gate
+  G --> Gate
+  Gate --> A[automatic angle]
+  A --> H[獨立人工否決與最終輸出]
+```
+
+schema8 `tracking.accepted` 描述身分規則，`tracking.joints.left/right` 記錄 observationValid／observationReasons、
+temporal、READY／INVALID／RECOVERING／SUSPENDED、source pixel段長、baselineBeforePx／recoveryAnchorPx、確認數與理由。
+各側 gate 不因另一側失敗而輸出零值或全段鎖定。B 只有身分與兩側 QC 都可靠才使用該姿態更新跟隨。
+Raw candidates、原始 angles、automatic、human review 分離。CSV 附 subject_tracking_accepted／joint_qc_* 與 replay strategy。
+Offline replay 使用相同核心；CLI 不載入 MediaPipe 或模型、不啟動 HTTP listener，寫入獨立 ignored outputs。

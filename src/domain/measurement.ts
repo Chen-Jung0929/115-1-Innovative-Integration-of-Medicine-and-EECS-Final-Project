@@ -3,7 +3,8 @@ export type AnatomicalSide = 'left' | 'right';
 export type MeasurementSpace = 'image-plane-2d' | 'model-estimated-3d';
 export type InvalidReason =
   | 'missing-landmark' | 'low-confidence' | 'non-finite'
-  | 'target-lost' | 'identity-uncertain' | 'out-of-range-confidence' | 'degenerate-geometry' | 'out-of-frame' | 'unsupported-view';
+  | 'target-lost' | 'identity-uncertain' | 'out-of-range-confidence' | 'degenerate-geometry' | 'out-of-frame' | 'unsupported-view'
+  | 'joint-landmark-invalid' | 'joint-temporal-discontinuity' | 'joint-recovery-pending';
 
 export type AngleValue =
   | { valid: true; rawAngleDeg: number; invalidReasons: readonly [] }

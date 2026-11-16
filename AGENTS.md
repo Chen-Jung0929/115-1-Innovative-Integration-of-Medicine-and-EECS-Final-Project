@@ -55,3 +55,10 @@ Use the existing checkout. Do not create worktrees unless explicitly requested.
 - Keep detection, selection, temporal identity, observation QC and angles separate. Never use candidate order as identity.
 - Freeze source/model hashes and 5Hz settings for comparisons; disclose decoder alignment and denominator limits.
 - No fabricated human results or claims that cropping hypotheses are confirmed. Preserve raw/auto/manual results per pipeline.
+
+## QC recovery and replay scope
+- Read docs/QC_REPLAY.md before changing QC or recovery. No new UI, motion types or camera features in v0.5.1.
+- A local knee failure must not alone set a permanent subject identity lock. Keep torso identity, side observation and temporal evidence separate.
+- Never auto-clear ambiguity/torso-jump/manual identity locks. Joint recovery needs consecutive reliable observations; do not interpolate angles.
+- src/tracking/legacy is the frozen v0.5.0 replay baseline; do not tune it. Replay uses saved candidates/ROIs and is not a new detector run.
+- Always report newly accepted samples and manual-label applicability. Increased validity/coverage is not accuracy. Preserve original research files.

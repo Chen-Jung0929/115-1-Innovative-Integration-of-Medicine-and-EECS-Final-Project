@@ -33,14 +33,14 @@ it('missing torso anchor makes identity uncertain even if the knee points look g
  expect(q.accepted).toBe(false);expect(q.reasons).toContain('unreliable-torso-anchors');
 });
 it('extrapolated target outside selected ROI is invalid',()=>{
- const p=humanPose();p[27]!.x=1.1;const q=tracker().assess([p],0);expect(q.accepted).toBe(false);expect(q.reasons).toContain('roi-boundary-or-extrapolation');
+ const p=humanPose();p[27]!.x=1.1;const q=tracker().assess([p],0);expect(q.accepted).toBe(true);expect(q.joints!.left.valid).toBe(false);expect(q.joints!.right.valid).toBe(true);expect(gateAngle({valid:true,rawAngleDeg:180,invalidReasons:[]},q,'left').valid).toBe(false);
 });
 it('rejects degenerate or implausible mixed projected geometry',()=>{
- const p=humanPose();p[25]={...p[23]!};const q=tracker().assess([p],0);expect(q.plausibility).toBe('implausible');expect(q.accepted).toBe(false);
+ const p=humanPose();p[25]={...p[23]!};const q=tracker().assess([p],0);expect(q.plausibility).toBe('implausible');expect(q.accepted).toBe(true);expect(q.joints!.left.valid).toBe(false);expect(q.joints!.right.valid).toBe(true);
 });
 it('rejects sudden limb length change and non-monotonic timestamps',()=>{
- const t=tracker();t.assess([humanPose()],0);const p=humanPose();p[27]!.y=.73;
- expect(t.assess([p],200).reasons).toContain('temporal-jump-or-scale-change');
+ const t=tracker();t.assess([humanPose()],0);const p=humanPose();p[25]!.y=.57;
+ const local=t.assess([p],200);expect(local.accepted).toBe(true);expect(local.joints!.left.reasons).toContain('temporal-limb-scale-change');expect(local.joints!.left.valid).toBe(false);
  const other=tracker();other.assess([humanPose()],0);expect(other.assess([humanPose()],0).accepted).toBe(false);
 });
 it('documents the limit: a similar wrong person with no detectable jump can pass heuristics',()=>{
