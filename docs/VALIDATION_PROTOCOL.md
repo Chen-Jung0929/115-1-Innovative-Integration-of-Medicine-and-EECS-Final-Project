@@ -55,3 +55,15 @@ Task 2 已加入 computational correctness 單元測試與合成輸入瀏覽器�
 Subject Switch Count。保存自動與人工覆核後 validity，避免標註修改後掩蓋原本漏放的錯誤。
 以同片、同模型 hash、同目標時間網格作前後比較；先規約標註、報未知／缺失比例與樣本交集。
 人工參考須考慮標註者一致性與重疊不可判定影格，不以模型輸出自動建立身份 ground truth。
+
+## v0.4.0 ROI / decoder regression and real-video acceptance
+
+自動回歸：同時間0秒尋時、無 seeked／無 rVFC、草稿／Apply stale、移動／8 handles／縮放 source mapping、
+keyframes插值、緩慢人物／camera位移、短期出框／兩次恢復、多人歧義、搜尋失敗、manual correction、舊session與CSV／JSON。
+真實 subject_002_squat_good_side.mp4 不在本環境，真實驗收待完成；不能以合成姿態驗證代替。
+
+先固定原片／模型 hash、對照相同 requested 5Hz grid 與指定受測者。逐樣本人工標身份與混點、
+同時報 reviewed／uncertain 分母、FVR／usable coverage、state／failure分布與模型搜尋成本。
+區分 presentation PTS 與 seek-position-estimate；估計時間不能冒稱精確逐影格配對。
+標註／人工 ROI 校正若使用驗證片，必須將其列為人工輔助條件，另保留無校正基準，不能聲稱完全自動成效。
+校正前後需分析新版本，記錄 keyframe時間、correctionSource、parentIDs，保留原始輸出；不把插值ROI當角度真值。

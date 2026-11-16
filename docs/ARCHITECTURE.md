@@ -1,6 +1,6 @@
 # Architecture
 
-狀態：團隊已完成初步真實影片分析；本次新增固定 ROI＋人物追蹤 QC，真實同片修正效果待驗證。
+狀態：v0.4.0 支援 editable Fixed／Manual Keyframes／Adaptive ROI 與解碼診斷；真實同片修正效果待驗收。
 
 ```mermaid
 flowchart TD
@@ -51,7 +51,7 @@ AngleValue 為 discriminated union：valid=true 有 raw angle；valid=false 時 
 未來 camera 需要 HTTPS 或受信任的本機 origin 及使用者授權；onboarding 不提供預覽連結。
 模型已記錄套件版本、模型來源／asset ID、SHA-256、CPU delegate；設定見 docs/MODEL_SETUP.md。
 CSV 每側每取樣一列，無效角度空欄附 validity/reasons；JSON 攜帶 metadata 與 normalized xy、visibility、可用的 presence 與 crop-relative z（沒有 world landmarks）。
-目前 schemaVersion=5；不把 sample_index 冒充來源 frame index。CSV 所有欄位加引號，文字公式前綴轉義。
+目前 schemaVersion=6；不把 sample_index 冒充來源 frame index。CSV 所有欄位加引號，文字公式前綴轉義。
 
 
 ## V0 offline sampling and playback contract
@@ -97,3 +97,13 @@ CSV 附 ROI／自動與最終 validity／人工標籤／政策版本。原始模
 草稿與分析 session 分離；Apply 建立新 selection ID／revision，舊分析標記 stale 並保留原始 JSON。完成重分析後保留前版記憶體存檔。
 Manual Keyframes 使用影片尋時位置（media-position ms）記錄人工重新確認，固定 5 Hz 目標網格不變；線性插值 source-pixel x/y/width/height，最後一框之後保持。每 sample 記錄實際 ROI、更新原因、manual keyframe ID。
 到達新人工 keyframe 的第一個取樣重新建立模型／tracker，避免沿用錯誤內部追蹤；角度永遠來自該次實際模型觀測，不插值。selection 與分析版本記錄 parentSelectionId／parentSessionId，重分析不修改舊 session。
+
+## v0.4.0 current controller contract
+
+前述 0.3.0 固定／永久鎖定策略為歷史基線，現行實作以 docs/ROI_TRACKING.md 為準。
+Input read → RoiController.propose → crop PoseEngine → 可選 independent full-frame PoseEngine →
+source mapping → RoiController.observe／state machine → pure knee angles → identity gate → human review → final export。
+Controller 只用前一 accepted pose 更新下一框；明確記錄每 sample ROI／state／source／reason及 decode time basis。
+短期失效可在 650 ms 內兩次嚴格確認後恢復；歧義與長期失效不可自動接人。
+搜尋最多2 candidates 只作建議與歧義證據，不把搜尋點自動覆蓋 primary measurements。
+新 manual keyframe／mode／selection 造成新 revision 與 stale；重分析產生新 session，保留 parent 及原 JSON。

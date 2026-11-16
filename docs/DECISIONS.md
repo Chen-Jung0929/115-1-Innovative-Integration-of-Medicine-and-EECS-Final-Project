@@ -34,3 +34,12 @@
 - ADR-017：人物遺失／疑慮後在同 session 鎖定無效，避免自動接人；犧牲 coverage 的門檻為未驗證工程值。
 - ADR-018：raw／automatic／人工覆核後結果分離，人工判錯使最終角度無效，自動決策保留以分析漏放。
 - ADR-019：人為 ID 只來自標註，不來自模型候選 index。人工指標分母與未知狀態須明示，未標註不假定正確。
+
+## Decoder / editable and adaptive ROI — 2026-11-17
+
+- ADR-020：no-op seek 與 callback 延遲分開處理；可繪製 frame 的時間估計必須有 provenance，不延長 timeout 掩蓋事件問題。
+- ADR-021：ROI 草稿與 session 分離，Apply 才 stale；保留舊session，重新分析指向 parent。
+- ADR-022：手動 keyframes 線性插值 source pixels，角度不插值；人工重新確認點重建模型與追蹤器。
+- ADR-023：Adaptive 僅用前一 accepted pose、有界平滑，4-state安全恢復取代永久 latch（取代 ADR-017 的無條件永久鎖定部分）。
+- ADR-024：獨立最多2-pose全畫面搜尋作人工建議／歧義證據，搜尋候選不自動轉成有效目標；未宣稱真人多姿態效度。
+- ADR-025：保守全片重分析，不在舊 session 局部拼接或覆寫；schema6保存逐樣本ROI、decode、state及校正來源。

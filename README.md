@@ -19,7 +19,8 @@
 各階段紀錄見 [解碼](docs/updates/iteration-03-phase-a1-decoder.md)、
 [ROI 編輯](docs/updates/iteration-04-phase-a2-editable-roi.md)、
 [keyframes](docs/updates/iteration-05-phase-a3-keyframes.md)、
-[跟隨與恢復](docs/updates/iteration-06-phase-b-tracking.md)。
+[跟隨與恢復](docs/updates/iteration-06-phase-b-tracking.md)、
+[最終驗證](docs/updates/iteration-08-phase-d-handoff.md)。
 
 ## 安裝與啟動
 

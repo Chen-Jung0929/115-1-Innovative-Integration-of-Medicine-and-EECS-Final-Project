@@ -42,7 +42,7 @@ Use the existing checkout. Do not create worktrees unless explicitly requested.
 
 ## Subject tracking rules
 - Formal course name: 醫學電資創意整合專題. Preserve Git history.
-- Read docs/SUBJECT_TRACKING.md before changing ROI, tracking or annotation metrics.
+- Read docs/ROI_TRACKING.md (current controller) and docs/SUBJECT_TRACKING.md (human metrics and historical baseline) before changing ROI, tracking or annotation metrics.
 - Never equate landmark visibility, temporal consistency or candidate index with verified identity.
 - Preserve per-candidate raw crop landmarks and source-mapped points; never stitch people.
 - Version thresholds, record ROI/source timestamps, and keep raw, automatic and human-reviewed outcomes separate.

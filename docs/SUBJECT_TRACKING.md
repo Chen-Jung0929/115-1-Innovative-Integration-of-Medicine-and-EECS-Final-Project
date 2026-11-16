@@ -1,4 +1,6 @@
-# Subject selection and tracking quality — v1
+# Subject selection and tracking quality — v1 historical baseline
+
+現行 v0.4.0 ROI／decoder／recovery 以 [ROI_TRACKING.md](ROI_TRACKING.md) 為準；本文件保留最初固定ROI策略及仍適用的人工指標定義。
 
 2026-11-17 · 對應 app 0.3.0、analysis schema 3、fixed-roi-conservative-v1。
 
