@@ -1,5 +1,5 @@
 # motion
 
-Planned responsibility: Summarize valid angle series, peaks and observed ROM without bridging invalid gaps.
+analyze.ts／series.ts：離線取樣協調、session、時間對應與有效取樣率；未實作 ROM。
 
-No runtime implementation in initialization. See docs/ARCHITECTURE.md.
+研究與實測限制見 docs/ARCHITECTURE.md 及 docs/updates/iteration-01-dataset-demo.md。

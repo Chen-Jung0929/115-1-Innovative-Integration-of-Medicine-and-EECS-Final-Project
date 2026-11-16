@@ -32,3 +32,9 @@ __pycache__/
 /recordings/
 /annotations/
 /session-exports/
+
+# Generated runtime assets and optional local models
+/public/mediapipe/
+*.task
+/playwright-report/
+/test-results/

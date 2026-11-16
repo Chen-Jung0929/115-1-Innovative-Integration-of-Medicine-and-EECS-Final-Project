@@ -44,4 +44,5 @@ Bland–Altman 可描述 bias 及 agreement limits，但相鄰影格不獨立，
 保留 raw angles、validity、模型／定義／QC／schema 版本、來源 hash、排除清單、
 分析腳本與（若重抽樣）random seed；敏感資料留在核准的受限空間。
 雙鏡頭即使互相一致也可能同時偏誤；不得自動當 ground truth。
-本次只有畫面基礎測試，沒有以上任何量測效度結果，Python 分析尚未開始。
+Task 2 已加入 computational correctness 單元測試與合成輸入瀏覽器整合測試；
+不把這些測試當量測效度結果。真實模型／人體影片驗收尚待執行；Python 分析尚未開始。

@@ -1,9 +1,9 @@
-/** Design contracts only. No pose inference or clinical measurement is implemented. */
+/** Shared measurement contracts; runtime QC is in biomechanics/knee.ts. */
 export type AnatomicalSide = 'left' | 'right';
 export type MeasurementSpace = 'image-plane-2d' | 'model-estimated-3d';
 export type InvalidReason =
   | 'missing-landmark' | 'low-confidence' | 'non-finite'
-  | 'degenerate-geometry' | 'out-of-frame' | 'unsupported-view';
+  | 'out-of-range-confidence' | 'degenerate-geometry' | 'out-of-frame' | 'unsupported-view';
 
 export type AngleValue =
   | { valid: true; rawAngleDeg: number; invalidReasons: readonly [] }

@@ -3,7 +3,7 @@
 ## Mission and scope
 Build the NTU 115-1 Real-Time Joint Motion Analysis System as an academic PoC.
 Read README.md, docs/PROJECT_SPEC.md, docs/DECISIONS.md and the latest iteration update before work.
-The current authorized task is initialization only; V0.1 is a separate task.
+The current authorized task is Dataset Demo V0. Keep clinical definitions provisional and do not start camera or clinical analysis features.
 Use the existing checkout. Do not create worktrees unless explicitly requested.
 
 ## Engineering rules
