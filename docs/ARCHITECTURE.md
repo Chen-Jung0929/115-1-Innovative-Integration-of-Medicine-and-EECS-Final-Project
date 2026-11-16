@@ -51,14 +51,14 @@ AngleValue 為 discriminated union：valid=true 有 raw angle；valid=false 時 
 未來 camera 需要 HTTPS 或受信任的本機 origin 及使用者授權；onboarding 不提供預覽連結。
 模型已記錄套件版本、模型來源／asset ID、SHA-256、CPU delegate；設定見 docs/MODEL_SETUP.md。
 CSV 每側每取樣一列，無效角度空欄附 validity/reasons；JSON 攜帶 metadata 與 normalized xy、visibility、可用的 presence 與 crop-relative z（沒有 world landmarks）。
-目前 schemaVersion=3；不把 sample_index 冒充來源 frame index。CSV 所有欄位加引號，文字公式前綴轉義。
+目前 schemaVersion=4；不把 sample_index 冒充來源 frame index。CSV 所有欄位加引號，文字公式前綴轉義。
 
 
 ## V0 offline sampling and playback contract
 
 1. 驗證 MP4，讀取長度與尺寸；上限 500 MB、10 分鐘。容器副檔名檢查之外，還必須通過瀏覽器解碼。
 2. 以獨立的暫停 video decoder，依 k/5 秒（k≥0，時間小於 duration）固定目標網格逐次 seek。
-3. 等待 seeked 與 requestVideoFrameCallback；保存 requested_time_ms 與實際 mediaTime（source_time_ms）。
+3. 優先使用 rVFC 的 mediaTime 或已知影格快取；同時間 seek 不依賴重新送出事件。若尋時已完成且 readyState≥2，150 ms 仍無回呼則讀取可繪製影格，時間明記 seek-position-estimate，不是精確 PTS。保存 requested_time_ms、source_time_ms 及 decode provenance。
    將當時 video 畫面畫到來源尺寸 canvas 再推論，不在播放迴圈做推論。
 4. 來源時間重複／逆序時跳過，不把相同影格重複送入 VIDEO；sample_index 是保留取樣的連續索引。
 5. 每次分析建立全新的 PoseLandmarker，完成／失敗／取消後 close 並釋放 decoder。

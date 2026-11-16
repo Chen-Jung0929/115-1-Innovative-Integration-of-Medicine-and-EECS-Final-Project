@@ -48,7 +48,7 @@ test('real browser decodes an MP4, seeks deterministically and reports corrupted
     try {
       await loadVideo(v, document.querySelector('video')!.src, signal);
       const times: number[] = [];
-      for (const seconds of [0,.2,.4,.6,.8]) times.push(await seekFrame(v, seconds, signal));
+      for (const seconds of [0,.2,.4,.6,.8]) times.push((await seekFrame(v, seconds, signal)).sourceTimeMs);
       return times;
     } finally { releaseVideo(v); }
   });
@@ -77,7 +77,7 @@ test('synthetic pose adapter: pipeline, gaps, chart, CSV, reanalysis and selecti
   await page.goto('/'); await page.getByLabel('MP4 影片').setInputFiles(synthetic); await selectRoi(page);
   await page.getByRole('button', { name:'開始分析' }).click();
   await expect(page.getByText('分析完成；', { exact:false })).toBeVisible();
-  await expect(page.getByText('已分析 5 個不重複影格', { exact:false })).toBeVisible();
+  await expect(page.getByText('已分析 5 個取樣', { exact:false })).toBeVisible();
   await expect(page.locator('.measurements')).toContainText('80.0%');
   await expect(page.getByRole('img', { name: /左右膝影像/ })).toBeVisible();
   await page.getByLabel('已分析取樣', { exact:true }).fill('1');
@@ -100,7 +100,7 @@ test('synthetic pose adapter: pipeline, gaps, chart, CSV, reanalysis and selecti
   await page.getByRole('button',{name:'重新分析'}).click(); await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
   const secondDownload=page.waitForEvent('download'); await page.getByRole('button',{name:/下載研究 JSON/}).click();
   const second=JSON.parse(readFileSync((await (await secondDownload).path())!, 'utf8'));
-  expect(first.samples).toEqual(second.samples); expect(first.metadata.sessionId).not.toBe(second.metadata.sessionId);
+  expect(first.samples.map(({decode,...s}:any)=>s)).toEqual(second.samples.map(({decode,...s}:any)=>s)); expect(first.metadata.sessionId).not.toBe(second.metadata.sessionId);
   await page.locator('video').evaluate((v: HTMLVideoElement) => {v.currentTime=.12;});
   await expect(page.locator('.measurements .angle').first()).toHaveText('N/A');
   expect(errors).toEqual([]); expect(outgoing).toEqual([]);
@@ -211,4 +211,20 @@ test('manual drag selects ROI in original video pixels and requires confirmation
  await expect(page.getByLabel('ROI x',{exact:true})).toHaveValue('64');await expect(page.getByLabel('ROI y',{exact:true})).toHaveValue('18');
  await expect(page.getByLabel('ROI width',{exact:true})).toHaveValue('192');await expect(page.getByLabel('ROI height',{exact:true})).toHaveValue('144');
  await page.getByRole('button',{name:'確認 ROI',exact:true}).click();await expect(page.getByRole('button',{name:'開始分析',exact:true})).toBeEnabled();
+});
+
+
+test('decoder handles repeated zero and paused frame callbacks that never arrive',async({page})=>{
+ await page.goto('/');await page.getByLabel('MP4 影片').setInputFiles(synthetic);
+ const frames=await page.evaluate(async()=>{
+  const {loadVideo,seekFrame,releaseVideo}=await import('/src/input/video.ts');
+  const v=document.createElement('video');document.body.append(v);
+  v.requestVideoFrameCallback=()=>1;v.cancelVideoFrameCallback=()=>{};
+  const signal=new AbortController().signal;
+  try{await loadVideo(v,document.querySelector('video')!.src,signal);const frames=[];
+    for(const t of [0,0,.2,.2,.4,.2])frames.push(await seekFrame(v,t,signal));return frames;
+  }finally{releaseVideo(v);}
+ });
+ expect(frames.map(f=>f.sourceTimeMs)).toEqual([0,0,200,200,400,200]);
+ expect(frames.every(f=>f.timeBasis==='seek-position-estimate')).toBe(true);expect(frames[1].method).toBe('cached');
 });

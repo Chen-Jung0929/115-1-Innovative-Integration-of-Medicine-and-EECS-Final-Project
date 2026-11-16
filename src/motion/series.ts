@@ -9,5 +9,5 @@ export function coverage(samples: readonly Sample[], side: AnatomicalSide): numb
 }
 /** Only use the exact decoded source frame; no interpolation / nearest-frame pose reuse. */
 export function matchingSample(samples: readonly Sample[], timeMs: number): Sample | undefined {
-  return samples.find(s => Math.abs(s.sourceTimeMs - timeMs) <= 1); // 1 ms timestamp tolerance
+  return samples.find(s => s.decode.timeBasis === 'presentation' && Math.abs(s.sourceTimeMs - timeMs) <= 1); // 1 ms timestamp tolerance
 }

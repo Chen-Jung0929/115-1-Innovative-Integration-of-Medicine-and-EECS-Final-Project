@@ -33,7 +33,8 @@ export async function analyze(url: string, filename: string, model: File | null,
     let previous = -1;
     for (const [index, time] of times.entries()) {
       signal.throwIfAborted();
-      const sourceTimeMs = await seekFrame(decoder, time, signal);
+      const decode = await seekFrame(decoder, time, signal);
+      const sourceTimeMs = decode.sourceTimeMs;
       if (sourceTimeMs <= previous) { progress(index + 1, times.length, '分析中'); continue; } // Low FPS/VFR may return the same frame. Never send duplicate timestamps.
       ctx.drawImage(decoder, roi.x, roi.y, roi.width, roi.height, 0, 0, canvas.width, canvas.height);
       const candidates = engine.detect(canvas, sourceTimeMs).map(cropLandmarks => ({cropLandmarks,landmarks:fromCrop(cropLandmarks,roi,decoder.videoWidth,decoder.videoHeight)}));
@@ -41,7 +42,7 @@ export async function analyze(url: string, filename: string, model: File | null,
       const landmarks = candidates.length===1 ? candidates[0]!.landmarks : [];
       const rawAngles = {left:kneeAngle(landmarks,'left',decoder.videoWidth,decoder.videoHeight),right:kneeAngle(landmarks,'right',decoder.videoWidth,decoder.videoHeight)};
       const automaticAngles = {left:gateAngle(rawAngles.left,tracking),right:gateAngle(rawAngles.right,tracking)};
-      samples.push({ sampleIndex: samples.length, requestedTimeMs: time * 1000, sourceTimeMs, landmarks, candidates, tracking, rawAngles, automaticAngles, ...automaticAngles });
+      samples.push({ sampleIndex: samples.length, requestedTimeMs: time * 1000, sourceTimeMs, decode, landmarks, candidates, tracking, rawAngles, automaticAngles, ...automaticAngles });
       previous = sourceTimeMs;
       progress(index + 1, times.length, '分析中');
       await new Promise(resolve => setTimeout(resolve, 0)); // Allow cancellation / progress paint.
@@ -49,7 +50,7 @@ export async function analyze(url: string, filename: string, model: File | null,
     if (!samples.length) throw new Error('沒有可分析的影格。');
     return {
       trackingPolicy:TRACKING_POLICY, subjectSelection: {...selection,roi}, sourceFilename: filename, durationMs: decoder.duration * 1000, samplingHz: SAMPLING_HZ, samples,
-      metadata: { schemaVersion: '3', sessionId: crypto.randomUUID(), sourceId: crypto.randomUUID(), inputKind: 'video',
+      metadata: { schemaVersion: '4', sessionId: crypto.randomUUID(), sourceId: crypto.randomUUID(), inputKind: 'video',
         sourceWidthPx: decoder.videoWidth, sourceHeightPx: decoder.videoHeight, inferenceMirrored: false, displayMirrored: false,
         model: { packageVersion: MODEL_VERSION, assetId: asset.id, assetSha256: asset.hash, delegate: 'CPU' },
         angleDefinitionVersion: ANGLE_DEFINITION, qcPolicyVersion: QC_POLICY, applicationVersion: pkg.version, createdAtUtc: new Date().toISOString() },

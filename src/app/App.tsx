@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Session } from '../domain/analysis';
 import { MODEL_URL, PROJECT_MODEL_URL } from '../pose/mediapipe';
-import { checkFile, loadVideo } from '../input/video';
+import { checkFile, loadVideo, seekFrame, observePresentedFrame } from '../input/video';
 import { analyze } from '../motion/analyze';
 import { coverage, matchingSample } from '../motion/series';
 import { flexionProxy } from '../biomechanics/knee';
@@ -17,6 +17,7 @@ import { AngleChart } from '../visualization/AngleChart';
 export function App() {
   const video = useRef<HTMLVideoElement>(null);
   const url = useRef<string | null>(null);
+  const uiSeek=useRef<AbortController|null>(null);
   const task = useRef<AbortController | null>(null);
   const [info, setInfo] = useState<{ name: string; duration: number; width: number; height: number } | null>(null);
   const [model, setModel] = useState<File | null>(null);
@@ -42,17 +43,17 @@ export function App() {
     if (v.requestVideoFrameCallback) {
       const frame = (_: number, data: VideoFrameCallbackMetadata) => {
         if (stopped) return;
-        setTimeMs(data.mediaTime * 1000); setSeeking(v.seeking);
+        observePresentedFrame(v,data.mediaTime); setTimeMs(data.mediaTime * 1000); setSeeking(v.seeking);
         id = v.requestVideoFrameCallback(frame);
       };
       id = v.requestVideoFrameCallback(frame);
     }
-    return () => { stopped = true; if (id) v.cancelVideoFrameCallback(id); task.current?.abort(); if (url.current) URL.revokeObjectURL(url.current); };
+    return () => { stopped = true; if (id) v.cancelVideoFrameCallback(id); task.current?.abort(); uiSeek.current?.abort(); if (url.current) URL.revokeObjectURL(url.current); };
   }, []);
 
   async function choose(file: File | undefined) {
     if (!file || !video.current) return;
-    task.current?.abort();
+    task.current?.abort(); uiSeek.current?.abort();
     const controller = new AbortController(); task.current = controller;
     video.current.pause();
     setSelection(null); setSelecting(false); setSession(null); setInfo(null); setError(''); setNotice(''); setBusy(false); setLoading(true); setTimeMs(0); setSeeking(true);
@@ -70,7 +71,7 @@ export function App() {
 
   async function run() {
     if (!url.current || !info || !selection) return;
-    task.current?.abort();
+    task.current?.abort(); uiSeek.current?.abort();
     const controller = new AbortController(); task.current = controller;
     video.current?.pause(); setSession(null); setError(''); setNotice(''); setBusy(true); setSampleIndex(0);
     try {
@@ -84,17 +85,23 @@ export function App() {
     finally { if (!controller.signal.aborted) setBusy(false); }
   }
   function cancel() { task.current?.abort(); setBusy(false); setNotice('已取消分析；未完成的結果不提供匯出。'); }
-  function jump(index: number) {
-    setSampleIndex(index);
-      const sample = session?.samples[index];
-    if (sample && video.current) { video.current.pause(); setSeeking(true); video.current.currentTime = sample.requestedTimeMs / 1000; }
+  async function seekPlayback(seconds:number) {
+    if(!video.current)return;
+    uiSeek.current?.abort();const controller=new AbortController();uiSeek.current=controller;
+    video.current.pause();setSeeking(true);
+    try { const frame=await seekFrame(video.current,seconds,controller.signal);if(!controller.signal.aborted)setTimeMs(frame.sourceTimeMs); }
+    catch(e){if(!controller.signal.aborted)setError(message(e));}
+    finally{if(!controller.signal.aborted)setSeeking(false);}
+  }
+  function jump(index:number) {
+    setSampleIndex(index);const sample=session?.samples[index];if(sample)void seekPlayback(sample.requestedTimeMs/1000);
   }
   function beginSelection() {
     if (!info || !video.current) return;
-    video.current.pause();setSeeking(true);video.current.currentTime=0;
+    void seekPlayback(0);
     setSession(null);setSelection(null);setSelecting(true);setError('');
     setDraft({x:0,y:0,width:info.width,height:info.height});
-    setNotice('已清除先前結果。請在影片起點框選單一受測者，保留完整髖、膝、踝與活動空間。');
+    setNotice('請在影片起點框選單一受測者，保留完整髖、膝、踝與活動空間。');
   }
   function confirmSelection() {
     if (!info) return;
@@ -102,7 +109,7 @@ export function App() {
       setSelection({id:crypto.randomUUID(),roi,method:'manual-fixed-roi',referenceTimeMs:0});setSelecting(false);setError('');
     } catch(e) {setError(message(e));}
   }
-  const sample = session && !seeking ? matchingSample(session.samples, timeMs) : undefined;
+  const sample = session && !seeking ? (matchingSample(session.samples, timeMs) ?? (video.current?.paused ? session.samples.find(s=>s.decode.timeBasis==='seek-position-estimate' && Math.abs(s.requestedTimeMs-video.current!.currentTime*1000)<.001):undefined)) : undefined;
   const pct = (s: 'left' | 'right') => { const value = session ? coverage(session.samples, s) : null; return value === null ? 'N/A' : `${(value * 100).toFixed(1)}%`; };
 
   return <main>
@@ -145,7 +152,7 @@ export function App() {
       }} onError={() => { if (info) { setError('影片播放解碼失敗，請改用 H.264 MP4。'); setSession(null); } }} /><Overlay sample={sample} width={info?.width ?? 640} height={info?.height ?? 360} side={side} diagnostic={diagnostic} />
       {selecting && info && !seeking && <RoiSelector width={info.width} height={info.height} roi={draft} onChange={setDraft} />}
       {selection && info && <svg className="roi-border" viewBox={`0 0 ${info.width} ${info.height}`} aria-label="受測者 ROI 範圍"><rect {...selection.roi} fill="none" stroke="#ffda57" strokeWidth={Math.max(2,info.width/250)} /></svg>}</div>
-        <p>來源影格時間：{(timeMs/1000).toFixed(3)} 秒。{sample ? `對應取樣 #${sample.sampleIndex}` : '此影格沒有對應分析結果，骨架與角度不顯示。'}</p>
+        <p>來源影格時間：{(timeMs/1000).toFixed(3)} 秒。{sample ? `對應取樣 #${sample.sampleIndex}（${sample.decode.timeBasis}）` : '此影格沒有對應分析結果，骨架與角度不顯示。'}</p>
         {session && <label>檢查已分析取樣 #{sampleIndex}<input aria-label="已分析取樣" type="range" min={0} max={session.samples.length-1} value={sampleIndex} onChange={e => jump(Number(e.target.value))} /></label>}
       </div><div className="measurements">
         {(['left','right'] as const).filter(s => side === 'both' || side === s).map(s => {
@@ -156,7 +163,7 @@ export function App() {
       <p>定義：髖–膝–踝於膝點的影像平面內角（0–180°）。暫定屈曲 proxy = 180° − 內角；不是已確認的臨床屈曲角。左右為人體解剖側，影片不鏡像。</p>
     </section>
     <section><h2>3. 角度時間曲線與匯出</h2>
-      {session ? <><p>已分析 {session.samples.length} 個不重複影格；每秒 5 次目標取樣，不代表全部影格。無效取樣保留為曲線斷點。</p><AngleChart samples={session.samples} side={side} timeMs={timeMs} /><div className="actions">
+      {session ? <><p>已分析 {session.samples.length} 個取樣；每秒 5 次目標取樣，不代表全部影格。可辨識的重複呈現時間已排除；無效取樣保留為曲線斷點。</p><AngleChart samples={session.samples} side={side} timeMs={timeMs} /><div className="actions">
         <button onClick={() => downloadFile(`knee-${session.metadata.sessionId}.csv`, toCsv(session), 'text/csv;charset=utf-8')}>下載 CSV</button>
         <button onClick={() => downloadFile(`research-${session.metadata.sessionId}.json`, JSON.stringify(session, null, 2), 'application/json')}>下載研究 JSON（含 landmarks）</button>
       </div><p>輸出含來源檔名、角度及人體特徵，請保存於受限空間，不要提交到 Public GitHub。</p></> : <p>完成分析後顯示曲線與匯出按鈕；目前沒有分析結果。</p>}

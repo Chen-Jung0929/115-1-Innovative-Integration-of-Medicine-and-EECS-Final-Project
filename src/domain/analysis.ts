@@ -1,9 +1,11 @@
+import type { FrameRead } from './video';
 import type { TrackingQuality, SubjectSelection, HumanReview } from './tracking';
 import type { AngleValue, AnalysisMetadata } from './measurement';
 export interface Landmark { x: number; y: number; visibility: number; presence?: number; z?: number }
 export interface Sample {
   sampleIndex: number;
   requestedTimeMs: number;
+  decode: FrameRead;
   sourceTimeMs: number; // Decoded frame presentation timestamp, from requestVideoFrameCallback.
   landmarks: Landmark[];
   candidates: { cropLandmarks: Landmark[]; landmarks: Landmark[] }[];

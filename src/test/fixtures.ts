@@ -10,5 +10,5 @@ export function humanPose(dx=0): Landmark[] {
 export function makeSample(overrides: Partial<Sample> = {}): Sample {
   const left=overrides.left??{valid:true,rawAngleDeg:180,invalidReasons:[]};
   const right=overrides.right??{valid:true,rawAngleDeg:180,invalidReasons:[]};
-  return {sampleIndex:0,requestedTimeMs:0,sourceTimeMs:0,landmarks:humanPose(),candidates:[],tracking:accepted,rawAngles:{left,right},automaticAngles:{left,right},left,right,...overrides};
+  return {decode:{sourceTimeMs:0,timeBasis:'presentation',method:'callback',warnings:[]},sampleIndex:0,requestedTimeMs:0,sourceTimeMs:0,landmarks:humanPose(),candidates:[],tracking:accepted,rawAngles:{left,right},automaticAngles:{left,right},left,right,...overrides};
 }
