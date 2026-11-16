@@ -1,6 +1,6 @@
 # 即時關節動作分析系統
 
-國立臺灣大學 115-1 醫學創意整合專題 · Real-Time Joint Motion Analysis System
+國立臺灣大學 115-1 醫學電資創意整合專題 · Real-Time Joint Motion Analysis System
 
 我們希望讓物理治療師用一般攝影機觀察動作，逐步取得關節角度、變化曲線與活動範圍。
 這是**學術概念驗證（PoC）**，僅輔助運動評估與溝通，不提供醫療診斷或治療建議。
