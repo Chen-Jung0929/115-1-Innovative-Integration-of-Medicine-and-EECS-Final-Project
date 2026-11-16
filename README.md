@@ -1,6 +1,6 @@
 # 即時關節動作分析系統
 
-國立臺灣大學 115-1 醫學創意整合專題 · Real-Time Joint Motion Analysis System
+國立臺灣大學 115-1 醫學電資創意整合專題 · Real-Time Joint Motion Analysis System
 
 這是一套讓團隊以瀏覽器觀察人體動作、檢查膝部影像平面角度的學術概念驗證（PoC）。
 **不提供醫療診斷或治療建議，模型估計值不是經驗證的臨床角度。**
@@ -120,11 +120,13 @@ presentation timestamp，去除重複／逆序影格。本版不宣稱分析全�
 沒有經驗證的 ROM、臨床判讀、三維運動學或前後測功能；Python 統計尚未開始。
 Mendeley 的 Good/Bad Form 標籤不是角度真值，資料集授權與實際選片仍待查核。
 
-## 專案文件與後續路線
+## 專案文件
 
 - [長期規格](docs/PROJECT_SPEC.md)、[架構](docs/ARCHITECTURE.md)、[資料集](docs/DATASET.md)。
 - [隱私倫理](docs/PRIVACY_AND_ETHICS.md)、[決策](docs/DECISIONS.md)、[Agent 規範](AGENTS.md)。
 - [初始化紀錄](docs/updates/iteration-01.md)、[Dataset Demo 紀錄](docs/updates/iteration-01-dataset-demo.md)。
+
+## 開發路線（以功能完成決定版本）
 
 後續依功能完成推進：先完成 V0 真實影片與模型驗收，再做 V1 即時攝影機、V2 物治確認
 的上下台階／抬腿動作、V3 量測驗證、V4 展示整合。版本不依固定日期決定。

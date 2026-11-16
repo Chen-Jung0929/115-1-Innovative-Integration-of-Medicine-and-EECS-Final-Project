@@ -80,3 +80,7 @@
 2. 記錄影片來源／授權、hash、尺寸、模型 hash、有效率與問題案例；有條件時使用指定 Mendeley V1。
 3. 執行 `POSE_MODEL_PATH=... POSE_VIDEO_PATH=... npm run test:browser` 補上真實推論驗收，再決定是否標記 V0 完成。
 4. 物治端確認幾何 proxy 與 clinical definitions 的界線；V1 攝影機與 V3 統計驗證另立任務。
+
+交付末段核對發現遠端 main 的 `1047f2b`／`d23a72f` 更新 README 課程名稱與路線標題。
+已同步合併到 feature branch，保留「醫學電資創意整合專題」與「以功能完成決定版本」標題；
+README 衝突保留本次 V0 狀態與操作教學，不回復過期的初始化內容。程式碼與測試未改動，main 未被本次推送。
