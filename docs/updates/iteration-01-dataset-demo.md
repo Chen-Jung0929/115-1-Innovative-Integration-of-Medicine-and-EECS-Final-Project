@@ -64,7 +64,11 @@
 
 本次 GitHub API read 測試 `gh api repos/Chen-Jung0929/115-1-Innovative-Integration-of-Medicine-and-EECS-Final-Project --jq .full_name`
 回傳 Forbidden；GH CLI 的 auth status 亦失敗，不等同 HTTPS Git push 沒有權限。
-提交／push／PR 的最終結果於交付訊息回報，不捏造 PR。
+實作 commit `8e747cc` 已成功 push 至 `origin/feature/dataset-demo-v0`，main 未修改。
+隨後執行 `gh pr create --repo Chen-Jung0929/115-1-Innovative-Integration-of-Medicine-and-EECS-Final-Project --base main --head feature/dataset-demo-v0 --draft ... --body-file /tmp/joint-v0-pr.md`，
+回傳 `Post "https://api.github.com/graphql": Forbidden`，PR 未建立、未合併。
+可於 GitHub 的 compare／new PR 畫面審閱此 feature branch；現有 Git push 成功不代表 GitHub API 已可用。
+本段紀錄以後續文件 commit 保存；最終 SHA 於交付訊息與 Git 歷史回報。
 
 環境設定草稿已新增所需 storage.googleapis.com、data.mendeley.com、api.github.com
 並保留套件網域 preset，且更新 V0 啟動教學；保存不代表已套用／發布。
