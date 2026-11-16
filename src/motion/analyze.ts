@@ -5,6 +5,7 @@ import { loadVideo, seekFrame, releaseVideo } from '../input/video';
 import { createPoseEngine, modelBytes, MODEL_VERSION } from '../pose/mediapipe';
 import { sampleTimes } from './series';
 import type { SubjectSelection } from '../domain/tracking';
+import { roiAt, checkedKeyframes } from '../tracking/keyframes';
 import { checkedRoi, fromCrop } from '../tracking/roi';
 import { createTargetTracker, TRACKING_POLICY } from '../tracking/target';
 import { gateAngle } from '../tracking/gate';
@@ -25,7 +26,9 @@ export async function analyze(url: string, filename: string, model: File | null,
     const canvas = document.createElement('canvas');
     const roi = checkedRoi(selection.roi, decoder.videoWidth, decoder.videoHeight);
     canvas.width = roi.width; canvas.height = roi.height;
-    const tracker = createTargetTracker(roi, decoder.videoWidth, decoder.videoHeight);
+    if(selection.method!=='manual-fixed-roi')checkedKeyframes(selection.keyframes,decoder.videoWidth,decoder.videoHeight,decoder.duration*1000);
+    let lastManualId:string|null=null;
+    let tracker = createTargetTracker(roi, decoder.videoWidth, decoder.videoHeight);
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('此瀏覽器無法建立影格畫布。');
     const times = sampleTimes(decoder.duration, SAMPLING_HZ);
@@ -36,21 +39,28 @@ export async function analyze(url: string, filename: string, model: File | null,
       const decode = await seekFrame(decoder, time, signal);
       const sourceTimeMs = decode.sourceTimeMs;
       if (sourceTimeMs <= previous) { progress(index + 1, times.length, '分析中'); continue; } // Low FPS/VFR may return the same frame. Never send duplicate timestamps.
-      ctx.drawImage(decoder, roi.x, roi.y, roi.width, roi.height, 0, 0, canvas.width, canvas.height);
-      const candidates = engine.detect(canvas, sourceTimeMs).map(cropLandmarks => ({cropLandmarks,landmarks:fromCrop(cropLandmarks,roi,decoder.videoWidth,decoder.videoHeight)}));
-      const tracking = tracker.assess(candidates.map(c=>c.landmarks),sourceTimeMs);
+      const proposal=roiAt(selection,time*1000,decoder.videoWidth,decoder.videoHeight);
+      const usedRoi=proposal.roi;
+      if(proposal.manualKeyframeId && proposal.manualKeyframeId!==lastManualId){
+        if(lastManualId!==null){engine.close();engine=await createPoseEngine(asset.bytes);signal.throwIfAborted();proposal.roiUpdateReason+=':new-model-after-manual-confirmation';}
+        tracker=createTargetTracker(usedRoi,decoder.videoWidth,decoder.videoHeight);lastManualId=proposal.manualKeyframeId;
+      }
+      canvas.width=usedRoi.width;canvas.height=usedRoi.height;
+      ctx.drawImage(decoder, usedRoi.x, usedRoi.y, usedRoi.width, usedRoi.height, 0, 0, canvas.width, canvas.height);
+      const candidates = engine.detect(canvas, sourceTimeMs).map(cropLandmarks => ({cropLandmarks,landmarks:fromCrop(cropLandmarks,usedRoi,decoder.videoWidth,decoder.videoHeight)}));
+      const tracking = tracker.assess(candidates.map(c=>c.landmarks),sourceTimeMs,usedRoi);
       const landmarks = candidates.length===1 ? candidates[0]!.landmarks : [];
       const rawAngles = {left:kneeAngle(landmarks,'left',decoder.videoWidth,decoder.videoHeight),right:kneeAngle(landmarks,'right',decoder.videoWidth,decoder.videoHeight)};
       const automaticAngles = {left:gateAngle(rawAngles.left,tracking),right:gateAngle(rawAngles.right,tracking)};
-      samples.push({ sampleIndex: samples.length, requestedTimeMs: time * 1000, sourceTimeMs, decode, landmarks, candidates, tracking, rawAngles, automaticAngles, ...automaticAngles });
+      samples.push({ sampleIndex: samples.length, requestedTimeMs: time * 1000, sourceTimeMs, decode, ...proposal, landmarks, candidates, tracking, rawAngles, automaticAngles, ...automaticAngles });
       previous = sourceTimeMs;
       progress(index + 1, times.length, '分析中');
       await new Promise(resolve => setTimeout(resolve, 0)); // Allow cancellation / progress paint.
     }
     if (!samples.length) throw new Error('沒有可分析的影格。');
     return {
-      trackingPolicy:TRACKING_POLICY, subjectSelection: {...selection,roi}, sourceFilename: filename, durationMs: decoder.duration * 1000, samplingHz: SAMPLING_HZ, samples,
-      metadata: { schemaVersion: '4', sessionId: crypto.randomUUID(), sourceId: crypto.randomUUID(), inputKind: 'video',
+      analysisRevision:{parentSessionId:null,selectionRevision:selection.revision,correctionSource:selection.correctionSource},trackingPolicy:TRACKING_POLICY, subjectSelection: {...selection,roi}, sourceFilename: filename, durationMs: decoder.duration * 1000, samplingHz: SAMPLING_HZ, samples,
+      metadata: { schemaVersion: '5', sessionId: crypto.randomUUID(), sourceId: crypto.randomUUID(), inputKind: 'video',
         sourceWidthPx: decoder.videoWidth, sourceHeightPx: decoder.videoHeight, inferenceMirrored: false, displayMirrored: false,
         model: { packageVersion: MODEL_VERSION, assetId: asset.id, assetSha256: asset.hash, delegate: 'CPU' },
         angleDefinitionVersion: ANGLE_DEFINITION, qcPolicyVersion: QC_POLICY, applicationVersion: pkg.version, createdAtUtc: new Date().toISOString() },

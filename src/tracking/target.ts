@@ -6,18 +6,18 @@ export const TRACKING_POLICY = {
   maxCenterTorsoPerSecond: 3, maxSegmentScaleChange: 2,
   latchAfterUncertainty: true,
 } as const;
-export interface TargetTracker { assess(candidates: readonly Landmark[][], sourceTimeMs: number): TrackingQuality }
+export interface TargetTracker { assess(candidates: readonly Landmark[][], sourceTimeMs: number, roi?:Roi): TrackingQuality }
 const core = [11,12,23,24];
 const legs = [[23,25],[25,27],[24,26],[26,28]] as const;
 export function confident(p: Landmark | undefined): p is Landmark {
   return !!p && [p.x,p.y,p.visibility,p.presence ?? 1].every(Number.isFinite) && p.visibility >= TRACKING_POLICY.minConfidence && p.visibility <= 1 && (p.presence ?? 1) >= TRACKING_POLICY.minConfidence && (p.presence ?? 1) <= 1;
 }
 /** A consistency screen, never an identity classifier or calibrated probability. */
-export function createTargetTracker(roi: Roi, sourceWidth: number, sourceHeight: number): TargetTracker {
+export function createTargetTracker(initialRoi: Roi, sourceWidth: number, sourceHeight: number): TargetTracker {
   let latched = false;
   let previous: { x:number; y:number; torso:number; lengths:(number|null)[]; time:number } | undefined;
   const distance = (a:Landmark,b:Landmark) => Math.hypot((a.x-b.x)*sourceWidth,(a.y-b.y)*sourceHeight);
-  return { assess(candidates, time) {
+  return { assess(candidates, time, roi=initialRoi) {
     const q: TrackingQuality = {accepted:false, identity:'identity-uncertain',landmarkConfidence:'insufficient',plausibility:'unassessed',continuity:'unassessed',reasons:[]};
     if (candidates.length === 0 || !candidates.some(p => p.length)) {
       latched = true; return {...q,identity:'target-lost',reasons:['no-pose-in-roi','manual-reselection-required']};

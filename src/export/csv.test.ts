@@ -3,7 +3,7 @@ import { expect, it } from 'vitest';
 import { toCsv } from './csv';
 import type { Session } from '../domain/analysis';
 const session: Session = {
-  subjectSelection:selection,trackingPolicy:{version:'test'},sourceFilename:'=SUM(1,2)".mp4',durationMs:1000,samplingHz:5,
+  analysisRevision:{parentSessionId:null,selectionRevision:1,correctionSource:'initial-selection'},subjectSelection:selection,trackingPolicy:{version:'test'},sourceFilename:'=SUM(1,2)".mp4',durationMs:1000,samplingHz:5,
   metadata:{schemaVersion:'2',sessionId:'synthetic-test',sourceId:'synthetic-fixture',inputKind:'video',sourceWidthPx:200,sourceHeightPx:100,inferenceMirrored:false,displayMirrored:false,model:{packageVersion:'test-only',assetId:'test',assetSha256:'test-hash',delegate:'CPU'},angleDefinitionVersion:'knee-image-interior-v1',qcPolicyVersion:'test',applicationVersion:'test',createdAtUtc:'2026-11-16T00:00:00Z'},
   samples:[makeSample({sampleIndex:0,requestedTimeMs:0,sourceTimeMs:0,landmarks:[],left:{valid:true,rawAngleDeg:0,invalidReasons:[]},right:{valid:false,rawAngleDeg:null,invalidReasons:['missing-landmark']}})],
 };

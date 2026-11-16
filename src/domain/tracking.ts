@@ -1,8 +1,15 @@
 export interface Roi { x: number; y: number; width: number; height: number }
+export interface RoiKeyframe {id:string; timeMs:number; roi:Roi; source:'manual-target-confirmation'}
+export interface RoiProposal {roi:Roi;roiSource:string;roiUpdateReason:string;manualKeyframeId:string|null}
 export interface SubjectSelection {
   id: string;
   roi: Roi; // Integer original-source pixels. Fixed for the whole analysis.
-  method: 'manual-fixed-roi';
+  method: 'manual-fixed-roi'|'manual-keyframes';
+  keyframes:RoiKeyframe[];
+  interpolation:'linear-source-pixels-v1';
+  revision:number;
+  correctionSource:'initial-selection'|'manual-roi-edit'|'manual-keyframe';
+  parentSelectionId:string|null;
   referenceTimeMs: 0; // Select on the beginning of the source clip.
 }
 export interface TrackingQuality {

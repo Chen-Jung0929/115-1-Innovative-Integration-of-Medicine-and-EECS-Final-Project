@@ -251,3 +251,21 @@ test('ROI draft is editable and cancelable; Apply preserves old session and mark
  await expect(page.getByText('舊分析已過期',{exact:false})).toBeVisible();await expect(page.getByRole('button',{name:'下載 CSV',exact:true})).toHaveCount(0);
  const old=page.waitForEvent('download');await page.getByRole('button',{name:'下載舊分析 JSON（原設定）',exact:true}).click();expect(JSON.parse(readFileSync((await(await old).path())!,'utf8'))).toEqual(first);
 });
+
+test('manual ROI keyframe reanalysis creates a new version and recovers only at explicit correction',async({page})=>{
+ await mockPose(page);await page.goto('/?case=lost');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await selectRoi(page);
+ await page.getByRole('button',{name:'開始分析',exact:true}).click();await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
+ const pending=page.waitForEvent('download');await page.getByRole('button',{name:/下載研究 JSON/}).click();const old=JSON.parse(readFileSync((await(await pending).path())!,'utf8'));
+ await page.getByLabel('前往影片時間（秒）',{exact:true}).fill('.4');await page.getByRole('button',{name:'跳轉影片時間',exact:true}).click();
+ await expect(page.getByText('來源影格時間：0.400',{exact:false})).toBeVisible();
+ await page.getByRole('button',{name:'重新選擇受測者／微調 ROI',exact:true}).click();await page.getByLabel('ROI 方法',{exact:true}).selectOption('manual-keyframes');
+ await page.getByLabel('ROI width',{exact:true}).fill('240');await page.getByRole('button',{name:'確認 ROI（Apply）',exact:true}).click();
+ await expect(page.getByText('舊分析已過期',{exact:false})).toBeVisible();
+ await page.getByRole('button',{name:'開始分析',exact:true}).click();await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
+ const next=page.waitForEvent('download');await page.getByRole('button',{name:/下載研究 JSON/}).click();const newer=JSON.parse(readFileSync((await(await next).path())!,'utf8'));
+ expect(newer.subjectSelection.keyframes.map((k:{timeMs:number})=>k.timeMs)).toEqual([0,400]);
+ expect(newer.samples.map((s:{roi:{width:number}})=>s.roi.width)).toEqual([320,280,240,240,240]);
+ expect(newer.samples[1].left.valid).toBe(false);expect(newer.samples[2].left.valid).toBe(true);
+ expect(newer.analysisRevision.parentSessionId).toBe(old.metadata.sessionId);expect(newer.subjectSelection.revision).toBe(2);
+ expect(old.subjectSelection.keyframes).toHaveLength(1);expect(newer.samples[2].roiUpdateReason).toContain('new-model');
+});

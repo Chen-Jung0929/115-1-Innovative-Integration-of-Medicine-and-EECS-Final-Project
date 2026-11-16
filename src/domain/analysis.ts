@@ -1,8 +1,8 @@
 import type { FrameRead } from './video';
-import type { TrackingQuality, SubjectSelection, HumanReview } from './tracking';
+import type { TrackingQuality, SubjectSelection, HumanReview, RoiProposal } from './tracking';
 import type { AngleValue, AnalysisMetadata } from './measurement';
 export interface Landmark { x: number; y: number; visibility: number; presence?: number; z?: number }
-export interface Sample {
+export interface Sample extends RoiProposal {
   sampleIndex: number;
   requestedTimeMs: number;
   decode: FrameRead;
@@ -18,6 +18,7 @@ export interface Sample {
 }
 export interface Session {
   metadata: AnalysisMetadata;
+  analysisRevision:{parentSessionId:string|null;selectionRevision:number;correctionSource:string};
   subjectSelection: SubjectSelection;
   trackingPolicy: Readonly<Record<string,string|number|boolean>>;
   sourceFilename: string;

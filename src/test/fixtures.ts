@@ -1,6 +1,6 @@
 import type { Landmark, Sample } from '../domain/analysis';
 import type { SubjectSelection, TrackingQuality } from '../domain/tracking';
-export const selection: SubjectSelection = {id:'synthetic-selection',method:'manual-fixed-roi',referenceTimeMs:0,roi:{x:0,y:0,width:320,height:180}};
+export const selection: SubjectSelection = {id:'synthetic-selection',method:'manual-fixed-roi',referenceTimeMs:0,keyframes:[],interpolation:'linear-source-pixels-v1',revision:1,correctionSource:'initial-selection',parentSelectionId:null,roi:{x:0,y:0,width:320,height:180}};
 export const accepted: TrackingQuality = {accepted:true,identity:'consistent-unverified',landmarkConfidence:'sufficient',plausibility:'plausible',continuity:'initial',reasons:[]};
 export function humanPose(dx=0): Landmark[] {
   const p:Landmark[]=Array.from({length:33},()=>({x:.5+dx,y:.4,visibility:1}));
@@ -10,5 +10,5 @@ export function humanPose(dx=0): Landmark[] {
 export function makeSample(overrides: Partial<Sample> = {}): Sample {
   const left=overrides.left??{valid:true,rawAngleDeg:180,invalidReasons:[]};
   const right=overrides.right??{valid:true,rawAngleDeg:180,invalidReasons:[]};
-  return {decode:{sourceTimeMs:0,timeBasis:'presentation',method:'callback',warnings:[]},sampleIndex:0,requestedTimeMs:0,sourceTimeMs:0,landmarks:humanPose(),candidates:[],tracking:accepted,rawAngles:{left,right},automaticAngles:{left,right},left,right,...overrides};
+  return {roi:selection.roi,roiSource:'fixed',roiUpdateReason:'manual-fixed-roi',manualKeyframeId:null,decode:{sourceTimeMs:0,timeBasis:'presentation',method:'callback',warnings:[]},sampleIndex:0,requestedTimeMs:0,sourceTimeMs:0,landmarks:humanPose(),candidates:[],tracking:accepted,rawAngles:{left,right},automaticAngles:{left,right},left,right,...overrides};
 }
