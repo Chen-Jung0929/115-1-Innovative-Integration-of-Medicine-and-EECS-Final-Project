@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 async function selectRoi(page:Page) {
+  await page.getByLabel('分析管線',{exact:true}).selectOption('roi-crop');
   await page.getByRole('button',{name:'框選受測者',exact:true}).click();
   await page.getByRole('button',{name:'確認 ROI（Apply）',exact:true}).click();
 }
@@ -14,10 +15,16 @@ async function mockPose(page:Page) {
     export const PROJECT_MODEL_URL='/models/pose_landmarker_lite.task';
     export async function modelBytes(){return {bytes:new Uint8Array(),hash:'synthetic',id:'synthetic'};}
     export async function createPoseEngine(bytes,numPoses=1){
+      if(numPoses===3&&new URLSearchParams(location.search).get('case')==='compare-failure')throw new Error('synthetic 3-pose unsupported');
       if(numPoses===2&&new URLSearchParams(location.search).get('case')==='adaptive-search-error')throw new Error('synthetic search unavailable');
       let count=0,previous=-1;return {close(){},detect(canvas,time){
       if(time<=previous)throw new Error('non-monotonic timestamp'); previous=time;
       const i=count++,scenario=new URLSearchParams(location.search).get('case');
+      if(scenario==='full-dimensions'||scenario==='multi-cross'){
+        if(canvas.width!==320||canvas.height!==180)throw new Error('full-frame input was cropped');
+        const ctx=canvas.getContext('2d'),left=ctx.getImageData(10,10,1,1).data,right=ctx.getImageData(310,10,1,1).data;
+        if(left[0]<200||right[2]<200)throw new Error('outside-reference pixels missing');
+      }
       if(i===1&&scenario==='lost')return [];
       const p=Array.from({length:33},()=>({x:.5,y:.4,visibility:1}));
       for(const [n,x,y]of [[11,.4,.2],[12,.6,.2],[23,.4,.5],[24,.6,.5],[25,.4,.7],[26,.6,.7],[27,.4,.9],[28,.6,.9]])p[n]={x,y,visibility:1};
@@ -26,6 +33,12 @@ async function mockPose(page:Page) {
       if(scenario==='adaptive'&&numPoses===1)p.forEach(p=>p.x+=i*.02);
       if(numPoses===2&&scenario==='adaptive-ambiguous')return [p,p.map(p=>({...p,x:p.x+.04}))];
       if(i===1&&!scenario){p[25].visibility=.1;p[26].visibility=.1;}
+      if(numPoses>1&&(scenario==='full-dimensions'||scenario==='multi-cross'||scenario==='comparison')){
+        const other=p.map(p=>({...p,x:p.x-(scenario==='multi-cross'&&i===1?.02:.35)}));
+        const candidates=i%2?[other,p]:[p,other];
+        if(numPoses===3)candidates.push(p.map(p=>({...p,x:p.x+.35})));
+        return candidates;
+      }
       return [p];
     }}};
   `}));
@@ -35,7 +48,7 @@ let synthetic: string;
 test.beforeAll(() => {
   folder = mkdtempSync(join(tmpdir(), 'knee-smoke-'));
   synthetic = join(folder, 'synthetic-no-human.mp4');
-  execFileSync('ffmpeg', ['-v','error','-f','lavfi','-i','color=c=blue:s=320x180:r=25:d=1','-c:v','libx264','-pix_fmt','yuv420p',synthetic]);
+  execFileSync('ffmpeg', ['-v','error','-f','lavfi','-i','color=c=blue:s=320x180:r=25:d=1,drawbox=x=0:y=0:w=160:h=180:color=red:t=fill','-c:v','libx264','-pix_fmt','yuv420p',synthetic]);
 });
 test.afterAll(() => rmSync(folder, { recursive: true, force: true }));
 
@@ -277,7 +290,7 @@ test('manual ROI keyframe reanalysis creates a new version and recovers only at 
 
 for(const scenario of ['adaptive','adaptive-ambiguous','adaptive-search-error']) {
  test(`${scenario}: exports actual per-sample ROI, state and independent full-frame evidence`,async({page})=>{
-  await mockPose(page);await page.goto(`/?case=${scenario}`);await page.getByLabel('MP4 影片').setInputFiles(synthetic);
+  await mockPose(page);await page.goto(`/?case=${scenario}`);await page.getByLabel('MP4 影片').setInputFiles(synthetic);await page.getByLabel('分析管線',{exact:true}).selectOption('roi-crop');
   await page.getByRole('button',{name:'框選受測者',exact:true}).click();
   await page.getByLabel('ROI 方法',{exact:true}).selectOption('adaptive-roi');
   await page.getByLabel('ROI width',{exact:true}).fill('200');await page.getByLabel('ROI x',{exact:true}).fill('80');
@@ -285,7 +298,7 @@ for(const scenario of ['adaptive','adaptive-ambiguous','adaptive-search-error'])
   await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
   const pending=page.waitForEvent('download');await page.getByRole('button',{name:/下載研究 JSON/}).click();
   const result=JSON.parse(readFileSync((await(await pending).path())!,'utf8'));
-  expect(result.metadata.schemaVersion).toBe('6');expect(result.subjectSelection.method).toBe('adaptive-roi');
+  expect(result.metadata.schemaVersion).toBe('7');expect(result.subjectSelection.method).toBe('adaptive-roi');
   expect(result.samples[0].search.numPoses).toBe(2);expect(result.samples[0].roi.width).toBe(200);
   if(scenario==='adaptive'){
    expect(result.samples.some((s:{roi:{x:number}})=>s.roi.x>80)).toBe(true);
@@ -311,4 +324,72 @@ test('upload and ROI editor stay usable when all video-frame callbacks are suppr
  const session=JSON.parse(readFileSync((await(await pending).path())!,'utf8'));
  expect(session.samples.map((s:{sourceTimeMs:number})=>s.sourceTimeMs)).toEqual([0,200,400,600,800]);
  expect(session.samples.every((s:{decode:{timeBasis:string}})=>s.decode.timeBasis==='seek-position-estimate')).toBe(true);
+});
+
+
+for(const config of [{id:'full-frame-single',count:1},{id:'full-frame-multi',count:2},{id:'full-frame-multi',count:3}] as const){
+ test(`${config.id} ${config.count}: input stays full-frame and candidate order is not identity`,async({page})=>{
+  await mockPose(page);await page.goto('/?case=full-dimensions');await page.getByLabel('MP4 影片').setInputFiles(synthetic);
+  await page.getByLabel('分析管線',{exact:true}).selectOption(config.id);
+  if(config.count>1){await page.getByText('A/B/C 比較設定',{exact:true}).click();await page.getByLabel('C 的候選數',{exact:true}).selectOption(String(config.count));}
+  await page.getByRole('button',{name:'框選受測者',exact:true}).click();await page.getByLabel('ROI width',{exact:true}).fill('120');await page.getByLabel('ROI x',{exact:true}).fill('100');
+  await page.getByRole('button',{name:'確認 ROI（Apply）',exact:true}).click();await page.getByRole('button',{name:'開始分析',exact:true}).click();
+  await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();const pending=page.waitForEvent('download');await page.getByRole('button',{name:/下載研究 JSON/}).click();
+  const run=JSON.parse(readFileSync((await(await pending).path())!,'utf8'));
+  expect(run.run.inputSpace).toBe('full-frame');expect(run.run.pipeline.numPoses).toBe(config.count);
+  expect(run.samples.every((s:any)=>s.roi.width===320&&s.targetReferenceRoi.width===120)).toBe(true);
+  expect(run.samples.every((s:any)=>s.left.valid)).toBe(true);
+  if(config.count>1)expect(run.samples.map((s:any)=>s.subjectDecision.selectedIndex)).toEqual([0,1,0,1,0]);
+  expect(run.samples.map((s:any)=>s.sourceTimeMs)).toEqual([0,200,400,600,800]);
+  await page.getByRole('button',{name:'重新選擇受測者／微調 ROI',exact:true}).click();
+  await expect(page.getByLabel('ROI x',{exact:true})).toHaveValue('100');
+  await expect(page.getByLabel('ROI width',{exact:true})).toHaveValue('120');
+  await page.getByRole('button',{name:'取消編輯',exact:true}).click();
+ });
+}
+
+test('full-frame multi rejects ambiguous crossings instead of changing the subject',async({page})=>{
+ await mockPose(page);await page.goto('/?case=multi-cross');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await page.getByLabel('分析管線',{exact:true}).selectOption('full-frame-multi');
+ await page.getByRole('button',{name:'框選受測者',exact:true}).click();await page.getByLabel('ROI width',{exact:true}).fill('120');await page.getByLabel('ROI x',{exact:true}).fill('100');await page.getByRole('button',{name:'確認 ROI（Apply）',exact:true}).click();
+ await page.getByRole('button',{name:'開始分析',exact:true}).click();await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
+ const pending=page.waitForEvent('download');await page.getByRole('button',{name:/下載研究 JSON/}).click();const run=JSON.parse(readFileSync((await(await pending).path())!,'utf8'));
+ expect(run.samples[0].left.valid).toBe(true);expect(run.samples.slice(1).every((s:any)=>!s.left.valid&&s.tracking.state==='MANUAL_REVIEW_REQUIRED')).toBe(true);
+ expect(run.samples[1].candidates).toHaveLength(2);expect(run.samples[1].subjectDecision.selectedIndex).toBeNull();
+});
+
+test('one-click A/B/C freezes source/model, preserves ROI mode and updates only independently reviewed results',async({page})=>{
+ await mockPose(page);await page.goto('/?case=comparison');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await selectRoi(page);
+ await page.getByRole('button',{name:'依序比較 A / B / C',exact:true}).click();await expect(page.getByText('同源比較完成。',{exact:false})).toBeVisible();
+ const pending=page.waitForEvent('download');await page.getByRole('button',{name:'下載 A/B/C 比較 JSON（含原始三次結果）',exact:true}).click();
+ const output=JSON.parse(readFileSync((await(await pending).path())!,'utf8'));const runs=output.bundle.entries.map((e:any)=>e.session);
+ expect(runs.map((s:any)=>s.run.pipeline.numPoses)).toEqual([1,1,2]);expect(runs[1].subjectSelection.method).toBe('adaptive-roi');
+ expect(new Set(runs.map((s:any)=>s.run.sourceSha256)).size).toBe(1);expect(output.bundle.sourceSha256).toMatch(/^[a-f0-9]{64}$/);
+ expect(runs.every((s:any)=>s.metadata.model.assetSha256===output.bundle.modelSha256&&s.run.comparisonId===output.bundle.id)).toBe(true);
+ expect(output.report.alignment.commonRequestedTimesMs).toEqual([0,200,400,600,800]);expect(output.report.rows.every((r:any)=>r.allSamples.correctTargetRate===null)).toBe(true);
+ await page.getByLabel('人工人物判斷').selectOption('wrong-target');
+ await page.getByRole('button',{name:/^C · Full Frame/}).click();await expect(page.getByLabel('人工人物判斷')).toHaveValue('');await page.getByLabel('人工人物判斷').selectOption('correct-target');
+ const after=page.waitForEvent('download');await page.getByRole('button',{name:'下載 A/B/C 比較 JSON（含原始三次結果）',exact:true}).click();const reviewed=JSON.parse(readFileSync((await(await after).path())!,'utf8'));
+ expect(reviewed.report.rows[0].allSamples.falseValidRate).toBe(1);expect(reviewed.report.rows[1].allSamples.correctTargetRate).toBeNull();expect(reviewed.report.rows[2].allSamples.correctTargetRate).toBe(1);
+ const csv=page.waitForEvent('download');await page.getByRole('button',{name:'下載比較指標 CSV',exact:true}).click();expect(readFileSync((await(await csv).path())!,'utf8')).toContain('landmark_comparable_pairs');
+});
+
+test('unsupported multi-pose comparison retains successful baselines and explicit failure',async({page})=>{
+ await mockPose(page);await page.goto('/?case=compare-failure');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await selectRoi(page);
+ await page.getByText('A/B/C 比較設定',{exact:true}).click();await page.getByLabel('C 的候選數',{exact:true}).selectOption('3');await page.getByRole('button',{name:'依序比較 A / B / C',exact:true}).click();await expect(page.getByText('同源比較完成。',{exact:false})).toBeVisible();
+ const download=page.waitForEvent('download');await page.getByRole('button',{name:'下載 A/B/C 比較 JSON（含原始三次結果）',exact:true}).click();const result=JSON.parse(readFileSync((await(await download).path())!,'utf8'));
+ expect(result.bundle.entries[0].session).not.toBeNull();expect(result.bundle.entries[1].session).not.toBeNull();expect(result.bundle.entries[2].session).toBeNull();expect(result.report.rows[2].allSamples).toBeNull();expect(result.report.complete).toBe(false);
+});
+
+test('actual A/B/C comparison with approved local assets (mechanism smoke, not identity ground truth)',async({page})=>{
+ test.skip(!process.env.POSE_MODEL_PATH||!process.env.POSE_VIDEO_PATH,'No approved real video / model supplied');test.slow();
+ await page.goto('/');await page.getByLabel('MP4 影片').setInputFiles(process.env.POSE_VIDEO_PATH!);
+ await page.getByRole('button',{name:'框選受測者',exact:true}).click();
+ if(process.env.POSE_TARGET_ROI){const roi=JSON.parse(process.env.POSE_TARGET_ROI);for(const key of ['width','height','x','y'])await page.getByLabel(`ROI ${key}`,{exact:true}).fill(String(roi[key]));}
+ await page.getByRole('button',{name:'確認 ROI（Apply）',exact:true}).click();
+ await page.getByText('模型設定與資料隱私',{exact:true}).click();await page.getByLabel('本機 .task 模型').setInputFiles(process.env.POSE_MODEL_PATH!);
+ await page.getByRole('button',{name:'依序比較 A / B / C',exact:true}).click();await expect(page.getByText('同源比較完成。',{exact:false})).toBeVisible({timeout:240000});
+ const pending=page.waitForEvent('download');await page.getByRole('button',{name:'下載 A/B/C 比較 JSON（含原始三次結果）',exact:true}).click();
+ const result=JSON.parse(readFileSync((await(await pending).path())!,'utf8'));
+ expect(result.report.complete).toBe(true);expect(result.report.provenanceConsistent).toBe(true);
+ expect(result.bundle.entries.every((entry:any)=>entry.session.samples.some((s:any)=>s.candidates.length>0))).toBe(true);
 });

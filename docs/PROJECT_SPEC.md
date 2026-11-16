@@ -61,3 +61,8 @@ Task 2 允許資料集無法存取時先完成本機 MP4 流程並揭露未實�
 原始與自動／人工覆核後角度分開保存；target-lost／identity-uncertain 不可作有效角度。
 依 docs/SUBJECT_TRACKING.md 的版本化規則與人工指標驗收，不把 visibility 或候選陣列 index 當人物真值。
 使用者已回報真實 Squat 影片多人錯選；修正後的同片數據尚未提供，不能宣稱定量改善。
+
+## v0.5 architecture review
+
+以 PIPELINE_COMPARISON.md 規約提供A全圖單人、B保留Adaptive裁切、C全圖多候選選人之可操作比較。
+裁切不穩定是待驗證假說，不先決定最佳方法；使用同檔／模型／5Hz與人工逐法參考驗證。

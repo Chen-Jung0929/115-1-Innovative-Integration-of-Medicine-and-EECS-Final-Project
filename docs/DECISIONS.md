@@ -43,3 +43,11 @@
 - ADR-023：Adaptive 僅用前一 accepted pose、有界平滑，4-state安全恢復取代永久 latch（取代 ADR-017 的無條件永久鎖定部分）。
 - ADR-024：獨立最多2-pose全畫面搜尋作人工建議／歧義證據，搜尋候選不自動轉成有效目標；未宣稱真人多姿態效度。
 - ADR-025：保守全片重分析，不在舊 session 局部拼接或覆寫；schema6保存逐樣本ROI、decode、state及校正來源。
+
+## Full-frame architecture comparison — 2026-11-17
+
+- ADR-026：暫停擴充ROI；保留B，新增A全圖單人與C全圖多候選，以真實比較再決定架構。
+- ADR-027：input crop 與 target reference 分離；A/C輸入完整source frame，候選index不是person ID。
+- ADR-028：新完整流程分離Detection／Initial Selection／Temporal Identity／Landmark QC／Angles；B保留舊行為作對照。
+- ADR-029：同源batch共用模型bytes與File hash，獨立依序A/B Adaptive/C，保留單法失敗；不把未知真實影格對齊假裝為零偏移。
+- ADR-030：人工標籤逐法獨立，提供common/all分母與runtime；三法pipeline比較不視為cropping因果實驗。

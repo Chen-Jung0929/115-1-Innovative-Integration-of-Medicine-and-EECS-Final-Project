@@ -34,3 +34,5 @@ summary { cursor: pointer; }
 input[type=checkbox] {display:inline-block;}
 fieldset {border:1px solid #d4e1de; border-radius:8px;}
 dt {font-weight:700;} dd {margin-bottom:12px;}
+
+table {border-collapse:collapse;width:100%;} th,td {padding:12px;border-bottom:1px solid #d4e1de;text-align:left;vertical-align:top;} pre {white-space:pre-wrap;overflow-wrap:anywhere;}

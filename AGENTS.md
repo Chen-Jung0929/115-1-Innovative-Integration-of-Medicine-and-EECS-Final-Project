@@ -48,3 +48,10 @@ Use the existing checkout. Do not create worktrees unless explicitly requested.
 - Version thresholds, record ROI/source timestamps, and keep raw, automatic and human-reviewed outcomes separate.
 - Wrong/mixed/uncertain human review must invalidate final angles without erasing automatic decisions.
 - Distinguish user-reported real-video evidence, synthetic regression and independently rerun measurements.
+
+## Architecture comparison scope
+- Read docs/PIPELINE_COMPARISON.md first. Pause ROI tracking expansion; retain B for regression.
+- A/C must infer on original full frames. Target reference is selection metadata, never an implicit crop.
+- Keep detection, selection, temporal identity, observation QC and angles separate. Never use candidate order as identity.
+- Freeze source/model hashes and 5Hz settings for comparisons; disclose decoder alignment and denominator limits.
+- No fabricated human results or claims that cropping hypotheses are confirmed. Preserve raw/auto/manual results per pipeline.

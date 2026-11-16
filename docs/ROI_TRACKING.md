@@ -1,4 +1,6 @@
-# ROI controller, decoder and recovery — v0.4.0
+# ROI controller, decoder and recovery — v0.4.0 retained baseline
+
+v0.5.0 暫停擴充此管線，保留作 B 對照；新的 A/B/C 比較見 [PIPELINE_COMPARISON.md](PIPELINE_COMPARISON.md)。
 
 2026-11-17 · schema 6 · QC pixel-xy-visible-present-0.5-and-roi-controller-v3。
 

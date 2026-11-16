@@ -1,3 +1,7 @@
+import {PIPELINE_NAMES,type PipelineId} from '../domain/pipeline';
+import {comparePipelines,sha256File} from '../motion/compare';
+import type {ComparisonBundle} from '../validation/comparison';
+import {ComparisonPanel} from '../validation/ComparisonPanel';
 import { useEffect, useRef, useState } from 'react';
 import type { Session } from '../domain/analysis';
 import { MODEL_URL, PROJECT_MODEL_URL } from '../pose/mediapipe';
@@ -17,6 +21,10 @@ import { applyReview } from '../validation/targetMetrics';
 import { AngleChart } from '../visualization/AngleChart';
 
 export function App() {
+  const [pipeline,setPipeline]=useState<PipelineId>('full-frame-single');
+  const [multiPoses,setMultiPoses]=useState<2|3>(2);
+  const [comparison,setComparison]=useState<ComparisonBundle|null>(null);
+  const sourceFile=useRef<File|null>(null);
   const video = useRef<HTMLVideoElement>(null);
   const url = useRef<string | null>(null);
   const uiSeek=useRef<AbortController|null>(null);
@@ -66,6 +74,7 @@ export function App() {
     task.current?.abort(); uiSeek.current?.abort();
     const controller = new AbortController(); task.current = controller;
     video.current.pause();
+    sourceFile.current=file;setComparison(null);
     setSelection(null); setSelecting(false); setSession(null); setStale(false); setInfo(null); setError(''); setNotice(''); setBusy(false); setLoading(true); setTimeMs(0); setSeeking(true);
     if (url.current) URL.revokeObjectURL(url.current);
     url.current = null;
@@ -85,14 +94,32 @@ export function App() {
     const controller = new AbortController(); task.current = controller;
     video.current?.pause(); setError(''); setNotice(''); setBusy(true); setSampleIndex(0);
     try {
+      const sourceSha256=sourceFile.current?await sha256File(sourceFile.current):undefined;controller.signal.throwIfAborted();
       const result = await analyze(url.current, info.name, model, allowDownload, structuredClone(selection), controller.signal, (done, total, phase) => {
         if (!controller.signal.aborted) setProgress({ done, total, phase });
-      });
+      },{pipeline:{id:pipeline,numPoses:pipeline==='full-frame-multi'?multiPoses:1},...(sourceSha256?{sourceSha256}:{})});
       controller.signal.throwIfAborted(); if(storedSession)setHistory(h=>[...h,storedSession]);setSession({...result,analysisRevision:{...result.analysisRevision,parentSessionId:storedSession?.metadata.sessionId??null}});setStale(false);
       if (video.current && result.samples[0]) video.current.currentTime = result.samples[0].requestedTimeMs / 1000;
       setNotice('分析完成；播放不會再次推論。可用取樣滑桿檢查每個已分析影格。');
     } catch (e) { if (!controller.signal.aborted) setError(`${message(e)} 若模型下載受阻，可下載官方模型後選取本機 .task 檔。`); }
     finally { if (!controller.signal.aborted) setBusy(false); }
+  }
+  async function runComparison(){
+    if(!url.current||!sourceFile.current||!selection)return;
+    task.current?.abort();uiSeek.current?.abort();const controller=new AbortController();task.current=controller;
+    video.current?.pause();setBusy(true);setError('');setNotice('');
+    try{
+      const bundle=await comparePipelines(url.current,sourceFile.current,model,allowDownload,selection,multiPoses,controller.signal,(done,total,phase)=>{if(!controller.signal.aborted)setProgress({done,total,phase});});
+      controller.signal.throwIfAborted();setComparison(bundle);
+      const first=bundle.entries.find(e=>e.session)?.session;
+      if(first){if(storedSession)setHistory(h=>[...h,storedSession]);setSession(first);setPipeline(first.run!.pipeline.id);setStale(false);setSampleIndex(0);void seekPlayback(0);}
+      setNotice('同源比較完成。請依序檢查三種方法並分別人工標註；失敗方法保留錯誤，不填造結果。');
+    }catch(e){if(!controller.signal.aborted)setError(message(e));}
+    finally{if(!controller.signal.aborted)setBusy(false);}
+  }
+  function selectComparison(id:string){
+    const selected=comparison?.entries.find(e=>e.session?.metadata.sessionId===id)?.session;
+    if(selected){setSession(selected);setSelection(structuredClone(selected.subjectSelection));setPipeline(selected.run!.pipeline.id);if(selected.run!.pipeline.numPoses>1)setMultiPoses(selected.run!.pipeline.numPoses as 2|3);setStale(false);setSampleIndex(0);void seekPlayback(0);}
   }
   function cancel() { task.current?.abort(); setBusy(false); setNotice('已取消分析；不保存部分結果，先前完成版本仍保留。'); }
   async function seekPlayback(seconds:number) {
@@ -110,7 +137,7 @@ export function App() {
     if (!info || !video.current) return;
     const time=selection?Math.min(video.current.currentTime,info.duration-.001):0;setEditTimeMs(time*1000);void seekPlayback(time);setDraftMode(selection?.method??'manual-fixed-roi');
     setSelecting(true);setError('');setDrawNew(!selection);
-    const applied=selection?(displayedRoi(session?.samples??[],time*1000)??roiAt(selection,time*1000,info.width,info.height).roi):{x:0,y:0,width:info.width,height:info.height};previousDraft.current={...applied};setDraft({...applied});
+    const applied=selection?((pipeline==='roi-crop'?displayedRoi(session?.samples??[],time*1000):null)??roiAt(selection,time*1000,info.width,info.height).roi):{x:0,y:0,width:info.width,height:info.height};previousDraft.current={...applied};setDraft({...applied});
     setNotice('編輯只變更草稿；Apply 前保留既有分析。請保留完整髖、膝、踝與活動空間。');
   }
   function confirmSelection() {
@@ -143,11 +170,14 @@ export function App() {
       </details>
       {loading && <p role="status">讀取影片中…</p>}
       {info && <p className="file-info">{info.name} · {info.duration.toFixed(2)} 秒 · {info.width} × {info.height} 像素</p>}
-      <div className="actions"><button disabled={!info || !selection || selecting || busy || loading} onClick={() => void run()}>{session ? '重新分析' : '開始分析'}</button>{busy && <button onClick={cancel}>取消分析</button>}</div>
+      <label>分析管線<select aria-label="分析管線" disabled={busy||selecting} value={pipeline} onChange={e=>{setPipeline(e.target.value as PipelineId);if(storedSession)setStale(true);}}>{Object.entries(PIPELINE_NAMES).map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
+      <details><summary>A/B/C 比較設定</summary><label>C 的候選數<select aria-label="C 的候選數" disabled={busy} value={multiPoses} onChange={e=>{setMultiPoses(Number(e.target.value) as 2|3);if(storedSession)setStale(true);}}><option value={2}>2</option><option value={3}>3</option></select></label><p>A/C 模型輸入始終是完整影格；框只作選人參考。依序比較固定為 A、B Adaptive、C，使用同一影片與模型內容。</p></details>
+      <div className="actions"><button disabled={!info || !selection || selecting || busy || loading} onClick={() => void run()}>{session ? '重新分析' : '開始分析'}</button><button disabled={!info||!selection||selecting||busy||loading} onClick={()=>void runComparison()}>依序比較 A / B / C</button>{busy && <button onClick={cancel}>取消分析</button>}</div>
       {busy && <div role="status"><p>{progress.phase} · {progress.done} / {progress.total || '準備中'}</p><progress max={progress.total || 1} value={progress.done} /></div>}
       {error && <p role="alert" className="error">{error}</p>}{notice && <p role="status">{notice}</p>}
     </section>
-    {info && <section><h2>受測者選擇與 ROI 時間校正</h2><p>首次請在片頭選取單一受測者；之後可在目前暫停時間微調或新增 keyframe。ROI 只能降低其他人物干擾，無法保證分開重疊人物。高 visibility 不是身分正確的證據。</p>
+    {comparison && <ComparisonPanel bundle={comparison} activeId={session?.metadata.sessionId} busy={busy||selecting} onSelect={selectComparison} />}
+    {info && <section><h2>受測者選擇與 ROI 時間校正</h2><p>首次請在片頭選取單一受測者；之後可在目前暫停時間微調或新增 keyframe。ROI 只能降低其他人物干擾，無法保證分開重疊人物。高 visibility 不是身分正確的證據。A/C 的框只用於選人，可圈指定人的軀幹中心附近，不裁切模型輸入。B 的裁切框則需要完整人體與活動空間。</p>
       <label>前往影片時間（秒）<input type="number" min={0} max={info.duration} step={0.2} value={navigation} disabled={busy||selecting} onChange={e=>setNavigation(Number(e.target.value))} /></label><button disabled={busy||selecting} onClick={()=>void seekPlayback(Math.max(0,Math.min(info.duration-.001,navigation)))}>跳轉影片時間</button>
       <button disabled={busy||seeking} onClick={beginSelection}>{selection?'重新選擇受測者／微調 ROI':'框選受測者'}</button>
       {selecting && <><label>ROI 方法<select aria-label="ROI 方法" value={draftMode} onChange={e=>setDraftMode(e.target.value as SubjectSelection['method'])}><option value="manual-fixed-roi">Fixed ROI（固定框）</option><option value="manual-keyframes">Manual Keyframes（手動時間框）</option><option value="adaptive-roi">Adaptive ROI（保守自動跟隨）</option></select></label><p>編輯位置：{(editTimeMs/1000).toFixed(3)} 秒。選用 Keyframes 或 Adaptive 時，Apply 代表在此時間人工重新確認受測者；相鄰框以原圖像素線性插值，只插值 ROI，不插值角度。</p><p>可拖曳矩形內部移動、四角／四邊縮放，或輸入來源像素座標（至少 32 × 32）。Fixed 模式不會自動移動；Adaptive 只依先前通過 QC 的姿態更新，仍需保留活動空間。</p>
@@ -166,6 +196,8 @@ export function App() {
     <section aria-labelledby="review-title"><h2 id="review-title">2. 影格與角度檢查</h2>
       <label>顯示側別<select value={side} onChange={e => setSide(e.target.value as typeof side)}><option value="both">左右膝 Both</option><option value="left">左膝 Left Knee</option><option value="right">右膝 Right Knee</option></select></label>
       <label><input type="checkbox" checked={diagnostic} onChange={e=>setDiagnostic(e.target.checked)} />顯示被拒絕骨架供人工檢查（紅色，不代表有效量測）</label>
+      {session?.run && <p>結果管線：{PIPELINE_NAMES[session.run.pipeline.id]} · 模型 hash：{session.metadata.model.assetSha256.slice(0,16)} · session：{session.metadata.sessionId}</p>}
+      {sample?.subjectDecision && <p>本影格選中候選：{sample.subjectDecision.selectedIndex===null?'N/A':sample.subjectDecision.selectedIndex+1}；候選編號僅限此影格，不是人物 ID。</p>}
       {sample && <p role="status">人工判斷：{sample.review?.label??'尚未標註'} · 追蹤狀態：{sample.tracking.state} · 人物一致性：{sample.tracking.identity}（未經人工確認） · 點位信心：{sample.tracking.landmarkConfidence} · 幾何：{sample.tracking.plausibility} · 連續性：{sample.tracking.continuity} · 原因：{sample.tracking.reasons.join(', ')||'未觸發篩檢警示；仍可能選錯或混合人物'}</p>}
       <div className="workspace"><div><div className="video-stage"><video ref={video} controls={!selecting} playsInline onPlay={()=>{if(selecting)video.current?.pause();}} onSeeking={() => setSeeking(true)} onSeeked={() => {
         const v = video.current;
@@ -176,7 +208,7 @@ export function App() {
         setTimeMs(known?.sourceTimeMs ?? v.currentTime * 1000); setSeeking(false);
       }} onError={() => { if (info) { setError('影片播放解碼失敗，請改用 H.264 MP4。'); setSession(null); } }} /><Overlay sample={sample} width={info?.width ?? 640} height={info?.height ?? 360} side={side} diagnostic={diagnostic} />
       {selecting && info && !seeking && <RoiSelector width={info.width} height={info.height} roi={draft} onChange={setDraft} drawNew={drawNew} onDrawEnd={()=>setDrawNew(false)} />}
-      {selection && info && !selecting && <svg className="roi-border" viewBox={`0 0 ${info.width} ${info.height}`} aria-label="受測者 ROI 範圍"><rect {...(sample?.roi??displayedRoi(session?.samples??[],timeMs)??roiAt(selection,timeMs,info.width,info.height).roi)} fill="none" stroke="#ffda57" strokeWidth={Math.max(2,info.width/250)} /></svg>}</div>
+      {selection && info && !selecting && <svg className="roi-border" viewBox={`0 0 ${info.width} ${info.height}`} aria-label="受測者 ROI 範圍"><rect {...(pipeline==='roi-crop'?(sample?.roi??displayedRoi(session?.samples??[],timeMs)??roiAt(selection,timeMs,info.width,info.height).roi):(sample?.targetReferenceRoi??selection.roi))} fill="none" stroke="#ffda57" strokeWidth={Math.max(2,info.width/250)} /></svg>}</div>
         <p>來源影格時間：{(timeMs/1000).toFixed(3)} 秒。{sample ? `對應取樣 #${sample.sampleIndex}（${sample.decode.timeBasis}）` : '此影格沒有對應分析結果，骨架與角度不顯示。'}</p>
         {session && <label>檢查已分析取樣 #{sampleIndex}<input aria-label="已分析取樣" type="range" min={0} max={session.samples.length-1} disabled={selecting} value={sampleIndex} onChange={e => jump(Number(e.target.value))} /></label>}
       </div><div className="measurements">
@@ -195,7 +227,7 @@ export function App() {
         <button onClick={() => downloadFile(`research-${session.metadata.sessionId}.json`, JSON.stringify(session, null, 2), 'application/json')}>下載研究 JSON（含 landmarks）</button>
       </div><p>輸出含來源檔名、角度及人體特徵，請保存於受限空間，不要提交到 Public GitHub。</p></> : <p>完成分析後顯示曲線與匯出按鈕；目前沒有分析結果。</p>}
     </section>
-    {session && <ReviewPanel session={session} sample={sample} onReview={(index,review)=>setSession(previous=>previous?{...previous,samples:previous.samples.map(s=>s.sampleIndex===index?applyReview(s,review):s)}:null)} />}
+    {session && <ReviewPanel session={session} sample={sample} onReview={(index,review)=>{if(!storedSession)return;const next={...storedSession,samples:storedSession.samples.map(s=>s.sampleIndex===index?applyReview(s,review):s)};setSession(next);setComparison(previous=>previous?{...previous,entries:previous.entries.map(e=>e.session?.metadata.sessionId===next.metadata.sessionId?{...e,session:next}:e)}:null);}} />}
   </main>;
 }
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }

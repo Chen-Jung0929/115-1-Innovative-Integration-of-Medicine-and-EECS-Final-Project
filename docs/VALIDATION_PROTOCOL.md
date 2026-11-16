@@ -67,3 +67,14 @@ keyframes插值、緩慢人物／camera位移、短期出框／兩次恢復、�
 區分 presentation PTS 與 seek-position-estimate；估計時間不能冒稱精確逐影格配對。
 標註／人工 ROI 校正若使用驗證片，必須將其列為人工輔助條件，另保留無校正基準，不能聲稱完全自動成效。
 校正前後需分析新版本，記錄 keyframe時間、correctionSource、parentIDs，保留原始輸出；不把插值ROI當角度真值。
+
+## v0.5.0 architecture comparison
+
+完整方法見 PIPELINE_COMPARISON.md。裁切缺上下文、動態尺度、SDK temporal tracking 及ROI誤差回饋皆待驗證假說。
+保留 B Adaptive，新增 A 全圖單人與 C 全圖多人／參考選人，三法輸出同一角度定義與版本化 QC 來源。
+以相同影片／模型 hash／5Hz grid，比較自動有效率、人工Correct Target／False-Valid／Usable Coverage、
+raw landmark不連續、可比較配對、實際分析耗時與失敗原因；未標註不當正確，失敗方法不填0。
+報告 common requested子集與allSamples，檢查不同來源PTS或estimated時間的配對限制。
+人工標註每法獨立，不能複製另一法的模型身份結果；比較整個pipeline不能單獨證實cropping因果。
+先用無中途校正的初始框作基準，人工輔助校正另立條件；重跑／控制順序檢查暖機及裝置差異。
+本環境真實影片未提供，不以合成測試替代人體結果或選出勝出方法。

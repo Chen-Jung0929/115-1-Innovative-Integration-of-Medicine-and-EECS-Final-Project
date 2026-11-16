@@ -1,6 +1,6 @@
 # Architecture
 
-狀態：v0.4.0 支援 editable Fixed／Manual Keyframes／Adaptive ROI 與解碼診斷；真實同片修正效果待驗收。
+狀態：v0.5.0 為可操作 A/B/C 架構比較；v0.4 ROI 保留並暫停擴充，效果與根因尚待真實資料。
 
 ```mermaid
 flowchart TD
@@ -51,7 +51,7 @@ AngleValue 為 discriminated union：valid=true 有 raw angle；valid=false 時 
 未來 camera 需要 HTTPS 或受信任的本機 origin 及使用者授權；onboarding 不提供預覽連結。
 模型已記錄套件版本、模型來源／asset ID、SHA-256、CPU delegate；設定見 docs/MODEL_SETUP.md。
 CSV 每側每取樣一列，無效角度空欄附 validity/reasons；JSON 攜帶 metadata 與 normalized xy、visibility、可用的 presence 與 crop-relative z（沒有 world landmarks）。
-目前 schemaVersion=6；不把 sample_index 冒充來源 frame index。CSV 所有欄位加引號，文字公式前綴轉義。
+目前 schemaVersion=7；不把 sample_index 冒充來源 frame index。CSV 所有欄位加引號，文字公式前綴轉義。
 
 
 ## V0 offline sampling and playback contract
@@ -107,3 +107,26 @@ Controller 只用前一 accepted pose 更新下一框；明確記錄每 sample R
 短期失效可在 650 ms 內兩次嚴格確認後恢復；歧義與長期失效不可自動接人。
 搜尋最多2 candidates 只作建議與歧義證據，不把搜尋點自動覆蓋 primary measurements。
 新 manual keyframe／mode／selection 造成新 revision 與 stale；重分析產生新 session，保留 parent 及原 JSON。
+
+## v0.5.0 pipeline separation
+
+現行比較規約以 PIPELINE_COMPARISON.md 為準。既有 ROI_TRACKING.md 描述 B 的保留基線。
+
+```mermaid
+flowchart TD
+ I[5Hz source frame] --> D{Pipeline}
+ D -->|A/C full original frame| P[Pose Detection: 1 or 2/3 candidates]
+ P --> S[Subject Selection: initial torso reference]
+ S --> T[Temporal Identity: source coordinates]
+ T --> Q[Independent Landmark QC]
+ D -->|B legacy crop| B[v0.4 RoiController + PoseEngine]
+ B --> G[Shared kneeAngle / geometricAngle]
+ Q --> G
+ G --> H[Identity gate / human review]
+ H --> E[CSV / JSON / A-B-C report]
+```
+
+A/C 的 inference ROI 永遠為全圖；targetReferenceRoi 不是裁切範圍，選人與裁切分離。
+完整raw候選保留，subjectDecision 記 selected／proposed index（不當固定身分）。
+同源 runner 固定影片／模型hash、selection與5Hz，獨立依序執行三法並保留單法失敗。
+不直接宣稱每法 decoder 取得相同呈現影格；輸出 common target grid、timing basis、已知偏移及完整分母。
