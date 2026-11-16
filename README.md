@@ -15,7 +15,7 @@ MP4 載入、5 Hz 目標離線取樣、MediaPipe 膝部 2D 角度、骨架、曲
 高 visibility 不等於正確人物；ROI 與時間規則不能保證解決遮蔽或重疊。
 修正後仍需在同一真實影片進行人工標註與前後比較，不宣稱已完全修復或已驗證臨床角度。
 
-本次自動測試：65 個單元測試；瀏覽器 11 通過、1 個真實人體測試因本環境缺資產而跳過。
+本次自動測試：75 個單元測試；瀏覽器 12 通過、1 個真實人體測試因本環境缺資產而跳過。
 實際測試與限制見 [受測者選擇進度](docs/updates/iteration-02-subject-tracking.md)、
 [追蹤與指標定義](docs/SUBJECT_TRACKING.md)；[原始 V0 紀錄](docs/updates/iteration-01-dataset-demo.md)保留歷史狀態。
 
@@ -149,3 +149,5 @@ Mendeley 的 Good/Bad Form 標籤不是角度或身份真值；目前已知實�
 的上下台階／抬腿動作、V3 量測驗證、V4 展示整合。版本不依固定日期決定。
 
 解碼修正（Phase A1）：重複 seek 0 秒會使用已有影格；背景回呼延遲時，以已完成尋時且可繪製的影格繼續，記錄 `seek-position-estimate`，不冒稱精確影格 PTS。等待失敗包含 readyState／seeking 等診斷，不一律歸咎編碼。
+
+ROI 可重新進入編輯，拖曳內部移動、四角與四邊縮放；數值會限制在來源畫面內。Restore Previous 回復已套用矩形，Reset 回全畫面，取消編輯不影響原分析。只有 Apply 會使舊結果 stale；可另存舊 JSON，重新分析後保留先前 session 下載入口。

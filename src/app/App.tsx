@@ -8,6 +8,7 @@ import { flexionProxy } from '../biomechanics/knee';
 import { downloadFile, toCsv } from '../export/csv';
 import { Overlay } from '../visualization/Overlay';
 import type { Roi, SubjectSelection } from '../domain/tracking';
+import { fitRoi } from '../tracking/editRoi';
 import { checkedRoi } from '../tracking/roi';
 import { RoiSelector } from '../visualization/RoiSelector';
 import { ReviewPanel } from '../validation/ReviewPanel';
@@ -22,8 +23,12 @@ export function App() {
   const [info, setInfo] = useState<{ name: string; duration: number; width: number; height: number } | null>(null);
   const [model, setModel] = useState<File | null>(null);
   const [allowDownload, setAllowDownload] = useState(false);
-  const [session, setSession] = useState<Session | null>(null);
+  const [storedSession, setSession] = useState<Session | null>(null);
+  const [stale,setStale]=useState(false);
+  const [history,setHistory]=useState<Session[]>([]);
+  const [drawNew,setDrawNew]=useState(true);
   const [busy, setBusy] = useState(false);
+  const session=stale||busy?null:storedSession;
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0, phase: '' });
   const [error, setError] = useState('');
@@ -56,7 +61,7 @@ export function App() {
     task.current?.abort(); uiSeek.current?.abort();
     const controller = new AbortController(); task.current = controller;
     video.current.pause();
-    setSelection(null); setSelecting(false); setSession(null); setInfo(null); setError(''); setNotice(''); setBusy(false); setLoading(true); setTimeMs(0); setSeeking(true);
+    setSelection(null); setSelecting(false); setSession(null); setStale(false); setInfo(null); setError(''); setNotice(''); setBusy(false); setLoading(true); setTimeMs(0); setSeeking(true);
     if (url.current) URL.revokeObjectURL(url.current);
     url.current = null;
     try {
@@ -73,18 +78,18 @@ export function App() {
     if (!url.current || !info || !selection) return;
     task.current?.abort(); uiSeek.current?.abort();
     const controller = new AbortController(); task.current = controller;
-    video.current?.pause(); setSession(null); setError(''); setNotice(''); setBusy(true); setSampleIndex(0);
+    video.current?.pause(); setError(''); setNotice(''); setBusy(true); setSampleIndex(0);
     try {
       const result = await analyze(url.current, info.name, model, allowDownload, selection, controller.signal, (done, total, phase) => {
         if (!controller.signal.aborted) setProgress({ done, total, phase });
       });
-      controller.signal.throwIfAborted(); setSession(result);
+      controller.signal.throwIfAborted(); if(storedSession)setHistory(h=>[...h,storedSession]);setSession(result);setStale(false);
       if (video.current && result.samples[0]) video.current.currentTime = result.samples[0].requestedTimeMs / 1000;
       setNotice('分析完成；播放不會再次推論。可用取樣滑桿檢查每個已分析影格。');
     } catch (e) { if (!controller.signal.aborted) setError(`${message(e)} 若模型下載受阻，可下載官方模型後選取本機 .task 檔。`); }
     finally { if (!controller.signal.aborted) setBusy(false); }
   }
-  function cancel() { task.current?.abort(); setBusy(false); setNotice('已取消分析；未完成的結果不提供匯出。'); }
+  function cancel() { task.current?.abort(); setBusy(false); setNotice('已取消分析；不保存部分結果，先前完成版本仍保留。'); }
   async function seekPlayback(seconds:number) {
     if(!video.current)return;
     uiSeek.current?.abort();const controller=new AbortController();uiSeek.current=controller;
@@ -98,16 +103,19 @@ export function App() {
   }
   function beginSelection() {
     if (!info || !video.current) return;
-    void seekPlayback(0);
-    setSession(null);setSelection(null);setSelecting(true);setError('');
-    setDraft({x:0,y:0,width:info.width,height:info.height});
-    setNotice('請在影片起點框選單一受測者，保留完整髖、膝、踝與活動空間。');
+    void seekPlayback(selection?video.current.currentTime:0);
+    setSelecting(true);setError('');setDrawNew(!selection);
+    setDraft({...selection?.roi??{x:0,y:0,width:info.width,height:info.height}});
+    setNotice('編輯只變更草稿；Apply 前保留既有分析。請保留完整髖、膝、踝與活動空間。');
   }
   function confirmSelection() {
     if (!info) return;
-    try { const roi=checkedRoi(draft,info.width,info.height);
-      setSelection({id:crypto.randomUUID(),roi,method:'manual-fixed-roi',referenceTimeMs:0});setSelecting(false);setError('');
-    } catch(e) {setError(message(e));}
+    try {const roi=checkedRoi(draft,info.width,info.height);
+      if(JSON.stringify(roi)!==JSON.stringify(selection?.roi)) {
+        setSelection({id:crypto.randomUUID(),roi,method:'manual-fixed-roi',referenceTimeMs:0});if(storedSession)setStale(true);
+      }
+      setSelecting(false);setError('');
+    }catch(e){setError(message(e));}
   }
   const sample = session && !seeking ? (matchingSample(session.samples, timeMs) ?? (video.current?.paused ? session.samples.find(s=>s.decode.timeBasis==='seek-position-estimate' && Math.abs(s.requestedTimeMs-video.current!.currentTime*1000)<.001):undefined)) : undefined;
   const pct = (s: 'left' | 'right') => { const value = session ? coverage(session.samples, s) : null; return value === null ? 'N/A' : `${(value * 100).toFixed(1)}%`; };
@@ -119,8 +127,8 @@ export function App() {
       <label>MP4 影片（最多 500 MB、10 分鐘）<input type="file" accept=".mp4,video/mp4" disabled={busy || loading} onChange={e => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; void choose(f); }} /></label>
       <details><summary>模型設定與資料隱私</summary><p>影片不會上傳。預設先讀取專案本機模型；手動選取的 .task 檔優先。WASM 與已安裝 npm 版本一致，從本站載入，不使用外部 CDN。沒有模型時可改選本機檔案，其他介面仍可操作。</p>
         <p><a href={MODEL_URL} target="_blank" rel="noreferrer">官方 Lite 模型下載</a>（模型來源與 SHA-256 會記錄於研究 JSON）。</p>
-        <label>本機 .task 模型<input type="file" accept=".task" disabled={busy} onChange={e => { setModel(e.target.files?.[0] ?? null); e.target.value = ''; setSession(null); }} /></label>
-        <button disabled={busy || !model} onClick={() => { setModel(null); setSession(null); }}>改用專案本機模型</button>
+        <label>本機 .task 模型<input type="file" accept=".task" disabled={busy} onChange={e => { setModel(e.target.files?.[0] ?? null); e.target.value = ''; if(storedSession)setStale(true); }} /></label>
+        <button disabled={busy || !model} onClick={() => { setModel(null); if(storedSession)setStale(true); }}>改用專案本機模型</button>
         <label><input type="checkbox" checked={allowDownload} disabled={busy} onChange={e => setAllowDownload(e.target.checked)} />本機模型不存在時，允許從 Google 官方下載（選用）</label>
         <p>放置方式：將官方模型存成 public/models/pose_landmarker_lite.task，或直接從 Mac 選取檔案，不需上傳伺服器。</p>
         <p>目前模型：{model ? model.name : `專案本機路徑 ${PROJECT_MODEL_URL}`} 。本機模型須由使用者核對來源與授權。</p>
@@ -132,17 +140,24 @@ export function App() {
       {error && <p role="alert" className="error">{error}</p>}{notice && <p role="status">{notice}</p>}
     </section>
     {info && <section><h2>受測者選擇：固定 ROI</h2><p>先回到影片起點，框選單一受測者。ROI 只能降低其他人物干擾，無法保證分開重疊人物。高 visibility 不是身分正確的證據。</p>
-      <button disabled={busy} onClick={beginSelection}>{selection?'重新選擇受測者':'框選受測者'}</button>
-      {selecting && <><p>可拖曳下方影片框選，或輸入來源像素座標（至少 32 × 32）。固定 ROI 不會隨人移動，請保留活動空間。</p>
-      <div className="roi-fields">{(['x','y','width','height'] as const).map(key=><label key={key}>ROI {key}<input type="number" value={draft[key]} onChange={e=>setDraft({...draft,[key]:Number(e.target.value)})} /></label>)}</div>
-      <button disabled={seeking} onClick={confirmSelection}>確認 ROI</button></>}
+      <button disabled={busy} onClick={beginSelection}>{selection?'重新選擇受測者／微調 ROI':'框選受測者'}</button>
+      {selecting && <><p>可拖曳矩形內部移動、四角／四邊縮放，或輸入來源像素座標（至少 32 × 32）。固定 ROI 不會隨人移動，請保留活動空間。</p>
+      <div className="roi-fields">{(['x','y','width','height'] as const).map(key=><label key={key}>ROI {key}<input type="number" value={draft[key]} onChange={e=>setDraft(fitRoi({...draft,[key]:Number(e.target.value)},info.width,info.height))} /></label>)}</div>
+      <button disabled={seeking} onClick={confirmSelection}>確認 ROI（Apply）</button>
+      <button onClick={()=>setDraft({...selection?.roi??{x:0,y:0,width:info.width,height:info.height}})}>Restore Previous</button>
+      <button onClick={()=>setDraft({x:0,y:0,width:info.width,height:info.height})}>Reset</button>
+      <button onClick={()=>setDrawNew(true)}>重新畫框</button>
+      <button onClick={()=>setSelecting(false)}>取消編輯</button></>}
       {selection && <p>ROI：x={selection.roi.x}, y={selection.roi.y}, w={selection.roi.width}, h={selection.roi.height}。失去目標後不自動接回；請重新選擇並分析。</p>}
     </section>}
+    {stale && storedSession && <aside role="status">舊分析已過期（stale），請重新分析。舊 ROI 的角度、圖表及一般匯出已隱藏。
+      <button onClick={()=>downloadFile(`archived-${storedSession.metadata.sessionId}.json`,JSON.stringify(storedSession,null,2),'application/json')}>下載舊分析 JSON（原設定）</button></aside>}
+    {history.length>0 && <details><summary>先前分析存檔（不修改原始 session）</summary>{history.map(s=><p key={s.metadata.sessionId}><button onClick={()=>downloadFile(`archived-${s.metadata.sessionId}.json`,JSON.stringify(s,null,2),'application/json')}>下載 {s.metadata.sessionId}</button></p>)}</details>}
     <section aria-labelledby="review-title"><h2 id="review-title">2. 影格與角度檢查</h2>
       <label>顯示側別<select value={side} onChange={e => setSide(e.target.value as typeof side)}><option value="both">左右膝 Both</option><option value="left">左膝 Left Knee</option><option value="right">右膝 Right Knee</option></select></label>
       <label><input type="checkbox" checked={diagnostic} onChange={e=>setDiagnostic(e.target.checked)} />顯示被拒絕骨架供人工檢查（紅色，不代表有效量測）</label>
       {sample && <p role="status">人工判斷：{sample.review?.label??'尚未標註'} · 人物一致性：{sample.tracking.identity}（未經人工確認） · 點位信心：{sample.tracking.landmarkConfidence} · 幾何：{sample.tracking.plausibility} · 連續性：{sample.tracking.continuity} · 原因：{sample.tracking.reasons.join(', ')||'未觸發篩檢警示；仍可能選錯或混合人物'}</p>}
-      <div className="workspace"><div><div className="video-stage"><video ref={video} controls playsInline onSeeking={() => setSeeking(true)} onSeeked={() => {
+      <div className="workspace"><div><div className="video-stage"><video ref={video} controls playsInline onPlay={()=>{if(selecting)video.current?.pause();}} onSeeking={() => setSeeking(true)} onSeeked={() => {
         const v = video.current;
         if (!v) return;
         // Paused/off-screen videos may throttle rVFC. The same completed seek target
@@ -150,8 +165,8 @@ export function App() {
         const known = session?.samples.find(s => Math.abs(s.requestedTimeMs - v.currentTime * 1000) <= 1);
         setTimeMs(known?.sourceTimeMs ?? v.currentTime * 1000); setSeeking(false);
       }} onError={() => { if (info) { setError('影片播放解碼失敗，請改用 H.264 MP4。'); setSession(null); } }} /><Overlay sample={sample} width={info?.width ?? 640} height={info?.height ?? 360} side={side} diagnostic={diagnostic} />
-      {selecting && info && !seeking && <RoiSelector width={info.width} height={info.height} roi={draft} onChange={setDraft} />}
-      {selection && info && <svg className="roi-border" viewBox={`0 0 ${info.width} ${info.height}`} aria-label="受測者 ROI 範圍"><rect {...selection.roi} fill="none" stroke="#ffda57" strokeWidth={Math.max(2,info.width/250)} /></svg>}</div>
+      {selecting && info && !seeking && <RoiSelector width={info.width} height={info.height} roi={draft} onChange={setDraft} drawNew={drawNew} onDrawEnd={()=>setDrawNew(false)} />}
+      {selection && info && !selecting && <svg className="roi-border" viewBox={`0 0 ${info.width} ${info.height}`} aria-label="受測者 ROI 範圍"><rect {...selection.roi} fill="none" stroke="#ffda57" strokeWidth={Math.max(2,info.width/250)} /></svg>}</div>
         <p>來源影格時間：{(timeMs/1000).toFixed(3)} 秒。{sample ? `對應取樣 #${sample.sampleIndex}（${sample.decode.timeBasis}）` : '此影格沒有對應分析結果，骨架與角度不顯示。'}</p>
         {session && <label>檢查已分析取樣 #{sampleIndex}<input aria-label="已分析取樣" type="range" min={0} max={session.samples.length-1} value={sampleIndex} onChange={e => jump(Number(e.target.value))} /></label>}
       </div><div className="measurements">

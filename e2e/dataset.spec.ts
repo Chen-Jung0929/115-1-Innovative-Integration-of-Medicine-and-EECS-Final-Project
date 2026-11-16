@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 async function selectRoi(page:Page) {
   await page.getByRole('button',{name:'框選受測者',exact:true}).click();
-  await page.getByRole('button',{name:'確認 ROI',exact:true}).click();
+  await page.getByRole('button',{name:'確認 ROI（Apply）',exact:true}).click();
 }
 async function mockPose(page:Page) {
   await page.route('**/src/pose/mediapipe.ts', route => route.fulfill({contentType:'application/javascript',body:`
@@ -167,10 +167,10 @@ for(const scenario of ['lost','switch','mixed']) {
     expect(result.samples[2].review.label).toBe('wrong-target');expect(result.samples[2].left.valid).toBe(false);
     expect(result.samples.map((s:{sourceTimeMs:number})=>s.sourceTimeMs)).toEqual([0,200,400,600,800]);
     const priorSelection=result.subjectSelection.id;
-    await page.getByRole('button',{name:'重新選擇受測者',exact:true}).click();
-    await expect(page.getByRole('button',{name:'下載 CSV',exact:true})).toHaveCount(0);
+    await page.getByRole('button',{name:'重新選擇受測者／微調 ROI',exact:true}).click();
+    await expect(page.getByRole('button',{name:'下載 CSV',exact:true})).toHaveCount(1);
     await page.getByLabel('ROI x',{exact:true}).fill('80');await page.getByLabel('ROI width',{exact:true}).fill('160');
-    await page.getByRole('button',{name:'確認 ROI',exact:true}).click();
+    await page.getByRole('button',{name:'確認 ROI（Apply）',exact:true}).click();
     await page.getByRole('button',{name:'開始分析',exact:true}).click();
     await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
     const second=page.waitForEvent('download');await page.getByRole('button',{name:/下載研究 JSON/}).click();
@@ -204,13 +204,13 @@ test('manual drag selects ROI in original video pixels and requires confirmation
  await page.goto('/');await page.getByLabel('MP4 影片').setInputFiles(synthetic);
  await expect(page.getByRole('button',{name:'開始分析',exact:true})).toBeDisabled();
  await page.getByRole('button',{name:'框選受測者',exact:true}).click();
- const selector=page.getByLabel('在影片起點框選受測者',{exact:true});await expect(selector).toBeVisible();await selector.scrollIntoViewIfNeeded();
+ const selector=page.getByLabel('編輯受測者 ROI',{exact:true});await expect(selector).toBeVisible();await selector.scrollIntoViewIfNeeded();
  const bounds=(await selector.boundingBox())!;
  await page.mouse.move(bounds.x+bounds.width*.2,bounds.y+bounds.height*.1);await page.mouse.down();
  await page.mouse.move(bounds.x+bounds.width*.8,bounds.y+bounds.height*.9,{steps:8});await page.mouse.up();
  await expect(page.getByLabel('ROI x',{exact:true})).toHaveValue('64');await expect(page.getByLabel('ROI y',{exact:true})).toHaveValue('18');
  await expect(page.getByLabel('ROI width',{exact:true})).toHaveValue('192');await expect(page.getByLabel('ROI height',{exact:true})).toHaveValue('144');
- await page.getByRole('button',{name:'確認 ROI',exact:true}).click();await expect(page.getByRole('button',{name:'開始分析',exact:true})).toBeEnabled();
+ await page.getByRole('button',{name:'確認 ROI（Apply）',exact:true}).click();await expect(page.getByRole('button',{name:'開始分析',exact:true})).toBeEnabled();
 });
 
 
@@ -227,4 +227,27 @@ test('decoder handles repeated zero and paused frame callbacks that never arrive
  });
  expect(frames.map(f=>f.sourceTimeMs)).toEqual([0,0,200,200,400,200]);
  expect(frames.every(f=>f.timeBasis==='seek-position-estimate')).toBe(true);expect(frames[1].method).toBe('cached');
+});
+
+test('ROI draft is editable and cancelable; Apply preserves old session and marks it stale',async({page})=>{
+ await mockPose(page);await page.goto('/');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await selectRoi(page);
+ await page.getByRole('button',{name:'開始分析',exact:true}).click();await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
+ const json=page.waitForEvent('download');await page.getByRole('button',{name:/下載研究 JSON/}).click();const first=JSON.parse(readFileSync((await(await json).path())!,'utf8'));
+ await page.getByRole('button',{name:'重新選擇受測者／微調 ROI',exact:true}).click();
+ await page.getByLabel('ROI width',{exact:true}).fill('160');await page.getByLabel('ROI height',{exact:true}).fill('100');
+ await expect(page.getByRole('button',{name:'下載 CSV',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Restore Previous',exact:true}).click();await expect(page.getByLabel('ROI width',{exact:true})).toHaveValue('320');
+ await page.getByLabel('ROI width',{exact:true}).fill('160');await page.getByLabel('ROI height',{exact:true}).fill('100');
+ const editor=page.getByLabel('編輯受測者 ROI',{exact:true});await editor.scrollIntoViewIfNeeded();const b=(await editor.boundingBox())!;
+ await page.mouse.move(b.x+b.width*.2,b.y+b.height*.2);await page.mouse.down();await page.mouse.move(b.x+b.width*.3,b.y+b.height*.3,{steps:4});await page.mouse.up();
+ await expect(page.getByLabel('ROI x',{exact:true})).toHaveValue('32');await expect(page.getByLabel('ROI y',{exact:true})).toHaveValue('18');
+ const se=page.getByLabel('ROI se handle',{exact:true});const h=(await se.boundingBox())!;
+ await page.mouse.move(h.x+h.width/2,h.y+h.height/2);await page.mouse.down();await page.mouse.move(h.x+h.width/2+b.width*.1,h.y+h.height/2+b.height*.1,{steps:4});await page.mouse.up();
+ await expect(page.getByLabel('ROI width',{exact:true})).toHaveValue('192');await expect(page.getByLabel('ROI height',{exact:true})).toHaveValue('118');
+ expect(await page.locator('video').evaluate((v:HTMLVideoElement)=>v.paused)).toBe(true);
+ await page.getByRole('button',{name:'取消編輯',exact:true}).click();await expect(page.getByRole('button',{name:'下載 CSV',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'重新選擇受測者／微調 ROI',exact:true}).click();await expect(page.getByLabel('ROI width',{exact:true})).toHaveValue('320');
+ await page.getByLabel('ROI width',{exact:true}).fill('200');await page.getByRole('button',{name:'確認 ROI（Apply）',exact:true}).click();
+ await expect(page.getByText('舊分析已過期',{exact:false})).toBeVisible();await expect(page.getByRole('button',{name:'下載 CSV',exact:true})).toHaveCount(0);
+ const old=page.waitForEvent('download');await page.getByRole('button',{name:'下載舊分析 JSON（原設定）',exact:true}).click();expect(JSON.parse(readFileSync((await(await old).path())!,'utf8'))).toEqual(first);
 });
