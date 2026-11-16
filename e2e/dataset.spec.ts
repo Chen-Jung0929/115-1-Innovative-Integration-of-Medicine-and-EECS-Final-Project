@@ -298,3 +298,17 @@ for(const scenario of ['adaptive','adaptive-ambiguous','adaptive-search-error'])
   const csv=readFileSync((await(await csvPending).path())!,'utf8');expect(csv).toContain('tracking_state');expect(csv).toContain('roi_update_reason');
  });
 }
+
+test('upload and ROI editor stay usable when all video-frame callbacks are suppressed',async({page})=>{
+ await page.addInitScript(()=>{
+  HTMLVideoElement.prototype.requestVideoFrameCallback=()=>1;
+  HTMLVideoElement.prototype.cancelVideoFrameCallback=()=>{};
+ });
+ await mockPose(page);await page.goto('/');await page.getByLabel('MP4 影片').setInputFiles(synthetic);
+ await expect(page.getByRole('button',{name:'框選受測者',exact:true})).toBeEnabled();await selectRoi(page);
+ await page.getByRole('button',{name:'開始分析',exact:true}).click();await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
+ const pending=page.waitForEvent('download');await page.getByRole('button',{name:/下載研究 JSON/}).click();
+ const session=JSON.parse(readFileSync((await(await pending).path())!,'utf8'));
+ expect(session.samples.map((s:{sourceTimeMs:number})=>s.sourceTimeMs)).toEqual([0,200,400,600,800]);
+ expect(session.samples.every((s:{decode:{timeBasis:string}})=>s.decode.timeBasis==='seek-position-estimate')).toBe(true);
+});

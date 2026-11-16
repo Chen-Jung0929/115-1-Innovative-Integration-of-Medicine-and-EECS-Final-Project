@@ -14,7 +14,7 @@
 並回報多人錯選、固定框失去目標及新版尋時逾時。本次修正已用程式／合成資料驗證，
 **同一真實 Squat 影片尚未在本環境重跑**，不能宣稱已完全解決錯人或原片逾時。
 
-94 個單元測試通過；Chromium 瀏覽器 16 通過、1 個真實人體測試因本環境無資產而跳過。
+94 個單元測試通過；Chromium 瀏覽器 17 通過、1 個真實人體測試因本環境無資產而跳過。
 安裝、typecheck、build 通過；build 有 bundle 大小警告。
 各階段紀錄見 [解碼](docs/updates/iteration-03-phase-a1-decoder.md)、
 [ROI 編輯](docs/updates/iteration-04-phase-a2-editable-roi.md)、

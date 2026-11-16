@@ -76,7 +76,7 @@ export function App() {
       setInfo({ name: file.name, duration: video.current.duration, width: video.current.videoWidth, height: video.current.videoHeight });
     } catch (e) {
       if (!controller.signal.aborted) { setError(message(e)); video.current.removeAttribute('src'); video.current.load(); if (url.current) URL.revokeObjectURL(url.current); url.current = null; }
-    } finally { if (!controller.signal.aborted) setLoading(false); }
+    } finally { if (!controller.signal.aborted) {setLoading(false);setSeeking(false);} }
   }
 
   async function run() {
