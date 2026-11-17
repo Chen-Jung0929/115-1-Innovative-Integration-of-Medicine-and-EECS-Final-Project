@@ -57,7 +57,8 @@ export function FrontalOverlay({ sample, frame, width, height }: { sample: Sampl
 export function FrontalCuePanel({ frame, hasSample }: { frame: FrontalFrame | undefined; hasSample: boolean }) {
   let body: ReactNode;
   if (!hasSample || !frame) body = <p className="cue-muted">此影格沒有分析結果</p>;
-  else if (frame.baseline.state !== 'locked') body = <p className="cue-muted">請先站穩約 1 秒，建立基準線</p>;
+  else if (frame.metrics.trunkSide.valid === false && frame.metrics.trunkSide.invalidReasons[0] === 'unsupported-view') body = <p className="cue-muted">請正面拍攝（目前角度太斜，不判斷）</p>;
+  else if (frame.baseline.state !== 'locked') body = <p className="cue-muted">請先站直、不動約 1 秒，建立基準線</p>;
   else if (frame.cues.length === 0) body = <p className="cue-ok">✓ 姿勢在基準線附近</p>;
   else body = <ul>{frame.cues.map(c => <li key={c.id}>⚠ {c.text}<span className="cue-page">講義 p.{c.page}</span></li>)}</ul>;
   return <div className="cue-panel" role="status" aria-live="polite">{body}</div>;

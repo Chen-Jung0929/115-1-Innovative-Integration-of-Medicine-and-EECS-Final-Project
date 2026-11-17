@@ -6,12 +6,34 @@ import { gateReason } from '../tracking/gate';
 import { createBaselineAnchor, type BaselineState } from './baseline';
 import { createCueTracker, instantCues, type Cue } from './frontalCues';
 
+/**
+ * Where the baseline sits once locked.
+ * - 'standing-trunk' (default, team decision 2026-11-17): the person's own trunk midline while
+ *   standing (mean of shoulder-midpoint and hip-midpoint x). Absorbs an asymmetric stance and small
+ *   camera offsets, so prompts mean "moved away from how this person stood".
+ * - 'heel-midpoint': handout p.5 literal definition, the vertical through the midpoint of both heels.
+ */
+export type BaselineSource = 'standing-trunk' | 'heel-midpoint';
+/** Both knees below this flexion proxy (degrees) count as standing for calibration. */
+export const STANDING_MAX_KNEE_FLEXION_DEG = 20;
+
 export interface FrontalFrame {
   sampleIndex: number;
   baseline: BaselineState;
+  /**
+   * Gated metrics. Head, shift, shoulder tilt, pelvis tilt and trunk side lean are RELATIVE to the
+   * person's own standing calibration (the same second that locked the baseline), which also cancels
+   * a slightly rolled camera or a habitual stance. Knee vs toe line stays absolute (handout p.11).
+   * N/A ('baseline-pending') until calibrated.
+   */
   metrics: FrontalMetrics;
+  /** Standing values subtracted from the metrics, for display/audit. */
+  neutral: Neutral | null;
   cues: Cue[];
 }
+export interface Neutral { head: number; shift: number; shoulderTilt: number; pelvisTilt: number; trunkSide: number }
+type Tilt = keyof Neutral;
+const TILTS: Tilt[] = ['head', 'shift', 'shoulderTilt', 'pelvisTilt', 'trunkSide'];
 
 const blocked = (reason: InvalidReason): ScalarValue => ({ valid: false, value: null, invalidReasons: [reason] });
 function gated(m: FrontalMetrics, s: Sample): FrontalMetrics {
@@ -32,22 +54,48 @@ function gated(m: FrontalMetrics, s: Sample): FrontalMetrics {
  * saved session. Only samples whose subject passed QC (and was not rejected by human review) feed
  * the baseline or produce prompts.
  */
-export function frontalTimeline(samples: readonly Sample[], width: number, height: number): FrontalFrame[] {
+export function frontalTimeline(samples: readonly Sample[], width: number, height: number, source: BaselineSource = 'standing-trunk'): FrontalFrame[] {
   const anchor = createBaselineAnchor();
   const tracker = createCueTracker();
+  let standingBuf: { timeMs: number; m: FrontalMetrics }[] = [];
+  let neutral: Neutral | null = null;
+  let lockedAt: number | null = null;
   return [...samples].sort((a, b) => a.sourceTimeMs - b.sourceTimeMs).map(s => {
     const rejected = s.review !== undefined && s.review.label !== 'correct-target';
     const usable = !rejected && s.tracking.accepted;
     const frame = usable ? frontalFrame(s.landmarks, width, height) : null;
     const heel = usable ? heelMidpoint(s.landmarks, width, height) : null;
-    const baseline = anchor.update({
-      timeMs: s.sourceTimeMs,
-      heel: heel && typeof heel !== 'string' ? heel : null,
-      hipWidthPx: frame && typeof frame !== 'string' ? frame.hipWidth : null,
-    });
-    const metrics = gated(measureFrontal(s.landmarks, width, height, baseline.x), s);
+    const f = frame && typeof frame !== 'string' ? frame : null;
+    const h = heel && typeof heel !== 'string' ? heel : null;
     const knee = { left: flexionProxy(s.left), right: flexionProxy(s.right) };
+    const standing = knee.left !== null && knee.right !== null && Math.max(knee.left, knee.right) <= STANDING_MAX_KNEE_FLEXION_DEG;
+    const centerX = source === 'heel-midpoint' ? h?.x ?? null : f ? (f.shoulderMid.x + f.hipMid.x) / 2 : null;
+    const baseline = anchor.update({ timeMs: s.sourceTimeMs, heel: h, hipWidthPx: f?.hipWidth ?? null, centerX, standing });
+    const raw = gated(measureFrontal(s.landmarks, width, height, baseline.x), s);
+    if (usable && standing) standingBuf = [...standingBuf.filter(b => s.sourceTimeMs - b.timeMs <= 1000), { timeMs: s.sourceTimeMs, m: raw }];
+    if (baseline.state !== 'locked') { neutral = null; lockedAt = null; }
+    else if (baseline.lockedAtMs !== lockedAt) { lockedAt = baseline.lockedAtMs; neutral = neutralFrom(standingBuf.map(b => b.m)); }
+    const metrics = relative(raw, neutral);
     const cues = tracker.update(s.sourceTimeMs, usable ? instantCues(metrics, knee) : []);
-    return { sampleIndex: s.sampleIndex, baseline, metrics, cues };
+    return { sampleIndex: s.sampleIndex, baseline, metrics, neutral, cues };
   });
+}
+
+/** Mean standing tilt per metric; a metric without any valid standing value stays uncalibrated. */
+function neutralFrom(ms: FrontalMetrics[]): Neutral | null {
+  const out = {} as Neutral;
+  for (const k of TILTS) {
+    const vals = ms.map(m => m[k]).filter(v => v.valid).map(v => v.value!);
+    if (!vals.length) return null;
+    out[k] = vals.reduce((a, b) => a + b, 0) / vals.length;
+  }
+  return out;
+}
+function relative(m: FrontalMetrics, n: Neutral | null): FrontalMetrics {
+  const out = { ...m };
+  for (const k of TILTS) {
+    const v = m[k];
+    out[k] = !v.valid ? v : n === null ? blocked('baseline-pending') : { valid: true, value: v.value - n[k], invalidReasons: [] };
+  }
+  return out;
 }

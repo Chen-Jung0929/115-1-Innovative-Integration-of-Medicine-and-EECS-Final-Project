@@ -45,4 +45,17 @@ describe('heel baseline lock (handout p.5)', () => {
     const s = [0, 1, 2, 3, 4, 5].map(i => a.update(obs(i * 200, i % 2 ? 512 : 500, 50)));
     expect(s.every(x => x.state === 'searching')).toBe(true);
   });
+  it('places the line at centerX (e.g. standing trunk midline) while heels decide stillness', () => {
+    const a = createBaselineAnchor();
+    const s = [0, 1, 2, 3, 4].map(i => a.update({ ...obs(i * 200, 500), centerX: 470 + (i % 2) }));
+    expect(s[4]!.state).toBe('locked'); expect(s[4]!.x).toBeCloseTo(470.4, 6);
+  });
+  it('only standing observations can establish the lock', () => {
+    const a = createBaselineAnchor();
+    const squatting = [0, 1, 2, 3, 4, 5].map(i => a.update({ ...obs(i * 200, 500), standing: false }));
+    expect(squatting.every(x => x.state === 'searching')).toBe(true);
+    // A squat in the middle of the window restarts it.
+    a.update(obs(1200, 500)); a.update(obs(1400, 500)); a.update({ ...obs(1600, 500), standing: false });
+    expect([1800, 2000, 2200, 2400, 2600].map(t => a.update(obs(t, 500)).state)).toEqual(['searching', 'searching', 'searching', 'searching', 'locked']);
+  });
 });

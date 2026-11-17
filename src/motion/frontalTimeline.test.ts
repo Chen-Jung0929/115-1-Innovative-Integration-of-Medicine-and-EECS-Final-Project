@@ -33,4 +33,35 @@ describe('frontal timeline over analysed samples', () => {
     const t = frontalTimeline([at(1, pose()), at(0, pose())], 100, 100);
     expect(t.map(f => f.sampleIndex)).toEqual([0, 1]);
   });
+  it('default baseline = standing trunk midline, not the heel midpoint (asymmetric stance)', () => {
+    const asym = () => { const p = pose(); p[29] = v(.46, .95); p[30] = v(.62, .95); return p; }; // heels centre at .54
+    const samples = [0, 1, 2, 3, 4, 5].map(i => at(i, asym()));
+    const trunk = frontalTimeline(samples, 100, 100);
+    expect(trunk[5]!.baseline.x).toBeCloseTo(50, 8);
+    expect(trunk[5]!.cues).toEqual([]);
+    const heel = frontalTimeline(samples, 100, 100, 'heel-midpoint');
+    expect(heel[5]!.baseline.x).toBeCloseTo(54, 8);
+  });
+  it('does not calibrate while squatting', () => {
+    const bent = { valid: true as const, rawAngleDeg: 120, invalidReasons: [] as [] };
+    const t = frontalTimeline([0, 1, 2, 3, 4, 5].map(i => at(i, pose(), { left: bent, right: bent })), 100, 100);
+    expect(t.every(f => f.baseline.state === 'searching')).toBe(true);
+  });
+  it('an oblique view is not judged (frontal checks and knee check N/A)', () => {
+    const oblique = () => { const p = pose(); p[11] = v(.45, .2); p[12] = v(.55, .2); return p; }; // shoulder/torso = 0.33
+    const t = frontalTimeline([0, 1, 2, 3, 4, 5].map(i => at(i, oblique())), 100, 100);
+    expect(t[5]!.metrics.trunkSide.invalidReasons).toEqual(['unsupported-view']);
+    expect(t[5]!.metrics.kneeToe.left.invalidReasons).toEqual(['unsupported-view']);
+    expect(t[5]!.cues).toEqual([]);
+  });
+  it('tilts are relative to the standing calibration (natural shoulder tilt / rolled camera is not a fault)', () => {
+    const tilted = (extra: number) => { const p = pose(); p[11] = v(.4, .2 + .2 * Math.tan((6 + extra) * Math.PI / 180)); return p; };
+    const t = frontalTimeline([0, 1, 2, 3, 4, 5, 6].map(i => at(i, tilted(0))).concat([7, 8, 9].map(i => at(i, tilted(7)))), 100, 100);
+    expect(t[3]!.metrics.shoulderTilt.invalidReasons).toEqual(['baseline-pending']);
+    expect(t[4]!.neutral!.shoulderTilt).toBeCloseTo(6, 6);
+    expect(t[6]!.metrics.shoulderTilt.value).toBeCloseTo(0, 6);
+    expect(t[6]!.cues).toEqual([]);
+    expect(t[9]!.metrics.shoulderTilt.value).toBeCloseTo(7, 6);
+    expect(t[9]!.cues.map(c => c.text)).toEqual(['左肩比較低（兩肩不平）']);
+  });
 });

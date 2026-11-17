@@ -1,10 +1,11 @@
 import type { Point } from '../biomechanics/knee';
 
 /**
- * Handout p.5 baseline: the vertical line through the midpoint of both heels. During a squat the
- * heels should not move, so instead of redrawing the line from every (noisy) frame we lock it once
- * the person has stood still, and only move it when the feet clearly move. This keeps the drawn line
- * steady while the body moves. Pure state machine; video and camera feed it the same way.
+ * Baseline lock. The heels decide WHEN: the person must stand still (heel midpoint stable for about
+ * a second) and the line only moves again when the feet clearly move. `centerX` decides WHERE: the
+ * caller passes either the heel midpoint (handout p.5 definition) or the standing trunk midline.
+ * Locking instead of redrawing every (noisy) frame keeps the line steady while the body moves.
+ * Pure state machine; video and camera feed it the same way.
  *
  * Distances are in hip widths so the policy does not depend on resolution or camera distance.
  * Values are provisional engineering choices, not PT-reviewed endpoints.
@@ -24,14 +25,23 @@ export const BASELINE_POLICY = {
   lostTimeoutMs: 2000,
 } as const;
 
-export interface BaselineObservation { timeMs: number; heel: Point | null; hipWidthPx: number | null }
+export interface BaselineObservation {
+  timeMs: number;
+  /** Heel midpoint: decides whether the feet are still / have moved. */
+  heel: Point | null;
+  hipWidthPx: number | null;
+  /** Where to put the line once locked (source px). Defaults to the heel midpoint x. */
+  centerX?: number | null;
+  /** Only standing observations may establish a lock (default true). */
+  standing?: boolean;
+}
 
 export type BaselineState =
   | { state: 'searching'; x: null; heelY: null; lockedAtMs: null }
   | { state: 'locked'; x: number; heelY: number; lockedAtMs: number };
 
 const SEARCHING: BaselineState = { state: 'searching', x: null, heelY: null, lockedAtMs: null };
-interface Obs { timeMs: number; x: number; y: number; scale: number }
+interface Obs { timeMs: number; x: number; cx: number; y: number; scale: number }
 
 export function createBaselineAnchor(policy: typeof BASELINE_POLICY = BASELINE_POLICY) {
   let window: Obs[] = [];
@@ -45,7 +55,8 @@ export function createBaselineAnchor(policy: typeof BASELINE_POLICY = BASELINE_P
       if (lastSeenMs !== null && o.timeMs - lastSeenMs > policy.lostTimeoutMs) { current = SEARCHING; window = []; awaySinceMs = null; }
       return current;
     }
-    const obs: Obs = { timeMs: o.timeMs, x: o.heel!.x, y: o.heel!.y, scale: o.hipWidthPx! };
+    const cx = o.centerX ?? o.heel!.x;
+    const obs: Obs = { timeMs: o.timeMs, x: o.heel!.x, cx: Number.isFinite(cx) ? cx : o.heel!.x, y: o.heel!.y, scale: o.hipWidthPx! };
     lastSeenMs = o.timeMs;
 
     if (current.state === 'locked') {
@@ -56,6 +67,8 @@ export function createBaselineAnchor(policy: typeof BASELINE_POLICY = BASELINE_P
       current = SEARCHING; window = []; awaySinceMs = null;
     }
 
+    // Not standing (e.g. already squatting): cannot define the neutral line; wait for standing.
+    if (o.standing === false || o.centerX === null) { window = []; return current; }
     window.push(obs);
     window = window.filter(w => obs.timeMs - w.timeMs <= policy.lockWindowMs);
     // Drop older observations until the remaining heel positions agree with each other.
@@ -67,7 +80,7 @@ export function createBaselineAnchor(policy: typeof BASELINE_POLICY = BASELINE_P
     }
     const span = window.length ? obs.timeMs - window[0]!.timeMs : 0;
     if (window.length >= policy.minLockSamples && span >= policy.lockWindowMs * 0.75) {
-      const x = window.reduce((s, w) => s + w.x, 0) / window.length;
+      const x = window.reduce((s, w) => s + w.cx, 0) / window.length;
       const heelY = window.reduce((s, w) => s + w.y, 0) / window.length;
       current = { state: 'locked', x, heelY, lockedAtMs: obs.timeMs };
       window = [];

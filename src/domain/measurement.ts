@@ -4,7 +4,9 @@ export type MeasurementSpace = 'image-plane-2d' | 'model-estimated-3d';
 export type InvalidReason =
   | 'missing-landmark' | 'low-confidence' | 'non-finite'
   | 'target-lost' | 'identity-uncertain' | 'out-of-range-confidence' | 'degenerate-geometry' | 'out-of-frame' | 'unsupported-view'
-  | 'joint-landmark-invalid' | 'joint-temporal-discontinuity' | 'joint-recovery-pending';
+  | 'joint-landmark-invalid' | 'joint-temporal-discontinuity' | 'joint-recovery-pending'
+  /** Frontal checks: no standing calibration / locked baseline yet. */
+  | 'baseline-pending';
 
 export type AngleValue =
   | { valid: true; rawAngleDeg: number; invalidReasons: readonly [] }

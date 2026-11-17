@@ -20,8 +20,11 @@ export const FRONTAL_POLICY = {
   pelvisDefinition: 'hip-joint-line-tilt-image-v1',
   /** Hip separation below this means a side view or a collapsed pose. */
   minHipWidthPx: 8,
-  /** Shoulder width / torso length below this is treated as not a frontal view. */
-  minFrontalShoulderRatio: 0.35,
+  /**
+   * Shoulder width / torso length below this is treated as not a frontal view. Adults facing the
+   * camera are roughly 0.7–0.9; about 40° of body rotation drops below 0.55. Provisional.
+   */
+  minFrontalShoulderRatio: 0.55,
 } as const;
 
 /** MediaPipe indices used to draw and measure the handout p.5 landmarks. */
@@ -96,9 +99,10 @@ export function measureFrontal(landmarks: readonly Landmark[], width: number, he
   const f = frontalFrame(landmarks, width, height);
   if (typeof f === 'string') {
     const no = bad(f);
-    return { head: no, shoulderTilt: no, trunkSide: no, shift: no, pelvisTilt: no, kneeToe };
+    // An oblique/side view also invalidates the frontal knee check.
+    return { head: no, shoulderTilt: no, trunkSide: no, shift: no, pelvisTilt: no, kneeToe: f === 'unsupported-view' ? { left: no, right: no } : kneeToe };
   }
-  const fromBaseline = (x: number) => baselineX === null || !Number.isFinite(baselineX) ? bad('missing-landmark') : ok((x - baselineX) * f.leftDir / f.hipWidth);
+  const fromBaseline = (x: number) => baselineX === null || !Number.isFinite(baselineX) ? bad('baseline-pending') : ok((x - baselineX) * f.leftDir / f.hipWidth);
   const head = headPoint(landmarks, width, height);
   const up = f.hipMid.y - f.shoulderMid.y;
   return {
