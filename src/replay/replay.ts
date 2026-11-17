@@ -6,7 +6,8 @@ import {createFullFrameIdentity,IDENTITY_POLICY,SINGLE_RECOVERY_POLICY} from '..
 import {createTargetTracker} from '../tracking/target';
 import {createFullFrameIdentity as legacyIdentity,IDENTITY_POLICY as LEGACY_IDENTITY_POLICY} from '../tracking/legacy/identity';
 import {createTargetTracker as legacyTarget,TRACKING_POLICY as LEGACY_TRACKING_POLICY} from '../tracking/legacy/target';
-import {gateAngle} from '../tracking/gate';
+import {gateAngle,gatePosture} from '../tracking/gate';
+import {measurePosture} from '../biomechanics/posture';
 import {applyReview} from '../validation/targetMetrics';
 import {JOINT_POLICY,TRACKING_POLICY} from '../tracking/policy';
 import pkg from '../../package.json';
@@ -52,8 +53,9 @@ export function replaySession(original:Session,strategy:ReplayStrategy):ReplayRe
     const newlyAcceptedSides=(['left','right'] as const).filter(side=>automaticAngles[side].valid&&!saved.automaticAngles[side].valid);
     changes.push({sampleIndex:saved.sampleIndex,sourceTimeMs:saved.sourceTimeMs,newlyAcceptedSides:[...newlyAcceptedSides],sameEvaluatedLandmarks:same,
       humanAssessment:!same||!saved.review?'not-adjudicated':saved.review.label==='correct-target'?'correct-target-only':saved.review.label==='uncertain'?'manual-uncertain':'manual-wrong-or-mixed',originalHumanLabel:saved.review?.label??null});
-    const {review:_review,...base}=structuredClone(saved);
-    const sample:Sample={...base,tracking,landmarks,rawAngles,automaticAngles,...automaticAngles,
+    const {review:_review,posture:_posture,...base}=structuredClone(saved);
+    const rawPosture=measurePosture(landmarks,w,h),automaticPosture=gatePosture(rawPosture,tracking);
+    const sample:Sample={...base,tracking,landmarks,rawAngles,automaticAngles,...automaticAngles,posture:{raw:rawPosture,automatic:automaticPosture,final:automaticPosture},
       subjectDecision:result?.decision??{selectedIndex:tracking.accepted?0:null,proposedIndex:candidates.length===1?0:null,reason:'roi-primary-single-candidate'}};
     return applyReview(sample,same?saved.review:undefined);
   });

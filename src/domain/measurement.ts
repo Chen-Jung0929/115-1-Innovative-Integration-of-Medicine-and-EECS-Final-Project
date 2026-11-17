@@ -10,6 +10,19 @@ export type AngleValue =
   | { valid: true; rawAngleDeg: number; invalidReasons: readonly [] }
   | { valid: false; rawAngleDeg: null; invalidReasons: readonly [InvalidReason, ...InvalidReason[]] };
 
+/** Non-angle scalar (e.g. a width ratio); same validity contract as AngleValue. */
+export type ScalarValue =
+  | { valid: true; value: number; invalidReasons: readonly [] }
+  | { valid: false; value: null; invalidReasons: readonly [InvalidReason, ...InvalidReason[]] };
+
+/** Provisional squat posture metrics, all 2D image-plane geometry (see biomechanics/posture.ts). */
+export interface PostureSet {
+  hip: { left: AngleValue; right: AngleValue };
+  trunkLean: AngleValue;
+  /** Knee offset from the toe plumb line in hip widths; + = medial. */
+  kneeToe: { left: ScalarValue; right: ScalarValue };
+}
+
 export interface AnalysisMetadata {
   schemaVersion: string;
   sessionId: string;

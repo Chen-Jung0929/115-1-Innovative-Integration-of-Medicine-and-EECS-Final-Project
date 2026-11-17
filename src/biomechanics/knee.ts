@@ -14,18 +14,32 @@ export function geometricAngle(a: Point, b: Point, c: Point): AngleValue {
   return { valid: true, rawAngleDeg: Math.acos(Math.max(-1, Math.min(1, cosine))) * 180 / Math.PI, invalidReasons: [] };
 }
 
-export function kneeAngle(landmarks: readonly Landmark[], side: AnatomicalSide, width: number, height: number): AngleValue {
-  if (![width, height].every(v => Number.isFinite(v) && v > 0)) return invalid('non-finite');
+/** Shared landmark screen: normalized point -> source pixels, or the first invalid reason. */
+export function sourcePoint(landmarks: readonly Landmark[], index: number, width: number, height: number): Point | InvalidReason {
+  const p = landmarks[index];
+  if (!p) return 'missing-landmark';
+  if (![p.x, p.y, p.visibility, p.presence ?? 1].every(Number.isFinite)) return 'non-finite';
+  if (p.visibility < 0 || p.visibility > 1 || (p.presence !== undefined && (p.presence < 0 || p.presence > 1))) return 'out-of-range-confidence';
+  if (p.visibility < 0.5 || (p.presence !== undefined && p.presence < 0.5)) return 'low-confidence';
+  if (p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return 'out-of-frame';
+  return { x: p.x * width, y: p.y * height };
+}
+
+/** Screens every index in order; returns pixel points or the first invalid reason. */
+export function sourcePoints(landmarks: readonly Landmark[], indices: readonly number[], width: number, height: number): Point[] | InvalidReason {
+  if (![width, height].every(v => Number.isFinite(v) && v > 0)) return 'non-finite';
   const points: Point[] = [];
-  for (const index of KNEE_INDICES[side]) {
-    const p = landmarks[index];
-    if (!p) return invalid('missing-landmark');
-    if (![p.x, p.y, p.visibility, p.presence ?? 1].every(Number.isFinite)) return invalid('non-finite');
-    if (p.visibility < 0 || p.visibility > 1 || (p.presence !== undefined && (p.presence < 0 || p.presence > 1))) return invalid('out-of-range-confidence');
-    if (p.visibility < 0.5 || (p.presence !== undefined && p.presence < 0.5)) return invalid('low-confidence');
-    if (p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return invalid('out-of-frame');
-    points.push({ x: p.x * width, y: p.y * height });
+  for (const index of indices) {
+    const p = sourcePoint(landmarks, index, width, height);
+    if (typeof p === 'string') return p;
+    points.push(p);
   }
+  return points;
+}
+
+export function kneeAngle(landmarks: readonly Landmark[], side: AnatomicalSide, width: number, height: number): AngleValue {
+  const points = sourcePoints(landmarks, KNEE_INDICES[side], width, height);
+  if (typeof points === 'string') return invalid(points);
   return geometricAngle(points[0]!, points[1]!, points[2]!);
 }
 
