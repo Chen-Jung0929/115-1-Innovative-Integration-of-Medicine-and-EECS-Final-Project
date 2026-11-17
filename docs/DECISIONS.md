@@ -74,3 +74,10 @@
 - ADR-042：新增髖角（hip-image-interior-v1）、上身（軀幹）前傾（trunk-lean-image-vertical-v1）、膝蓋對腳尖線（knee-toe-plumb-offset-hip-width-image-v1，依講義 p.11 膝蓋應在腳尖／第二趾鉛垂線上或微外側）三項 2D 影像平面指標，皆為暫定定義、無門檻，待 PT 確認；不宣稱臨床角度。
 - ADR-043：姿勢指標與膝角共用同一套 landmark 篩檢（knee.ts sourcePoint）與 subject gating；髖角與膝蓋對腳尖線跟隨同側 joint QC，軀幹只看 subject。raw／automatic／人工覆核後 final 分開保存於 sample.posture（schema10，選填欄位，舊 session 不受影響）。
 - ADR-044：CSV 每筆取樣在兩列膝之後加 hip 左右、trunk_lean（midline）、knee_toe_offset 左右；非角度值不放入角度欄，改用 metric_value／metric_unit（hip-width）／ungated_metric_value。
+
+## 醫學組正面檢查（第二版） — 2026-11-17
+
+- ADR-048：依 Movement analysis 講義 p.5，基準線定義為「通過兩腳跟中點（MediaPipe 29/30）的畫面垂直線」（heel-midpoint-image-vertical-v1）。為避免線隨每格點位雜訊晃動，以狀態機鎖定（heel-baseline-lock-v1）：腳跟在 1 秒內範圍 ≤ 0.15 個骨盆寬才鎖定，偏離 > 0.35 個骨盆寬持續 ≥ 0.6 秒才重新搜尋，無觀測 > 2 秒解除。皆為工程暫定值。
+- ADR-049：正面指標（squat-frontal-image-v1）：頭（眉心≈兩眼中點，否則鼻子）與骨盆中點相對基準線的水平距離（骨盆寬）、肩線與髖線傾斜角、軀幹（髖中點→肩中點）與畫面垂直的側傾角；正負號以個案解剖左側為 +，與鏡像無關。肩寬／軀幹長 < 0.35 判 unsupported-view（非正面）。2D 影像平面幾何，不是臨床角度。
+- ADR-050：提示（squat-frontal-cues-v1）門檻全為暫定、待醫學組確認：頭 0.35 骨盆寬、肩 5°、軀幹 8°、重心 0.25 骨盆寬、骨盆 5°、膝對腳尖 0.45 骨盆寬（膝屈曲 proxy ≥ 30° 才判斷）。同方向的頭偏／肩不平歸因於軀幹側傾並合併為一則（依講義錯誤示範的寫法）；持續 ≥ 200 ms 才顯示，最多 2 則。
+- ADR-051：正面檢查在顯示時由已分析取樣即時推導（motion/frontalTimeline.ts），不寫入 session、CSV 或 schema，schema 維持 10；只使用身分通過且未被人工否決的取樣。之後相機模式需呼叫同一組純函式（baseline、measureFrontal、instantCues、createCueTracker）。

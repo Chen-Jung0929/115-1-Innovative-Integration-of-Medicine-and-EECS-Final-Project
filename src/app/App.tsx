@@ -3,7 +3,7 @@ import {DEFAULT_PIPELINE,PIPELINE_NAMES,type PipelineId} from '../domain/pipelin
 import {comparePipelines,sha256File} from '../motion/compare';
 import type {ComparisonBundle} from '../validation/comparison';
 import {ComparisonPanel} from '../validation/ComparisonPanel';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Session } from '../domain/analysis';
 import { MODEL_URL, PROJECT_MODEL_URL } from '../pose/mediapipe';
 import { checkFile, loadVideo, seekFrame, observePresentedFrame } from '../input/video';
@@ -22,6 +22,9 @@ import { applyReview } from '../validation/targetMetrics';
 import { AngleChart, CHART_METRICS, type ChartMetric } from '../visualization/AngleChart';
 import { hipFlexionProxy } from '../biomechanics/posture';
 import type { AngleValue, ScalarValue } from '../domain/measurement';
+import { frontalTimeline } from '../motion/frontalTimeline';
+import { FrontalOverlay, FrontalCuePanel } from '../visualization/FrontalOverlay';
+import { CUE_POLICY } from '../motion/frontalCues';
 
 export function App() {
   const [pipeline,setPipeline]=useState<PipelineId>(DEFAULT_PIPELINE.id);
@@ -59,6 +62,7 @@ export function App() {
   const [diagnostic,setDiagnostic]=useState(false);
   const [sampleIndex, setSampleIndex] = useState(0);
   const [chartMetric,setChartMetric]=useState<ChartMetric>('knee');
+  const [frontalView,setFrontalView]=useState(true);
 
   useEffect(() => {
     const v = video.current!;
@@ -166,6 +170,8 @@ export function App() {
     }catch(e){setError(message(e));}
   }
   const sample = session && !seeking ? (matchingSample(session.samples, timeMs) ?? (video.current?.paused ? session.samples.find(s=>s.decode.timeBasis==='seek-position-estimate' && Math.abs(s.requestedTimeMs-video.current!.currentTime*1000)<.001):undefined)) : undefined;
+  const frontal = useMemo(() => session && info ? frontalTimeline(session.samples, info.width, info.height) : [], [session, info]);
+  const frontalFrame = sample ? frontal.find(f => f.sampleIndex === sample.sampleIndex) : undefined;
   const pct = (s: 'left' | 'right') => { const value = session ? coverage(session.samples, s) : null; return value === null ? 'N/A' : `${(value * 100).toFixed(1)}%`; };
 
   return <main>
@@ -214,6 +220,7 @@ export function App() {
       <button onClick={()=>downloadFile(`archived-${storedSession.metadata.sessionId}.json`,JSON.stringify(storedSession,null,2),'application/json')}>下載舊分析 JSON（原設定）</button></aside>}
     {history.length>0 && <details><summary>先前分析存檔（不修改原始 session）</summary>{history.map(s=><p key={s.metadata.sessionId}><button onClick={()=>downloadFile(`archived-${s.metadata.sessionId}.json`,JSON.stringify(s,null,2),'application/json')}>下載 {s.metadata.sessionId}</button></p>)}</details>}
     <section aria-labelledby="review-title"><h2 id="review-title">2. 影格與角度檢查</h2>
+      <label className="inline"><input type="checkbox" checked={frontalView} onChange={e=>setFrontalView(e.target.checked)} />醫學組正面檢查（點位、基準線、提示；依 Movement analysis 講義 p.5–p.11）</label>
       <label>顯示側別<select value={side} onChange={e => setSide(e.target.value as typeof side)}><option value="both">左右膝 Both</option><option value="left">左膝 Left Knee</option><option value="right">右膝 Right Knee</option></select></label>
       {sample?.tracking.state==='MANUAL_REVIEW_REQUIRED'&&<aside>人物一致性無法確認，量測已暫停。請確認單人、完整入鏡後重新分析；必要時可在實驗區人工校正。局部膝部缺點不會單獨造成這個鎖定。</aside>}
       <div className="workspace"><div><div className="video-stage"><video ref={video} controls={!selecting} playsInline onPlay={()=>{if(selecting)video.current?.pause();}} onSeeking={() => setSeeking(true)} onSeeked={() => {
@@ -224,6 +231,7 @@ export function App() {
         const known = session?.samples.find(s => Math.abs(s.requestedTimeMs - v.currentTime * 1000) <= 1);
         setTimeMs(known?.sourceTimeMs ?? v.currentTime * 1000); setSeeking(false);
       }} onError={() => { if (info) { setError('影片播放解碼失敗，請改用 H.264 MP4。'); setSession(null); } }} /><Overlay sample={sample} width={info?.width ?? 640} height={info?.height ?? 360} side={side} diagnostic={diagnostic} />
+      {frontalView && session && !selecting && <><FrontalOverlay sample={sample} frame={frontalFrame} width={info?.width ?? 640} height={info?.height ?? 360} /><FrontalCuePanel frame={frontalFrame} hasSample={!!sample} /></>}
       {selecting && info && !seeking && <RoiSelector width={info.width} height={info.height} roi={draft} onChange={setDraft} drawNew={drawNew} onDrawEnd={()=>setDrawNew(false)} />}
       {experiments && selection && info && !selecting && <svg className="roi-border" viewBox={`0 0 ${info.width} ${info.height}`} aria-label="受測者 ROI 範圍"><rect {...(pipeline==='roi-crop'?(sample?.roi??displayedRoi(session?.samples??[],timeMs)??roiAt(selection,timeMs,info.width,info.height).roi):(sample?.targetReferenceRoi??selection.roi))} fill="none" stroke="#ffda57" strokeWidth={Math.max(2,info.width/250)} /></svg>}</div>
         <p>來源影格時間：{(timeMs/1000).toFixed(3)} 秒。{sample ? `對應取樣 #${sample.sampleIndex}（${sample.decode.timeBasis}）` : '此影格沒有對應分析結果，骨架與角度不顯示。'}</p>
@@ -235,6 +243,7 @@ export function App() {
         })}
       </div></div>
       <p>定義：髖–膝–踝於膝點的影像平面內角（0–180°）。暫定屈曲 proxy = 180° − 內角；不是已確認的臨床屈曲角。左右為人體解剖側，影片不鏡像。</p>
+      {frontalView && <p className="frontal-note">正面檢查說明：紅色直線是基準線（通過兩腳跟中點的垂直線，站穩約 1 秒後固定，腳移動才重新定位）。黃線為兩肩線、骨盆線（以髖關節代替 ASIS）與過腳尖的鉛垂線，藍色虛線為軀幹；偏離時變紅並出現提示。左右指個案本身的左右。提示門檻為暫定值（頭 {CUE_POLICY.headHipWidths} 個骨盆寬、肩 {CUE_POLICY.shoulderDeg}°、軀幹 {CUE_POLICY.trunkDeg}°、骨盆 {CUE_POLICY.pelvisDeg}°、膝 {CUE_POLICY.kneeToeHipWidths} 個骨盆寬），待醫學組確認；只適用正面拍攝，皆為 2D 影像平面幾何。</p>}
       <h3>深蹲姿勢指標（暫定，待物理治療師確認）</h3>
       <div className="posture-measurements">
         {(['left','right'] as const).filter(s => side === 'both' || side === s).map(s => {

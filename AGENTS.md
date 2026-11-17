@@ -4,6 +4,7 @@
 Build the NTU 115-1 Real-Time Joint Motion Analysis System as an academic PoC.
 Read README.md, docs/PROJECT_SPEC.md, docs/DECISIONS.md and the latest iteration update before work.
 The current authorized task is Dataset Demo V0. Keep clinical definitions provisional and do not start camera or clinical analysis features.
+V2 (authorized 2026-11-17 by the team, iteration 15): frontal checks from the Movement analysis handout — p.5 landmarks, heel-midpoint baseline, provisional prompts. Thresholds stay provisional until the PT group confirms them; prompts are derived at display time, not persisted.
 Use the existing checkout. Do not create worktrees unless explicitly requested.
 
 ## Engineering rules
