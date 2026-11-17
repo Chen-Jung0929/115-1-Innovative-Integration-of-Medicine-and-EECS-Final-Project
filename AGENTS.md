@@ -57,8 +57,15 @@ Use the existing checkout. Do not create worktrees unless explicitly requested.
 - No fabricated human results or claims that cropping hypotheses are confirmed. Preserve raw/auto/manual results per pipeline.
 
 ## QC recovery and replay scope
-- Read docs/QC_REPLAY.md before changing QC or recovery. No new UI, motion types or camera features in v0.5.1.
+- Read docs/QC_REPLAY.md before changing QC or recovery. The v0.5.1 restriction on UI applied to that iteration; v0.6 explicitly authorizes simplifying the main UI. Keep camera and new motion types out of scope.
 - A local knee failure must not alone set a permanent subject identity lock. Keep torso identity, side observation and temporal evidence separate.
 - Never auto-clear ambiguity/torso-jump/manual identity locks. Joint recovery needs consecutive reliable observations; do not interpolate angles.
 - src/tracking/legacy is the frozen v0.5.0 replay baseline; do not tune it. Replay uses saved candidates/ROIs and is not a new detector run.
 - Always report newly accepted samples and manual-label applicability. Increased validity/coverage is not accuracy. Preserve original research files.
+
+## v0.6 primary scope
+- Default to Full Frame + Single Pose in both UI and analyze. A valid upload must not require ROI confirmation.
+- Mark generated whole-frame references controlled-single-default, never manual identity annotations; keep schema/version provenance.
+- ROI, Multi-Pose and comparisons are experimental, collapsed by default; preserve their regression tests without expanding algorithms.
+- Read docs/SINGLE_SUBJECT_DEMO.md. Local anomalies must remain side-local and recover conservatively; ambiguity/manual identity locks still reject.
+- Separate software verification from real single-person Squat acceptance. Do not declare human stability from synthetic or mock tests.

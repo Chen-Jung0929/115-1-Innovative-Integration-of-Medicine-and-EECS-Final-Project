@@ -59,6 +59,7 @@ it('reads session or comparison JSON and rejects missing candidates, duplicate t
  const s=syntheticResearch();expect(readReplayInput(s)).toHaveLength(1);expect(readReplayInput({bundle:{entries:[{session:s},{session:null,error:'synthetic'}]}})).toHaveLength(1);
  const missing=structuredClone(s) as any;delete missing.samples[0].candidates;expect(()=>readReplayInput(missing)).toThrow('raw candidates');
  const duplicate=structuredClone(s);duplicate.samples[1]!.sourceTimeMs=0;expect(()=>readReplayInput(duplicate)).toThrow('遞增');
+ const current=structuredClone(s);current.metadata.schemaVersion='9';expect(readReplayInput(current)).toHaveLength(1);
  const newer=structuredClone(s);newer.metadata.schemaVersion='8';newer.trackingPolicy={version:'identity-only-recovery-v3'};expect(replaySession(newer,'frozen-v0.5.0').session.trackingPolicy.version).toBe('roi-temporal-recovery-v2');
  const unknown=structuredClone(s);unknown.metadata.schemaVersion='6';expect(()=>readReplayInput(unknown)).toThrow('schema');
  const noModel=structuredClone(s) as any;delete noModel.metadata.model;expect(()=>readReplayInput(noModel)).toThrow('provenance');

@@ -3,6 +3,12 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+async function openResearchTools(page:Page) {
+  for(const name of ['實驗性功能（ROI／多人／A/B/C 比較）','研究診斷與人工檢查']){
+    const summary=page.getByText(name,{exact:true});
+    if(!await summary.evaluate(el=>(el.parentElement as HTMLDetailsElement).open))await summary.click();
+  }
+}
 async function selectRoi(page:Page) {
   await page.getByLabel('分析管線',{exact:true}).selectOption('roi-crop');
   await page.getByRole('button',{name:'框選受測者',exact:true}).click();
@@ -20,16 +26,19 @@ async function mockPose(page:Page) {
       let count=0,previous=-1;return {close(){},detect(canvas,time){
       if(time<=previous)throw new Error('non-monotonic timestamp'); previous=time;
       const i=count++,scenario=new URLSearchParams(location.search).get('case');
-      if(scenario==='full-dimensions'||scenario==='multi-cross'){
+      if(scenario==='full-dimensions'||scenario==='multi-cross'||scenario?.startsWith('single-')||scenario==='initial-missing'){
+        if(numPoses!==1&&scenario!=='full-dimensions'&&scenario!=='multi-cross')throw new Error('primary flow changed candidate count');
         if(canvas.width!==320||canvas.height!==180)throw new Error('full-frame input was cropped');
         const ctx=canvas.getContext('2d'),left=ctx.getImageData(10,10,1,1).data,right=ctx.getImageData(310,10,1,1).data;
         if(left[0]<200||right[2]<200)throw new Error('outside-reference pixels missing');
       }
-      if(i===1&&scenario==='lost')return [];
+      if(i===1&&(scenario==='lost'||scenario==='main-loss')||i===0&&scenario==='initial-missing')return [];
       const p=Array.from({length:33},()=>({x:.5,y:.4,visibility:1}));
       for(const [n,x,y]of [[11,.4,.2],[12,.6,.2],[23,.4,.5],[24,.6,.5],[25,.4,.7],[26,.6,.7],[27,.4,.9],[28,.6,.9]])p[n]={x,y,visibility:1};
       if(i===1&&scenario==='switch')p.forEach(p=>p.x+=.3);
       if(i===1&&scenario==='mixed')p[25].y=.51;
+      if(i===1&&scenario==='single-confidence')p[25].visibility=.1;
+      if(i===1&&scenario==='single-temporal')p[25].y=.57;
       if(scenario==='adaptive'&&numPoses===1)p.forEach(p=>p.x+=i*.02);
       if(numPoses===2&&scenario==='adaptive-ambiguous')return [p,p.map(p=>({...p,x:p.x+.04}))];
       if(i===1&&!scenario){p[25].visibility=.1;p[26].visibility=.1;}
@@ -55,7 +64,7 @@ test.afterAll(() => rmSync(folder, { recursive: true, force: true }));
 test('real browser decodes an MP4, seeks deterministically and reports corrupted uploads', async ({ page }) => {
   const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
   await page.goto('/');
-  await page.getByLabel('MP4 影片').setInputFiles(synthetic); await selectRoi(page);
+  await page.getByLabel('MP4 影片').setInputFiles(synthetic);await openResearchTools(page); await selectRoi(page);
   await expect(page.locator('.file-info')).toContainText('320 × 180');
   const result = await page.evaluate(async () => {
     // Browser test imports the real source decoder, not a mocked video API.
@@ -78,7 +87,7 @@ test('real browser decodes an MP4, seeks deterministically and reports corrupted
 
 test('model network failure is explicit and does not produce results', async ({ page }) => {
   await page.route('https://storage.googleapis.com/**', route => route.fulfill({ status: 403, body: 'blocked for network failure test' }));
-  await page.goto('/'); await page.getByLabel('MP4 影片').setInputFiles(synthetic); await selectRoi(page);
+  await page.goto('/'); await page.getByLabel('MP4 影片').setInputFiles(synthetic);await openResearchTools(page); await selectRoi(page);
   await page.getByText('模型設定與資料隱私').click();
   await page.getByLabel('本機模型不存在時').check();
   await page.getByRole('button', { name: '開始分析' }).click();
@@ -91,7 +100,7 @@ test('synthetic pose adapter: pipeline, gaps, chart, CSV, reanalysis and selecti
   await mockPose(page);
   const errors: string[]=[]; page.on('pageerror', e=>errors.push(e.message));
   const outgoing: string[]=[]; page.on('request', r => { if (!new URL(r.url()).hostname.match(/^(127\.0\.0\.1|localhost)$/) && !r.url().startsWith('blob:')) outgoing.push(r.url()); });
-  await page.goto('/'); await page.getByLabel('MP4 影片').setInputFiles(synthetic); await selectRoi(page);
+  await page.goto('/'); await page.getByLabel('MP4 影片').setInputFiles(synthetic);await openResearchTools(page); await selectRoi(page);
   await page.getByRole('button', { name:'開始分析' }).click();
   await expect(page.getByText('分析完成；', { exact:false })).toBeVisible();
   await expect(page.getByText('已分析 5 個取樣', { exact:false })).toBeVisible();
@@ -127,7 +136,7 @@ test('synthetic pose adapter: pipeline, gaps, chart, CSV, reanalysis and selecti
 
 test('actual MediaPipe on an approved local human MP4 (requires supplied assets)', async ({ page }) => {
   test.skip(!process.env.POSE_MODEL_PATH || !process.env.POSE_VIDEO_PATH, 'No approved model / real-human MP4 provided');
-  await page.goto('/'); await page.getByLabel('MP4 影片').setInputFiles(process.env.POSE_VIDEO_PATH!); await selectRoi(page);
+  await page.goto('/'); await page.getByLabel('MP4 影片').setInputFiles(process.env.POSE_VIDEO_PATH!);
   await page.getByText('模型設定與資料隱私').click();
   await page.getByLabel('本機 .task 模型').setInputFiles(process.env.POSE_MODEL_PATH!);
   await page.getByRole('button',{name:'開始分析'}).click();
@@ -141,7 +150,7 @@ test('actual MediaPipe on an approved local human MP4 (requires supplied assets)
 test('actual MediaPipe adapter loads local WASM and rejects an invalid task model', async ({ page }) => {
   const wasm: string[] = [];
   page.on('response', r => { if (r.url().includes('/mediapipe/wasm/') && r.url().endsWith('.wasm') && r.status() === 200) wasm.push(r.url()); });
-  await page.goto('/'); await page.getByLabel('MP4 影片').setInputFiles(synthetic); await selectRoi(page);
+  await page.goto('/'); await page.getByLabel('MP4 影片').setInputFiles(synthetic);await openResearchTools(page); await selectRoi(page);
   await page.getByText('模型設定與資料隱私').click();
   await page.getByLabel('本機 .task 模型').setInputFiles({name:'invalid.task',mimeType:'application/octet-stream',buffer:Buffer.from('invalid task model')});
   await page.getByRole('button',{name:'開始分析'}).click();
@@ -156,7 +165,7 @@ test('actual MediaPipe adapter loads local WASM and rejects an invalid task mode
 test('missing local model keeps app usable and never downloads without opt-in', async ({ page }) => {
   let remote = 0;
   await page.route('https://storage.googleapis.com/**', route => { remote++; return route.abort(); });
-  await page.goto('/'); await page.getByLabel('MP4 影片').setInputFiles(synthetic); await selectRoi(page);
+  await page.goto('/'); await page.getByLabel('MP4 影片').setInputFiles(synthetic);await openResearchTools(page); await selectRoi(page);
   await page.getByRole('button',{name:'開始分析'}).click();
   await expect(page.getByRole('alert')).toContainText('找不到專案本機模型');
   await expect(page.getByRole('button',{name:'開始分析'})).toBeEnabled();
@@ -167,7 +176,7 @@ test('missing local model keeps app usable and never downloads without opt-in', 
 for(const scenario of ['lost','switch']) {
   test(`synthetic multi-person ${scenario}: reject, retain raw evidence, annotate and reselect`,async({page})=>{
     await mockPose(page);await page.goto(`/?case=${scenario}`);
-    await page.getByLabel('MP4 影片').setInputFiles(synthetic);await selectRoi(page);
+    await page.getByLabel('MP4 影片').setInputFiles(synthetic);await openResearchTools(page);await selectRoi(page);
     await page.getByRole('button',{name:'開始分析',exact:true}).click();
     await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
     await expect(page.locator('.measurements')).toContainText(scenario==='lost'?'40.0%':'20.0%');
@@ -204,7 +213,7 @@ for(const scenario of ['lost','switch']) {
 }
 
 test('human wrong-target annotation suppresses final CSV validity but counts auto false-valid',async({page})=>{
- await mockPose(page);await page.goto('/?case=human-review');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await selectRoi(page);
+ await mockPose(page);await page.goto('/?case=human-review');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await openResearchTools(page);await selectRoi(page);
  await page.getByRole('button',{name:'開始分析',exact:true}).click();await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
  await page.getByLabel('已分析取樣',{exact:true}).fill('2');
  await page.getByLabel('人工人物判斷').selectOption('wrong-target');await page.getByLabel('人工人物代碼',{exact:false}).fill('person-B');
@@ -220,9 +229,10 @@ test('human wrong-target annotation suppresses final CSV validity but counts aut
 });
 
 test('manual drag selects ROI in original video pixels and requires confirmation',async({page})=>{
- await page.goto('/');await page.getByLabel('MP4 影片').setInputFiles(synthetic);
- await expect(page.getByRole('button',{name:'開始分析',exact:true})).toBeDisabled();
+ await page.goto('/');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await openResearchTools(page);
+ await expect(page.getByRole('button',{name:'開始分析',exact:true})).toBeEnabled();
  await page.getByRole('button',{name:'框選受測者',exact:true}).click();
+ await expect(page.getByRole('button',{name:'開始分析',exact:true})).toBeDisabled();
  const selector=page.getByLabel('編輯受測者 ROI',{exact:true});await expect(selector).toBeVisible();await selector.scrollIntoViewIfNeeded();
  const bounds=(await selector.boundingBox())!;
  await page.mouse.move(bounds.x+bounds.width*.2,bounds.y+bounds.height*.1);await page.mouse.down();
@@ -234,7 +244,7 @@ test('manual drag selects ROI in original video pixels and requires confirmation
 
 
 test('decoder handles repeated zero and paused frame callbacks that never arrive',async({page})=>{
- await page.goto('/');await page.getByLabel('MP4 影片').setInputFiles(synthetic);
+ await page.goto('/');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await openResearchTools(page);
  const frames=await page.evaluate(async()=>{
   const {loadVideo,seekFrame,releaseVideo}=await import('/src/input/video.ts');
   const v=document.createElement('video');document.body.append(v);
@@ -249,7 +259,7 @@ test('decoder handles repeated zero and paused frame callbacks that never arrive
 });
 
 test('ROI draft is editable and cancelable; Apply preserves old session and marks it stale',async({page})=>{
- await mockPose(page);await page.goto('/');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await selectRoi(page);
+ await mockPose(page);await page.goto('/');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await openResearchTools(page);await selectRoi(page);
  await page.getByRole('button',{name:'開始分析',exact:true}).click();await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
  const json=page.waitForEvent('download');await page.getByRole('button',{name:/下載研究 JSON/}).click();const first=JSON.parse(readFileSync((await(await json).path())!,'utf8'));
  await page.getByRole('button',{name:'重新選擇受測者／微調 ROI',exact:true}).click();
@@ -272,7 +282,7 @@ test('ROI draft is editable and cancelable; Apply preserves old session and mark
 });
 
 test('manual ROI keyframe reanalysis creates a new version and recovers only at explicit correction',async({page})=>{
- await mockPose(page);await page.goto('/?case=lost');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await selectRoi(page);
+ await mockPose(page);await page.goto('/?case=lost');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await openResearchTools(page);await selectRoi(page);
  await page.getByRole('button',{name:'開始分析',exact:true}).click();await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
  const pending=page.waitForEvent('download');await page.getByRole('button',{name:/下載研究 JSON/}).click();const old=JSON.parse(readFileSync((await(await pending).path())!,'utf8'));
  await page.getByLabel('前往影片時間（秒）',{exact:true}).fill('.4');await page.getByRole('button',{name:'跳轉影片時間',exact:true}).click();
@@ -285,14 +295,14 @@ test('manual ROI keyframe reanalysis creates a new version and recovers only at 
  expect(newer.subjectSelection.keyframes.map((k:{timeMs:number})=>k.timeMs)).toEqual([0,400]);
  expect(newer.samples.map((s:{roi:{width:number}})=>s.roi.width)).toEqual([320,280,240,240,240]);
  expect(newer.samples[1].left.valid).toBe(false);expect(newer.samples[2].left.valid).toBe(true);
- expect(newer.analysisRevision.parentSessionId).toBe(old.metadata.sessionId);expect(newer.subjectSelection.revision).toBe(2);
+ expect(newer.analysisRevision.parentSessionId).toBe(old.metadata.sessionId);expect(newer.subjectSelection.revision).toBe(old.subjectSelection.revision+1);
  expect(old.subjectSelection.keyframes).toHaveLength(1);expect(newer.samples[2].roiUpdateReason).toContain('new-model');
 });
 
 
 for(const scenario of ['adaptive','adaptive-ambiguous','adaptive-search-error']) {
  test(`${scenario}: exports actual per-sample ROI, state and independent full-frame evidence`,async({page})=>{
-  await mockPose(page);await page.goto(`/?case=${scenario}`);await page.getByLabel('MP4 影片').setInputFiles(synthetic);await page.getByLabel('分析管線',{exact:true}).selectOption('roi-crop');
+  await mockPose(page);await page.goto(`/?case=${scenario}`);await page.getByLabel('MP4 影片').setInputFiles(synthetic);await openResearchTools(page);await page.getByLabel('分析管線',{exact:true}).selectOption('roi-crop');
   await page.getByRole('button',{name:'框選受測者',exact:true}).click();
   await page.getByLabel('ROI 方法',{exact:true}).selectOption('adaptive-roi');
   await page.getByLabel('ROI width',{exact:true}).fill('200');await page.getByLabel('ROI x',{exact:true}).fill('80');
@@ -300,7 +310,7 @@ for(const scenario of ['adaptive','adaptive-ambiguous','adaptive-search-error'])
   await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
   const pending=page.waitForEvent('download');await page.getByRole('button',{name:/下載研究 JSON/}).click();
   const result=JSON.parse(readFileSync((await(await pending).path())!,'utf8'));
-  expect(result.metadata.schemaVersion).toBe('8');expect(result.subjectSelection.method).toBe('adaptive-roi');
+  expect(result.metadata.schemaVersion).toBe('9');expect(result.subjectSelection.method).toBe('adaptive-roi');
   expect(result.samples[0].search.numPoses).toBe(2);expect(result.samples[0].roi.width).toBe(200);
   if(scenario==='adaptive'){
    expect(result.samples.some((s:{roi:{x:number}})=>s.roi.x>80)).toBe(true);
@@ -319,7 +329,7 @@ test('upload and ROI editor stay usable when all video-frame callbacks are suppr
   HTMLVideoElement.prototype.requestVideoFrameCallback=()=>1;
   HTMLVideoElement.prototype.cancelVideoFrameCallback=()=>{};
  });
- await mockPose(page);await page.goto('/');await page.getByLabel('MP4 影片').setInputFiles(synthetic);
+ await mockPose(page);await page.goto('/');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await openResearchTools(page);
  await expect(page.getByRole('button',{name:'框選受測者',exact:true})).toBeEnabled();await selectRoi(page);
  await page.getByRole('button',{name:'開始分析',exact:true}).click();await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
  const pending=page.waitForEvent('download');await page.getByRole('button',{name:/下載研究 JSON/}).click();
@@ -331,7 +341,7 @@ test('upload and ROI editor stay usable when all video-frame callbacks are suppr
 
 for(const config of [{id:'full-frame-single',count:1},{id:'full-frame-multi',count:2},{id:'full-frame-multi',count:3}] as const){
  test(`${config.id} ${config.count}: input stays full-frame and candidate order is not identity`,async({page})=>{
-  await mockPose(page);await page.goto('/?case=full-dimensions');await page.getByLabel('MP4 影片').setInputFiles(synthetic);
+  await mockPose(page);await page.goto('/?case=full-dimensions');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await openResearchTools(page);
   await page.getByLabel('分析管線',{exact:true}).selectOption(config.id);
   if(config.count>1){await page.getByText('A/B/C 比較設定',{exact:true}).click();await page.getByLabel('C 的候選數',{exact:true}).selectOption(String(config.count));}
   await page.getByRole('button',{name:'框選受測者',exact:true}).click();await page.getByLabel('ROI width',{exact:true}).fill('120');await page.getByLabel('ROI x',{exact:true}).fill('100');
@@ -351,7 +361,7 @@ for(const config of [{id:'full-frame-single',count:1},{id:'full-frame-multi',cou
 }
 
 test('full-frame multi rejects ambiguous crossings instead of changing the subject',async({page})=>{
- await mockPose(page);await page.goto('/?case=multi-cross');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await page.getByLabel('分析管線',{exact:true}).selectOption('full-frame-multi');
+ await mockPose(page);await page.goto('/?case=multi-cross');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await openResearchTools(page);await page.getByLabel('分析管線',{exact:true}).selectOption('full-frame-multi');
  await page.getByRole('button',{name:'框選受測者',exact:true}).click();await page.getByLabel('ROI width',{exact:true}).fill('120');await page.getByLabel('ROI x',{exact:true}).fill('100');await page.getByRole('button',{name:'確認 ROI（Apply）',exact:true}).click();
  await page.getByRole('button',{name:'開始分析',exact:true}).click();await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
  const pending=page.waitForEvent('download');await page.getByRole('button',{name:/下載研究 JSON/}).click();const run=JSON.parse(readFileSync((await(await pending).path())!,'utf8'));
@@ -360,7 +370,7 @@ test('full-frame multi rejects ambiguous crossings instead of changing the subje
 });
 
 test('one-click A/B/C freezes source/model, preserves ROI mode and updates only independently reviewed results',async({page})=>{
- await mockPose(page);await page.goto('/?case=comparison');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await selectRoi(page);
+ await mockPose(page);await page.goto('/?case=comparison');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await openResearchTools(page);await selectRoi(page);
  await page.getByRole('button',{name:'依序比較 A / B / C',exact:true}).click();await expect(page.getByText('同源比較完成。',{exact:false})).toBeVisible();
  const pending=page.waitForEvent('download');await page.getByRole('button',{name:'下載 A/B/C 比較 JSON（含原始三次結果）',exact:true}).click();
  const output=JSON.parse(readFileSync((await(await pending).path())!,'utf8'));const runs=output.bundle.entries.map((e:any)=>e.session);
@@ -376,7 +386,7 @@ test('one-click A/B/C freezes source/model, preserves ROI mode and updates only 
 });
 
 test('unsupported multi-pose comparison retains successful baselines and explicit failure',async({page})=>{
- await mockPose(page);await page.goto('/?case=compare-failure');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await selectRoi(page);
+ await mockPose(page);await page.goto('/?case=compare-failure');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await openResearchTools(page);await selectRoi(page);
  await page.getByText('A/B/C 比較設定',{exact:true}).click();await page.getByLabel('C 的候選數',{exact:true}).selectOption('3');await page.getByRole('button',{name:'依序比較 A / B / C',exact:true}).click();await expect(page.getByText('同源比較完成。',{exact:false})).toBeVisible();
  const download=page.waitForEvent('download');await page.getByRole('button',{name:'下載 A/B/C 比較 JSON（含原始三次結果）',exact:true}).click();const result=JSON.parse(readFileSync((await(await download).path())!,'utf8'));
  expect(result.bundle.entries[0].session).not.toBeNull();expect(result.bundle.entries[1].session).not.toBeNull();expect(result.bundle.entries[2].session).toBeNull();expect(result.report.rows[2].allSamples).toBeNull();expect(result.report.complete).toBe(false);
@@ -384,7 +394,7 @@ test('unsupported multi-pose comparison retains successful baselines and explici
 
 test('actual A/B/C comparison with approved local assets (mechanism smoke, not identity ground truth)',async({page})=>{
  test.skip(!process.env.POSE_MODEL_PATH||!process.env.POSE_VIDEO_PATH,'No approved real video / model supplied');test.slow();
- await page.goto('/');await page.getByLabel('MP4 影片').setInputFiles(process.env.POSE_VIDEO_PATH!);
+ await page.goto('/');await page.getByLabel('MP4 影片').setInputFiles(process.env.POSE_VIDEO_PATH!);await openResearchTools(page);
  await page.getByRole('button',{name:'框選受測者',exact:true}).click();
  if(process.env.POSE_TARGET_ROI){const roi=JSON.parse(process.env.POSE_TARGET_ROI);for(const key of ['width','height','x','y'])await page.getByLabel(`ROI ${key}`,{exact:true}).fill(String(roi[key]));}
  await page.getByRole('button',{name:'確認 ROI（Apply）',exact:true}).click();
@@ -398,11 +408,11 @@ test('actual A/B/C comparison with approved local assets (mechanism smoke, not i
 
 for(const pipeline of ['full-frame-single','roi-crop','full-frame-multi']){
  test(`${pipeline}: local knee anomaly recovers independently; raw evidence and human veto survive export`,async({page})=>{
-  await mockPose(page);await page.goto('/?case=mixed');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await selectRoi(page);
+  await mockPose(page);await page.goto('/?case=mixed');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await openResearchTools(page);await selectRoi(page);
   await page.getByLabel('分析管線',{exact:true}).selectOption(pipeline);
   await page.getByRole('button',{name:'開始分析',exact:true}).click();await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
   const pending=page.waitForEvent('download');await page.getByRole('button',{name:/下載研究 JSON/}).click();const r=JSON.parse(readFileSync((await(await pending).path())!,'utf8'));
-  expect(r.metadata.applicationVersion).toBe('0.5.1');expect(r.metadata.schemaVersion).toBe('8');
+  expect(r.metadata.applicationVersion).toBe('0.6.0');expect(r.metadata.schemaVersion).toBe('9');
   expect(r.samples.map((s:any)=>s.tracking.state)).toEqual(Array(5).fill('TRACKING'));
   expect(r.samples.map((s:any)=>s.left.valid)).toEqual([true,false,false,true,true]);
   expect(r.samples.every((s:any)=>s.right.valid)).toBe(true);expect(r.samples[1].rawAngles.left.valid).toBe(true);
@@ -413,3 +423,55 @@ for(const pipeline of ['full-frame-single','roi-crop','full-frame-multi']){
   const csv=page.waitForEvent('download');await page.getByRole('button',{name:'下載 CSV',exact:true}).click();const text=readFileSync((await(await csv).path())!,'utf8');expect(text).toContain('joint_qc_state');expect(text).toContain('subject_tracking_accepted');
  });
 }
+
+for(const scenario of ['main-stable','single-confidence','single-temporal','initial-missing','main-loss']){
+ test(`primary single-person flow ${scenario}: no ROI setup, recoverable gaps, traceable CSV and JSON`,async({page})=>{
+  await mockPose(page);await page.goto(`/?case=${scenario}`);
+  await page.getByLabel('MP4 影片').setInputFiles(synthetic);
+  await expect(page.getByLabel('分析管線',{exact:true})).not.toBeVisible();
+  await expect(page.getByRole('button',{name:'框選受測者',exact:true})).not.toBeVisible();
+  await expect(page.getByRole('button',{name:'依序比較 A / B / C',exact:true})).not.toBeVisible();
+  await expect(page.getByRole('button',{name:'開始分析',exact:true})).toBeEnabled();
+  await page.getByRole('button',{name:'開始分析',exact:true}).click();await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
+  await expect(page.getByRole('img',{name:/左右膝影像/})).toBeVisible();
+  const pending=page.waitForEvent('download');await page.getByRole('button',{name:/下載研究 JSON/}).click();const r=JSON.parse(readFileSync((await(await pending).path())!,'utf8'));
+  expect(r.run.pipeline).toEqual({id:'full-frame-single',numPoses:1});expect(r.run.inputSpace).toBe('full-frame');
+  expect(r.metadata.applicationVersion).toBe('0.6.0');expect(r.metadata.schemaVersion).toBe('9');
+  expect(r.subjectSelection.correctionSource).toBe('controlled-single-default');expect(r.subjectSelection.keyframes[0].source).toBe('controlled-single-default');
+  expect(r.samples.map((s:any)=>s.sourceTimeMs)).toEqual([0,200,400,600,800]);expect(r.samples.every((s:any)=>s.roi.width===320&&s.roi.height===180&&s.search===null&&s.manualKeyframeId===null)).toBe(true);
+  expect(r.samples.every((s:any)=>s.tracking.state!=='MANUAL_REVIEW_REQUIRED')).toBe(true);
+  expect(r.samples.slice(1).every((s:any,i:number)=>s.previousState===r.samples[i].tracking.state)).toBe(true);
+  if(scenario==='single-confidence'||scenario==='single-temporal'){
+   expect(r.samples.map((s:any)=>s.left.valid)).toEqual([true,false,false,true,true]);expect(r.samples.every((s:any)=>s.right.valid)).toBe(true);
+   expect(r.samples[1].candidates[0].landmarks[25]).toBeDefined();
+   expect(r.samples[1].rawAngles.left.valid).toBe(scenario==='single-temporal');
+   await page.getByLabel('已分析取樣',{exact:true}).fill('1');await expect(page.locator('.measurements .angle').first()).toHaveText('N/A');
+  }
+  if(scenario==='initial-missing')expect(r.samples.map((s:any)=>s.left.valid)).toEqual([false,false,true,true,true]);
+  if(scenario==='main-loss')expect(r.samples.map((s:any)=>s.left.valid)).toEqual([true,false,false,false,true]);
+  if(scenario==='main-stable'){
+   expect(r.samples.every((s:any)=>s.left.valid&&s.right.valid)).toBe(true);
+   await page.screenshot({path:'test-results/main-v06-synthetic.png',fullPage:true});
+   await page.getByRole('button',{name:'重新分析',exact:true}).click();await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
+  }
+  const csv=page.waitForEvent('download');await page.getByRole('button',{name:'下載 CSV',exact:true}).click();const text=readFileSync((await(await csv).path())!,'utf8');expect(text).toContain('raw_angle_deg');expect(text).toContain('joint_qc_state');
+  expect(text).toContain('synthetic-adapter-test');expect(text).toContain('full-frame-single');
+ });
+}
+
+test('experimental methods are explicit and returning to main preserves old results as stale',async({page})=>{
+ await mockPose(page);await page.goto('/?case=main-stable');await page.getByLabel('MP4 影片').setInputFiles(synthetic);await openResearchTools(page);
+ await page.getByLabel('分析管線',{exact:true}).selectOption('roi-crop');await page.getByRole('button',{name:'開始分析',exact:true}).click();await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
+ const before=page.waitForEvent('download');await page.getByRole('button',{name:/下載研究 JSON/}).click();const old=JSON.parse(readFileSync((await(await before).path())!,'utf8'));
+ await page.getByRole('button',{name:'框選受測者',exact:true}).click();await page.getByLabel('ROI width',{exact:true}).fill('200');
+ await page.getByText('實驗性功能（ROI／多人／A/B/C 比較）',{exact:true}).click();
+ await expect(page.getByLabel('編輯受測者 ROI',{exact:true})).not.toBeVisible();await expect(page.getByRole('button',{name:'重新分析',exact:true})).toBeEnabled();
+ await expect(page.getByRole('button',{name:'下載 CSV',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'回到單人主要模式',exact:true}).click();await expect(page.getByText('舊分析已過期',{exact:false})).toBeVisible();
+ await expect(page.getByRole('button',{name:'下載 CSV',exact:true})).toHaveCount(0);
+ const archived=page.waitForEvent('download');await page.getByRole('button',{name:'下載舊分析 JSON（原設定）',exact:true}).click();expect(JSON.parse(readFileSync((await(await archived).path())!,'utf8'))).toEqual(old);
+ await page.getByRole('button',{name:'開始分析',exact:true}).click();await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
+ const next=page.waitForEvent('download');await page.getByRole('button',{name:/下載研究 JSON/}).click();const r=JSON.parse(readFileSync((await(await next).path())!,'utf8'));
+ expect(r.run.pipeline.id).toBe('full-frame-single');expect(r.analysisRevision.parentSessionId).toBe(old.metadata.sessionId);
+ expect(r.subjectSelection.correctionSource).toBe('controlled-single-default');
+});

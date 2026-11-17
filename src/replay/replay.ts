@@ -1,5 +1,5 @@
 import type {Landmark,Sample,Session} from '../domain/analysis';
-import {QC_POLICY} from '../domain/analysis';
+import {QC_POLICY,ANALYSIS_SCHEMA_VERSION} from '../domain/analysis';
 import {kneeObservation} from '../biomechanics/jointQuality';
 import {kneeAngle} from '../biomechanics/knee';
 import {createFullFrameIdentity,IDENTITY_POLICY} from '../tracking/identity';
@@ -58,7 +58,7 @@ export function replaySession(original:Session,strategy:ReplayStrategy):ReplayRe
   });
   const session=structuredClone(original);
   session.samples=samples;
-  session.metadata={...session.metadata,sessionId:crypto.randomUUID(),schemaVersion:'8',applicationVersion:pkg.version,createdAtUtc:new Date().toISOString(),qcPolicyVersion:legacy?'frozen-v0.5.0-recomputed':QC_POLICY};
+  session.metadata={...session.metadata,sessionId:crypto.randomUUID(),schemaVersion:ANALYSIS_SCHEMA_VERSION,applicationVersion:pkg.version,createdAtUtc:new Date().toISOString(),qcPolicyVersion:legacy?'frozen-v0.5.0-recomputed':QC_POLICY};
   session.analysisRevision={...session.analysisRevision,parentSessionId:original.metadata.sessionId,correctionSource:`offline-qc-replay:${strategy}:saved-observations`};
   // Original inference timing belongs to the parent; replay is not a new MediaPipe run.
   delete session.run;

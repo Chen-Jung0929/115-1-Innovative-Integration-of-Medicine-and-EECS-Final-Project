@@ -1,5 +1,5 @@
 export interface Roi { x: number; y: number; width: number; height: number }
-export interface RoiKeyframe {id:string; timeMs:number; roi:Roi; source:'manual-target-confirmation'}
+export interface RoiKeyframe {id:string; timeMs:number; roi:Roi; source:'manual-target-confirmation'|'controlled-single-default'}
 export interface RoiProposal {previousState?:TrackingState;resetModel?:boolean;searchDue?:boolean;roi:Roi;roiSource:string;roiUpdateReason:string;manualKeyframeId:string|null}
 export interface SubjectSelection {
   id: string;
@@ -8,7 +8,7 @@ export interface SubjectSelection {
   keyframes:RoiKeyframe[];
   interpolation:'linear-source-pixels-v1';
   revision:number;
-  correctionSource:'initial-selection'|'manual-roi-edit'|'manual-keyframe'|'mode-change';
+  correctionSource:'initial-selection'|'manual-roi-edit'|'manual-keyframe'|'mode-change'|'controlled-single-default';
   parentSelectionId:string|null;
   referenceTimeMs: 0; // Select on the beginning of the source clip.
 }

@@ -1,5 +1,7 @@
 # v0.5.1 — 追蹤 QC 診斷與離線重播
 
+> v0.6：主要流程已收斂為單人完整影格，見 [SINGLE_SUBJECT_DEMO.md](SINGLE_SUBJECT_DEMO.md)。本文件保留研究／實驗規約；replay現可讀schema7/8/9，新派生結果為schema9。
+
 2026-11-17 · schema 8 · `separate-identity-joint-recovery-v5`。
 
 ## 證據與診斷

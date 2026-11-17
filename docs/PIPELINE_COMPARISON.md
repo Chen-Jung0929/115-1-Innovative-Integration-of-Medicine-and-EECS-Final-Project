@@ -1,5 +1,7 @@
 # Full-frame vs application ROI cropping — comparison protocol v1
 
+> v0.6：主要流程已收斂為單人完整影格，見 [SINGLE_SUBJECT_DEMO.md](SINGLE_SUBJECT_DEMO.md)。本文件保留研究／實驗規約；replay現可讀schema7/8/9，新派生結果為schema9。
+
 > v0.5.1：下列為先前策略／比較規約；目前 QC 與恢復以 [QC_REPLAY.md](QC_REPLAY.md) 為準。裁切／取樣／候選契約保留，腿段不再單獨永久鎖定身分。
 
 2026-11-17 · app 0.5.0 · schema 7 · pipeline-metrics-v1。

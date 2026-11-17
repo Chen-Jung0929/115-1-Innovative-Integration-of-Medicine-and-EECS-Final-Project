@@ -1,16 +1,16 @@
-import { checkedPipeline,type PipelineConfig } from '../domain/pipeline';
+import { checkedPipeline,DEFAULT_PIPELINE,type PipelineConfig } from '../domain/pipeline';
 import {LANDMARK_QUALITY_POLICY} from '../biomechanics/poseQuality';
 import { createFullFrameIdentity,IDENTITY_POLICY } from '../tracking/identity';
 import type { Session, Sample } from '../domain/analysis';
-import { ANGLE_DEFINITION, QC_POLICY, SAMPLING_HZ } from '../domain/analysis';
+import { ANGLE_DEFINITION, QC_POLICY, SAMPLING_HZ, ANALYSIS_SCHEMA_VERSION } from '../domain/analysis';
 import { kneeAngle } from '../biomechanics/knee';
 import { loadVideo, seekFrame, releaseVideo } from '../input/video';
 import { createPoseEngine, modelBytes, MODEL_VERSION } from '../pose/mediapipe';
 import { sampleTimes } from './series';
-import type { SubjectSelection } from '../domain/tracking';
+import type { SubjectSelection,TrackingState } from '../domain/tracking';
 import { checkedKeyframes,roiAt } from '../tracking/keyframes';
 import { checkedRoi, fromCrop } from '../tracking/roi';
-import { createRoiController, FOLLOW_POLICY } from '../tracking/controller';
+import { createRoiController, FOLLOW_POLICY, type FramePlan } from '../tracking/controller';
 import { TRACKING_POLICY, JOINT_POLICY } from '../tracking/policy';
 import { gateAngle } from '../tracking/gate';
 import pkg from '../../package.json';
@@ -18,7 +18,7 @@ import pkg from '../../package.json';
 export interface AnalysisOptions {pipeline?:PipelineConfig;asset?:Awaited<ReturnType<typeof modelBytes>>;sourceSha256?:string;comparisonId?:string}
 export async function analyze(url: string, filename: string, model: File | null, allowOfficialDownload: boolean, selection: SubjectSelection, signal: AbortSignal, progress: (done: number, total: number, phase: string) => void, options:AnalysisOptions={}): Promise<Session> {
   const started=performance.now();
-  const pipeline=checkedPipeline(options.pipeline??{id:'roi-crop',numPoses:1});
+  const pipeline=checkedPipeline(options.pipeline??DEFAULT_PIPELINE);
   const cropping=pipeline.id==='roi-crop';
   let modelPreparationMs=0;
   let completed:Session|undefined;
@@ -43,6 +43,7 @@ export async function analyze(url: string, filename: string, model: File | null,
     if(selection.method!=='manual-fixed-roi')checkedKeyframes(selection.keyframes,decoder.videoWidth,decoder.videoHeight,decoder.duration*1000);
     let identity=createFullFrameIdentity(decoder.videoWidth,decoder.videoHeight);
     let referenceKey:string|null=null;
+    let previousTrackingState:TrackingState='TRACKING';
     const controller = createRoiController(selection,decoder.videoWidth,decoder.videoHeight);
     const fullFrame=document.createElement('canvas');fullFrame.width=decoder.videoWidth;fullFrame.height=decoder.videoHeight;
     const ctx = canvas.getContext('2d');
@@ -57,7 +58,7 @@ export async function analyze(url: string, filename: string, model: File | null,
       if (sourceTimeMs <= previous) { progress(index + 1, times.length, '分析中'); continue; } // Low FPS/VFR may return the same frame. Never send duplicate timestamps.
       const referenceSelection={...selection,method:'manual-keyframes' as const,keyframes:selection.keyframes.length?selection.keyframes:[{id:selection.id,timeMs:0,roi:selection.roi,source:'manual-target-confirmation' as const}]};
       const reference=roiAt(referenceSelection,time*1000,decoder.videoWidth,decoder.videoHeight);
-      const proposal=cropping?controller.propose(time*1000):{roi:{x:0,y:0,width:decoder.videoWidth,height:decoder.videoHeight},roiSource:'full-frame',roiUpdateReason:'original-source-image-no-crop',manualKeyframeId:reference.manualKeyframeId,resetModel:false,searchDue:false,previousState:'TRACKING' as const};
+      const proposal:FramePlan=cropping?controller.propose(time*1000):{roi:{x:0,y:0,width:decoder.videoWidth,height:decoder.videoHeight},roiSource:'full-frame',roiUpdateReason:'original-source-image-no-crop',manualKeyframeId:reference.manualKeyframeId,resetModel:false,searchDue:false,previousState:previousTrackingState};
       if(!cropping&&reference.manualKeyframeId!==referenceKey){identity=createFullFrameIdentity(decoder.videoWidth,decoder.videoHeight);referenceKey=reference.manualKeyframeId;}
       const usedRoi=proposal.roi;
       if(proposal.resetModel){engine.close();engine=await createPoseEngine(asset.bytes);signal.throwIfAborted();proposal.roiUpdateReason+=':new-model-after-manual-confirmation';}
@@ -74,6 +75,7 @@ export async function analyze(url: string, filename: string, model: File | null,
       const detected=candidates.map(c=>c.landmarks);
       const fullResult=cropping?null:identity.observe(detected,sourceTimeMs,reference.roi);
       const {tracking,search}=fullResult?{tracking:fullResult.tracking,search:null}:controller.observe(detected,sourceTimeMs,proposal,searchCandidates,searchUnavailable);
+      previousTrackingState=tracking.state;
       const landmarks = fullResult?fullResult.landmarks:candidates.length===1?candidates[0]!.landmarks:[];
       const subjectDecision=fullResult?.decision??{selectedIndex:tracking.accepted?0:null,proposedIndex:candidates.length===1?0:null,reason:'roi-primary-single-candidate'};
       const rawAngles = {left:kneeAngle(landmarks,'left',decoder.videoWidth,decoder.videoHeight),right:kneeAngle(landmarks,'right',decoder.videoWidth,decoder.videoHeight)};
@@ -87,7 +89,7 @@ export async function analyze(url: string, filename: string, model: File | null,
     completed={
       run:{pipeline,inputSpace:cropping?'roi-crop':'full-frame',sourceSha256:options.sourceSha256??null,comparisonId:options.comparisonId??null,analysisDurationMs:performance.now()-started,modelPreparationMs,requestedSamples:times.length},
       analysisRevision:{parentSessionId:null,selectionRevision:selection.revision,correctionSource:selection.correctionSource},trackingPolicy:{...TRACKING_POLICY,identityPolicy:IDENTITY_POLICY,jointPolicy:JOINT_POLICY.version,jointRecoveryConfirmations:JOINT_POLICY.recoveryConfirmations,...Object.fromEntries(Object.entries(JOINT_POLICY).map(([key,value])=>[`joint_${key}`,value])),landmarkQualityPolicy:LANDMARK_QUALITY_POLICY.version,...Object.fromEntries(Object.entries(FOLLOW_POLICY).map(([key,value])=>[`follow_${key}`,value]))}, subjectSelection: {...selection,roi}, sourceFilename: filename, durationMs: decoder.duration * 1000, samplingHz: SAMPLING_HZ, samples,
-      metadata: { schemaVersion: '8', sessionId: crypto.randomUUID(), sourceId: crypto.randomUUID(), inputKind: 'video',
+      metadata: { schemaVersion: ANALYSIS_SCHEMA_VERSION, sessionId: crypto.randomUUID(), sourceId: crypto.randomUUID(), inputKind: 'video',
         sourceWidthPx: decoder.videoWidth, sourceHeightPx: decoder.videoHeight, inferenceMirrored: false, displayMirrored: false,
         model: { packageVersion: MODEL_VERSION, assetId: asset.id, assetSha256: asset.hash, delegate: 'CPU' },
         angleDefinitionVersion: ANGLE_DEFINITION, qcPolicyVersion: QC_POLICY, applicationVersion: pkg.version, createdAtUtc: new Date().toISOString() },

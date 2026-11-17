@@ -1,5 +1,6 @@
 export type PipelineId='full-frame-single'|'roi-crop'|'full-frame-multi';
 export interface PipelineConfig {id:PipelineId;numPoses:1|2|3}
+export const DEFAULT_PIPELINE={id:'full-frame-single',numPoses:1} as const satisfies PipelineConfig;
 export const PIPELINES:PipelineConfig[]=[{id:'full-frame-single',numPoses:1},{id:'roi-crop',numPoses:1},{id:'full-frame-multi',numPoses:2}];
 export const PIPELINE_NAMES:Record<PipelineId,string>={
  'full-frame-single':'A · Full Frame + Single Pose',

@@ -1,6 +1,6 @@
 # Architecture
 
-狀態：v0.5.1 保留 A/B/C 架構比較並分離身分與各側關節 QC；目前行為見文末及 [QC_REPLAY.md](QC_REPLAY.md)。真實修正效果待原始 JSON／人工驗收。
+狀態：v0.6 主流程為 Full Frame + Single Pose；ROI／Multi-Pose／A/B/C 比較收至實驗區。現行規約見 [SINGLE_SUBJECT_DEMO.md](SINGLE_SUBJECT_DEMO.md)，真實單人 Squat 待驗收。
 
 ```mermaid
 flowchart TD
@@ -51,7 +51,7 @@ AngleValue 為 discriminated union：valid=true 有 raw angle；valid=false 時 
 未來 camera 需要 HTTPS 或受信任的本機 origin 及使用者授權；onboarding 不提供預覽連結。
 模型已記錄套件版本、模型來源／asset ID、SHA-256、CPU delegate；設定見 docs/MODEL_SETUP.md。
 CSV 每側每取樣一列，無效角度空欄附 validity/reasons；JSON 攜帶 metadata 與 normalized xy、visibility、可用的 presence 與 crop-relative z（沒有 world landmarks）。
-目前 schemaVersion=7；不把 sample_index 冒充來源 frame index。CSV 所有欄位加引號，文字公式前綴轉義。
+目前 schemaVersion=9；不把 sample_index 冒充來源 frame index。CSV 所有欄位加引號，文字公式前綴轉義。
 
 
 ## V0 offline sampling and playback contract
@@ -131,7 +131,7 @@ A/C 的 inference ROI 永遠為全圖；targetReferenceRoi 不是裁切範圍，
 同源 runner 固定影片／模型hash、selection與5Hz，獨立依序執行三法並保留單法失敗。
 不直接宣稱每法 decoder 取得相同呈現影格；輸出 common target grid、timing basis、已知偏移及完整分母。
 
-## v0.5.1 QC 分離（目前行為）
+## v0.5.1 QC 分離（v0.6沿用，初始化更新見下節）
 
 本節取代上文以全身幾何 gate 身分的描述，詳見 [QC_REPLAY.md](QC_REPLAY.md)。
 Detection／ROI／5Hz 工作流不擴充；A/C 完整影格、B 原裁切設計維持。
@@ -157,3 +157,12 @@ temporal、READY／INVALID／RECOVERING／SUSPENDED、source pixel段長、basel
 各側 gate 不因另一側失敗而輸出零值或全段鎖定。B 只有身分與兩側 QC 都可靠才使用該姿態更新跟隨。
 Raw candidates、原始 angles、automatic、human review 分離。CSV 附 subject_tracking_accepted／joint_qc_* 與 replay strategy。
 Offline replay 使用相同核心；CLI 不載入 MediaPipe 或模型、不啟動 HTTP listener，寫入獨立 ignored outputs。
+
+## v0.6 單人主要流程
+
+UI 與 analyze 共用 DEFAULT_PIPELINE（完整原尺寸影格／numPoses1）。上傳成功由 input/singleSubject.ts 建立全圖參考，
+source=controlled-single-default；不要求ROI、不偽造人工確認／manualKeyframeId。核心幾何／逐側QC與5Hz時間序列共用，保留實驗分支。
+主要UI只需影片／模型、分析、影格／角度／曲線與CSV／研究JSON；管線選擇、ROI與比較預設收合，研究診斷及標註另收合。
+初始未取得可靠torso時可等待，不因首筆空觀測直接人工鎖定；可靠初始化後仍受原identity安全恢復與逐側joint確認。
+全圖樣本previousState保存實際上一筆狀態，不固定寫TRACKING；schema9與policy版本反映本版語意。
+實驗設定切回主要模式會stale、不修改舊結果，收合編輯只取消草稿。沒有相機或新增追蹤演算法。

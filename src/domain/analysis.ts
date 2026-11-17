@@ -37,6 +37,7 @@ export interface Session {
 }
 export const ANGLE_DEFINITION = 'knee-image-interior-v1';
 export const PROXY_DEFINITION = 'knee-flexion-proxy-180-minus-interior-v1';
-export const QC_POLICY = 'separate-identity-joint-recovery-v5';
+export const QC_POLICY = 'controlled-single-core-qc-v6';
+export const ANALYSIS_SCHEMA_VERSION = '9';
 export const SAMPLING_HZ = 5;
 export const MAX_DURATION_SECONDS = 600;

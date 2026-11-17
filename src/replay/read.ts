@@ -5,9 +5,9 @@ function object(value:unknown):value is RecordValue{return !!value&&typeof value
 function finite(value:unknown):value is number{return typeof value==='number'&&Number.isFinite(value);}
 /** Fail closed on unavailable candidates. Selected landmarks alone cannot reconstruct candidate selection. */
 function validateSession(value:unknown):Session {
-  if(!object(value)||!object(value.metadata)||!Array.isArray(value.samples)||!object(value.subjectSelection)||!object(value.run))throw new Error('需要含 metadata、samples、subjectSelection、run 的原始研究 session（schema 7/8）');
+  if(!object(value)||!object(value.metadata)||!Array.isArray(value.samples)||!object(value.subjectSelection)||!object(value.run))throw new Error('需要含 metadata、samples、subjectSelection、run 的原始研究 session（schema 7/8/9）');
   const m=value.metadata;
-  if(!['7','8'].includes(String(m.schemaVersion))||value.qcReplay)throw new Error('僅支援原始 schema 7/8，不接受已重播 session');
+  if(!['7','8','9'].includes(String(m.schemaVersion))||value.qcReplay)throw new Error('僅支援原始 schema 7/8/9，不接受已重播 session');
   if(!finite(m.sourceWidthPx)||!finite(m.sourceHeightPx)||m.sourceWidthPx<=0||m.sourceHeightPx<=0||typeof m.sessionId!=='string')throw new Error('來源尺寸或 session ID 無效');
   if(!object(m.model)||typeof m.model.assetSha256!=='string'||!m.model.assetSha256||typeof m.model.packageVersion!=='string'||typeof m.model.assetId!=='string'||typeof m.qcPolicyVersion!=='string'||typeof m.angleDefinitionVersion!=='string'||!object(value.trackingPolicy)||!object(value.analysisRevision))throw new Error('缺少模型版本／hash 或 QC provenance');
   if(!['roi-crop','full-frame'].includes(String(value.run.inputSpace)))throw new Error('缺少明確 inference inputSpace');

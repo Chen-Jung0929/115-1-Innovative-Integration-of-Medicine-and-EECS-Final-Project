@@ -36,3 +36,7 @@ fieldset {border:1px solid #d4e1de; border-radius:8px;}
 dt {font-weight:700;} dd {margin-bottom:12px;}
 
 table {border-collapse:collapse;width:100%;} th,td {padding:12px;border-bottom:1px solid #d4e1de;text-align:left;vertical-align:top;} pre {white-space:pre-wrap;overflow-wrap:anywhere;}
+
+.experimental, .research { background: #fff; border: 1px solid #d4e1de; border-radius: 10px; padding: 14px 20px; margin: 20px 0; }
+.experimental > summary, .research > summary { font-weight: 600; color: #376a65; }
+.research p { overflow-wrap: anywhere; }

@@ -1,5 +1,7 @@
 # ROI controller, decoder and recovery — v0.4.0 retained baseline
 
+> v0.6：主要流程已收斂為單人完整影格，見 [SINGLE_SUBJECT_DEMO.md](SINGLE_SUBJECT_DEMO.md)。本文件保留研究／實驗規約；replay現可讀schema7/8/9，新派生結果為schema9。
+
 > v0.5.1：下列為先前策略／比較規約；目前 QC 與恢復以 [QC_REPLAY.md](QC_REPLAY.md) 為準。裁切／取樣／候選契約保留，腿段不再單獨永久鎖定身分。
 
 v0.5.0 暫停擴充此管線，保留作 B 對照；新的 A/B/C 比較見 [PIPELINE_COMPARISON.md](PIPELINE_COMPARISON.md)。

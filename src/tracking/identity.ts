@@ -4,7 +4,7 @@ import {poseQuality,torsoOf,confident,type Torso} from '../biomechanics/poseQual
 import {selectInitialSubject,type CandidateSelection} from '../selection/subject';
 import {TRACKING_POLICY as POLICY} from './policy';
 import {createJointQuality} from './jointQuality';
-export const IDENTITY_POLICY='torso-identity-independent-joints-v2';
+export const IDENTITY_POLICY='torso-identity-independent-joints-v3';
 export function associateByContinuity(candidates:readonly Landmark[][],previous:Torso,dtSeconds:number,width:number,height:number):CandidateSelection {
  if(!(dtSeconds>0))return {selectedIndex:null,proposedIndex:null,reason:'non-increasing-source-time'};
  const ranked=candidates.map((p,index)=>({index,b:torsoOf(p,width,height)})).filter(c=>c.b).map(c=>({...c,d:Math.hypot(c.b!.x-previous.x,c.b!.y-previous.y)/Math.max(c.b!.length,previous.length),scale:Math.max(c.b!.length/previous.length,previous.length/c.b!.length)})).sort((a,b)=>a.d-b.d);
@@ -42,8 +42,10 @@ export function createFullFrameIdentity(width:number,height:number,options:{crop
   if(!accepted){
    returns=0;reasons.push(decision.reason);
    if(state!=='MANUAL_REVIEW_REQUIRED'){
-    if(!previous)lock('initial-identity-not-established');
-    else state=candidates.length?'UNCERTAIN':'LOST';
+    if(!previous){
+     if(body)lock('initial-identity-not-established');
+     else {state=candidates.length?'UNCERTAIN':'LOST';reasons.push('waiting-for-initial-reliable-pose');}
+    }else state=candidates.length?'UNCERTAIN':'LOST';
    }
   }else if(previous&&state!=='TRACKING'){
    const b=body!;

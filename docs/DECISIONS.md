@@ -60,3 +60,11 @@
 - ADR-034：保存凍結 v0.5.0 實作供 offline replay；不覆寫原 session，保存來源 hash／parent，逐筆列新增放行及人工適用性，coverage 不是 accuracy。
 - ADR-035：Replay 固定原候選、實際 ROI、timestamps 與搜尋歧義／失敗紀錄；B 不重建 crop feedback，不能冒充新版本完整重分析。
 - ADR-036：schema8 明確記錄各側 observation／temporal／recovery state；派生 session 的舊 detection run 保存於 qcReplay.detectionRun，與新推論耗時區別。
+
+## v0.6 單人核心收斂 — 2026-11-17
+
+- ADR-037：依使用者決定以 Full Frame + Single Pose 為主要操作及核心預設；取代 ADR-026 的「以A/B/C比較決定架構」作為主要開發目標，並非accuracy勝出結論。
+- ADR-038：ROI／Multi-Pose／比較保留於實驗區，診斷／標註收合；停止擴充，既有測試保留。
+- ADR-039：自動全圖參考標controlled-single-default、不作manual keyframe，schema9保留raw／QC／source與模型metadata；不要求一般使用者框選。
+- ADR-040：初始化尚無可信torso時等待而非永久鎖定，逐側確認完成才放行；既有ambiguity／torso jump／長期遺失人工鎖定不自動解除。
+- ADR-041：本版完成工程回歸仍將真實受控Squat標待驗收；先完成這項驗收，再另案規劃camera，不同時擴大範圍。
