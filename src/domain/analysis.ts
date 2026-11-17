@@ -2,7 +2,7 @@ import type { PipelineConfig } from './pipeline';
 import type { CandidateSelection } from '../selection/subject';
 import type { FrameRead } from './video';
 import type { TrackingQuality, SubjectSelection, HumanReview, RoiProposal, Roi } from './tracking';
-import type { AngleValue, AnalysisMetadata } from './measurement';
+import type { AngleValue, AnalysisMetadata, PostureSet } from './measurement';
 export interface Landmark { x: number; y: number; visibility: number; presence?: number; z?: number }
 export interface SearchObservation {roi:Roi;candidates:Landmark[][];status:string;suggestedRoi:Roi|null;numPoses:number;error?:string}
 export interface Sample extends RoiProposal {
@@ -20,6 +20,8 @@ export interface Sample extends RoiProposal {
   rawAngles: { left: AngleValue; right: AngleValue };
   automaticAngles: { left: AngleValue; right: AngleValue };
   review?: HumanReview;
+  /** Optional (schema ≥10): squat posture metrics, raw / automatic-gated / final after human review. */
+  posture?: { raw: PostureSet; automatic: PostureSet; final: PostureSet };
   left: AngleValue;
   right: AngleValue;
 }
@@ -38,6 +40,6 @@ export interface Session {
 export const ANGLE_DEFINITION = 'knee-image-interior-v1';
 export const PROXY_DEFINITION = 'knee-flexion-proxy-180-minus-interior-v1';
 export const QC_POLICY = 'controlled-single-core-qc-v7';
-export const ANALYSIS_SCHEMA_VERSION = '9';
+export const ANALYSIS_SCHEMA_VERSION = '10';
 export const SAMPLING_HZ = 5;
 export const MAX_DURATION_SECONDS = 600;

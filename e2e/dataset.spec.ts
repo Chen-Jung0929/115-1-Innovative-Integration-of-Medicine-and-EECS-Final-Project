@@ -122,7 +122,7 @@ test('synthetic pose adapter: pipeline, gaps, chart, CSV, reanalysis and selecti
   await expect(page.locator('.measurements article')).toHaveCount(1);
   const pending=page.waitForEvent('download'); await page.getByRole('button',{name:'下載 CSV',exact:true}).click();
   const download=await pending; const text=readFileSync((await download.path())!, 'utf8');
-  expect(text.split('\r\n')).toHaveLength(12); expect(text).toContain('low-confidence'); expect(text).toContain('synthetic-adapter-test');
+  expect(text.split('\r\n')).toHaveLength(32); expect(text).toContain('"trunk_lean","midline"'); expect(text).toContain('knee-ankle-width-ratio-image-v1'); expect(text).toContain('low-confidence'); expect(text).toContain('synthetic-adapter-test');
   const jsonDownload=page.waitForEvent('download'); await page.getByRole('button',{name:/下載研究 JSON/}).click();
   const first=JSON.parse(readFileSync((await (await jsonDownload).path())!, 'utf8'));
   await page.getByRole('button',{name:'重新分析'}).click(); await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
@@ -310,7 +310,7 @@ for(const scenario of ['adaptive','adaptive-ambiguous','adaptive-search-error'])
   await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
   const pending=page.waitForEvent('download');await page.getByRole('button',{name:/下載研究 JSON/}).click();
   const result=JSON.parse(readFileSync((await(await pending).path())!,'utf8'));
-  expect(result.metadata.schemaVersion).toBe('9');expect(result.subjectSelection.method).toBe('adaptive-roi');
+  expect(result.metadata.schemaVersion).toBe('10');expect(result.subjectSelection.method).toBe('adaptive-roi');
   expect(result.samples[0].search.numPoses).toBe(2);expect(result.samples[0].roi.width).toBe(200);
   if(scenario==='adaptive'){
    expect(result.samples.some((s:{roi:{x:number}})=>s.roi.x>80)).toBe(true);
@@ -412,7 +412,7 @@ for(const pipeline of ['full-frame-single','roi-crop','full-frame-multi']){
   await page.getByLabel('分析管線',{exact:true}).selectOption(pipeline);
   await page.getByRole('button',{name:'開始分析',exact:true}).click();await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
   const pending=page.waitForEvent('download');await page.getByRole('button',{name:/下載研究 JSON/}).click();const r=JSON.parse(readFileSync((await(await pending).path())!,'utf8'));
-  expect(r.metadata.applicationVersion).toBe('0.6.1');expect(r.metadata.schemaVersion).toBe('9');
+  expect(r.metadata.applicationVersion).toBe('0.6.1');expect(r.metadata.schemaVersion).toBe('10');
   expect(r.samples.map((s:any)=>s.tracking.state)).toEqual(Array(5).fill('TRACKING'));
   expect(r.samples.map((s:any)=>s.left.valid)).toEqual([true,false,false,true,true]);
   expect(r.samples.every((s:any)=>s.right.valid)).toBe(true);expect(r.samples[1].rawAngles.left.valid).toBe(true);
@@ -436,7 +436,7 @@ for(const scenario of ['main-stable','single-confidence','single-temporal','init
   await expect(page.getByRole('img',{name:/左右膝影像/})).toBeVisible();
   const pending=page.waitForEvent('download');await page.getByRole('button',{name:/下載研究 JSON/}).click();const r=JSON.parse(readFileSync((await(await pending).path())!,'utf8'));
   expect(r.run.pipeline).toEqual({id:'full-frame-single',numPoses:1});expect(r.run.inputSpace).toBe('full-frame');
-  expect(r.metadata.applicationVersion).toBe('0.6.1');expect(r.metadata.schemaVersion).toBe('9');
+  expect(r.metadata.applicationVersion).toBe('0.6.1');expect(r.metadata.schemaVersion).toBe('10');
   expect(r.subjectSelection.correctionSource).toBe('controlled-single-default');expect(r.subjectSelection.keyframes[0].source).toBe('controlled-single-default');
   expect(r.samples.map((s:any)=>s.sourceTimeMs)).toEqual([0,200,400,600,800]);expect(r.samples.every((s:any)=>s.roi.width===320&&s.roi.height===180&&s.search===null&&s.manualKeyframeId===null)).toBe(true);
   expect(r.samples.every((s:any)=>s.tracking.state!=='MANUAL_REVIEW_REQUIRED')).toBe(true);

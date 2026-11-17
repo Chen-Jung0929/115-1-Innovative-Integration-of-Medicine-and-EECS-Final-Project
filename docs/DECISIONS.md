@@ -68,3 +68,9 @@
 - ADR-039：自動全圖參考標controlled-single-default、不作manual keyframe，schema9保留raw／QC／source與模型metadata；不要求一般使用者框選。
 - ADR-040：初始化尚無可信torso時等待而非永久鎖定，逐側確認完成才放行；既有ambiguity／torso jump／長期遺失人工鎖定不自動解除。
 - ADR-041：本版完成工程回歸仍將真實受控Squat標待驗收；先完成這項驗收，再另案規劃camera，不同時擴大範圍。
+
+## 深蹲姿勢指標 — 2026-11-17
+
+- ADR-042：新增髖角（hip-image-interior-v1）、上身（軀幹）前傾（trunk-lean-image-vertical-v1）、膝蓋內夾（knee-ankle-width-ratio-image-v1）三項 2D 影像平面指標，皆為暫定定義、無門檻，待 PT 確認；不宣稱臨床角度。
+- ADR-043：姿勢指標與膝角共用同一套 landmark 篩檢（knee.ts sourcePoint）與 subject gating；髖角跟隨同側 joint QC，膝寬比需雙側 joint QC，軀幹只看 subject。raw／automatic／人工覆核後 final 分開保存於 sample.posture（schema10，選填欄位，舊 session 不受影響）。
+- ADR-044：CSV 每筆取樣在兩列膝之後加 hip 左右、trunk_lean（midline）、knee_width_ratio（bilateral）；比值不放入角度欄，改用 metric_value／metric_unit／ungated_metric_value。
