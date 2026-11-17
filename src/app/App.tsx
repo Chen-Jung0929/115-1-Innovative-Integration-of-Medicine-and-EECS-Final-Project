@@ -169,7 +169,7 @@ export function App() {
   const pct = (s: 'left' | 'right') => { const value = session ? coverage(session.samples, s) : null; return value === null ? 'N/A' : `${(value * 100).toFixed(1)}%`; };
 
   return <main>
-    <header><p className="eyebrow">臺大 115-1 醫學電資創意整合專題 · Dataset Demo v0.6.1</p><h1>關節動作分析研究工作台</h1><p>上傳單人 MP4 → 開始分析 → 查看膝、髖、上身前傾、膝蓋內夾與曲線 → 匯出 CSV</p></header>
+    <header><p className="eyebrow">臺大 115-1 醫學電資創意整合專題 · Dataset Demo v0.6.1</p><h1>關節動作分析研究工作台</h1><p>上傳單人 MP4 → 開始分析 → 查看膝、髖、上身前傾、膝蓋對腳尖線與曲線 → 匯出 CSV</p></header>
     <aside>本系統為學術概念驗證，不提供醫療診斷或治療建議。2D 影像平面幾何角不是經驗證的臨床角度；側面視角較適合觀察，遮蔽與透視會影響結果。</aside>
     <section className="setup" aria-labelledby="input-title"><h2 id="input-title">1. 選擇影片與模型</h2>
       <label>MP4 影片（最多 500 MB、10 分鐘）<input type="file" accept=".mp4,video/mp4" disabled={busy || loading} onChange={e => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; void choose(f); }} /></label>
@@ -242,9 +242,12 @@ export function App() {
           return <article key={s}><h3>{s === 'left' ? '左髖 Left Hip' : '右髖 Right Hip'}</h3><p className="angle">{showAngle(angle)}</p><p>暫定髖屈曲 proxy：{angle?.valid ? `${hipFlexionProxy(angle)!.toFixed(1)}°` : 'N/A'}</p><p>{status(angle, !!sample)}</p></article>;
         })}
         <article><h3>上身（軀幹）前傾 Trunk Lean</h3><p className="angle">{showAngle(sample?.posture?.final.trunkLean)}</p><p>{status(sample?.posture?.final.trunkLean, !!sample)}</p></article>
-        <article><h3>膝蓋內夾 Knee Valgus</h3><p className="angle">{sample?.posture?.final.kneeWidthRatio.valid ? sample.posture.final.kneeWidthRatio.value.toFixed(2) : 'N/A'}</p><p>兩膝距離 ÷ 兩踝距離；小於 1 代表膝蓋比腳踝靠近。只適用正面拍攝。</p><p>{status(sample?.posture?.final.kneeWidthRatio, !!sample)}</p></article>
+        {(['left','right'] as const).filter(s => side === 'both' || side === s).map(s => {
+          const v = sample?.posture?.final.kneeToe[s];
+          return <article key={`toe-${s}`}><h3>{s === 'left' ? '左膝對腳尖線 Left Knee–Toe' : '右膝對腳尖線 Right Knee–Toe'}</h3><p className="angle">{v?.valid ? `${v.value >= 0 ? '+' : ''}${v.value.toFixed(2)}` : 'N/A'}</p><p>{v?.valid ? (v.value > 0 ? '膝蓋在腳尖線內側（膝蓋內夾方向）' : '膝蓋在腳尖線上或外側') : '只適用正面拍攝'}</p><p>{status(v, !!sample)}</p></article>;
+        })}
       </div>
-      <p>定義：髖角 = 肩–髖–膝於髖點的影像平面內角（0–180°），暫定髖屈曲 proxy = 180° − 內角。上身（軀幹）前傾 = 兩髖中點→兩肩中點連線與畫面垂直線的夾角（0° = 直立；手機需擺正）。膝蓋內夾 = 兩膝距離 ÷ 兩踝距離。三者都是 2D 影像平面幾何，不是經驗證的臨床角度；點位不可靠時顯示 N/A，不補值。</p>
+      <p>定義：髖角 = 肩–髖–膝於髖點的影像平面內角（0–180°），暫定髖屈曲 proxy = 180° − 內角。上身（軀幹）前傾 = 兩髖中點→兩肩中點連線與畫面垂直線的夾角（0° = 直立；手機需擺正）。膝蓋對腳尖線（依講義 p.11）= 膝蓋離「過腳尖的鉛垂線」多遠，以骨盆寬為單位；+ = 膝在內側（膝蓋內夾），講義標準為在線上或微外側，且左右對稱；只適用正面拍攝。三者都是 2D 影像平面幾何，不是經驗證的臨床角度；點位不可靠時顯示 N/A，不補值。</p>
     </section>
     {experiments && sample?.search && <aside>全畫面搜尋：{sample.search.status}（候選不代表確認身分）。{sample.search.error && <p>全畫面搜尋不可用，請改用 Manual Keyframes 並人工確認；本次搜尋不作身分放行依據。</p>}
       {sample.search.suggestedRoi && <button disabled={busy||seeking} onClick={()=>{beginSelection();setDraft(sample.search!.suggestedRoi!);setDraftMode('adaptive-roi');}}>檢查搜尋建議 ROI（仍需人工 Apply）</button>}</aside>}

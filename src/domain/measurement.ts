@@ -19,7 +19,8 @@ export type ScalarValue =
 export interface PostureSet {
   hip: { left: AngleValue; right: AngleValue };
   trunkLean: AngleValue;
-  kneeWidthRatio: ScalarValue;
+  /** Knee offset from the toe plumb line in hip widths; + = medial. */
+  kneeToe: { left: ScalarValue; right: ScalarValue };
 }
 
 export interface AnalysisMetadata {

@@ -71,6 +71,6 @@
 
 ## 深蹲姿勢指標 — 2026-11-17
 
-- ADR-042：新增髖角（hip-image-interior-v1）、上身（軀幹）前傾（trunk-lean-image-vertical-v1）、膝蓋內夾（knee-ankle-width-ratio-image-v1）三項 2D 影像平面指標，皆為暫定定義、無門檻，待 PT 確認；不宣稱臨床角度。
-- ADR-043：姿勢指標與膝角共用同一套 landmark 篩檢（knee.ts sourcePoint）與 subject gating；髖角跟隨同側 joint QC，膝寬比需雙側 joint QC，軀幹只看 subject。raw／automatic／人工覆核後 final 分開保存於 sample.posture（schema10，選填欄位，舊 session 不受影響）。
-- ADR-044：CSV 每筆取樣在兩列膝之後加 hip 左右、trunk_lean（midline）、knee_width_ratio（bilateral）；比值不放入角度欄，改用 metric_value／metric_unit／ungated_metric_value。
+- ADR-042：新增髖角（hip-image-interior-v1）、上身（軀幹）前傾（trunk-lean-image-vertical-v1）、膝蓋對腳尖線（knee-toe-plumb-offset-hip-width-image-v1，依講義 p.11 膝蓋應在腳尖／第二趾鉛垂線上或微外側）三項 2D 影像平面指標，皆為暫定定義、無門檻，待 PT 確認；不宣稱臨床角度。
+- ADR-043：姿勢指標與膝角共用同一套 landmark 篩檢（knee.ts sourcePoint）與 subject gating；髖角與膝蓋對腳尖線跟隨同側 joint QC，軀幹只看 subject。raw／automatic／人工覆核後 final 分開保存於 sample.posture（schema10，選填欄位，舊 session 不受影響）。
+- ADR-044：CSV 每筆取樣在兩列膝之後加 hip 左右、trunk_lean（midline）、knee_toe_offset 左右；非角度值不放入角度欄，改用 metric_value／metric_unit（hip-width）／ungated_metric_value。

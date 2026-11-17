@@ -5,7 +5,7 @@ import type { AngleValue, AnatomicalSide, ScalarValue } from '../domain/measurem
 import { POSTURE_POLICY, hipFlexionProxy } from '../biomechanics/posture';
 type Validity = AngleValue | ScalarValue;
 /** One exported measurement row; knee rows keep their original column meaning. */
-interface MetricRow { joint: string; side: string; angle: number | null; proxy: number | null; final: Validity; raw: Validity; auto: Validity; rawValue: number | null; angleDefinition: string; proxyDefinition: string; qc: AnatomicalSide | null; value: number | null; unit: 'deg' | 'ratio' }
+interface MetricRow { joint: string; side: string; angle: number | null; proxy: number | null; final: Validity; raw: Validity; auto: Validity; rawValue: number | null; angleDefinition: string; proxyDefinition: string; qc: AnatomicalSide | null; value: number | null; unit: 'deg' | 'hip-width' }
 function cell(value: string | number | boolean | null): string {
   // Text that spreadsheet software could execute is explicitly neutralized.
   let text = value === null ? '' : String(value);
@@ -29,8 +29,10 @@ export function toCsv(session: Session): string {
     if (!p) continue; // Sessions before schema 10 have knee rows only.
     for (const side of ['left', 'right'] as const) rows.push(row(s, angleRow('hip', side, p.final.hip[side], p.raw.hip[side], p.automatic.hip[side], POSTURE_POLICY.hipDefinition, POSTURE_POLICY.hipProxyDefinition, hipFlexionProxy(p.final.hip[side]), side)));
     rows.push(row(s, angleRow('trunk_lean', 'midline', p.final.trunkLean, p.raw.trunkLean, p.automatic.trunkLean, POSTURE_POLICY.trunkLeanDefinition, '', null, null)));
-    const r = p.final.kneeWidthRatio;
-    rows.push(row(s, { joint: 'knee_width_ratio', side: 'bilateral', angle: null, proxy: null, final: r, raw: p.raw.kneeWidthRatio, auto: p.automatic.kneeWidthRatio, rawValue: null, angleDefinition: POSTURE_POLICY.kneeWidthRatioDefinition, proxyDefinition: '', qc: null, value: r.value, unit: 'ratio' }));
+    for (const side of ['left', 'right'] as const) {
+      const r = p.final.kneeToe[side];
+      rows.push(row(s, { joint: 'knee_toe_offset', side, angle: null, proxy: null, final: r, raw: p.raw.kneeToe[side], auto: p.automatic.kneeToe[side], rawValue: null, angleDefinition: POSTURE_POLICY.kneeToeDefinition, proxyDefinition: '', qc: side, value: r.value, unit: 'hip-width' }));
+    }
   }
   return serializeCsv(rows);
 }

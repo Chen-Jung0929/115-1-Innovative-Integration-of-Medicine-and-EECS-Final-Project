@@ -1,18 +1,18 @@
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine } from 'recharts';
 import type { Sample } from '../domain/analysis';
-export type ChartMetric = 'knee' | 'hip' | 'trunkLean' | 'kneeWidthRatio';
-export const CHART_METRICS: Record<ChartMetric, { label: string; aria: string; axis: string; domain: [number, number | 'auto']; bilateral: boolean }> = {
+export type ChartMetric = 'knee' | 'hip' | 'trunkLean' | 'kneeToe';
+export const CHART_METRICS: Record<ChartMetric, { label: string; aria: string; axis: string; domain: [number | 'auto', number | 'auto']; bilateral: boolean }> = {
   knee: { label: '膝角', aria: '左右膝影像平面內角時間曲線；無效取樣為斷點', axis: '內角（°）', domain: [0, 180], bilateral: true },
   hip: { label: '髖角', aria: '左右髖影像平面內角時間曲線；無效取樣為斷點', axis: '內角（°）', domain: [0, 180], bilateral: true },
   trunkLean: { label: '上身（軀幹）前傾', aria: '上身（軀幹）前傾角時間曲線；無效取樣為斷點', axis: '與垂直線夾角（°）', domain: [0, 90], bilateral: false },
-  kneeWidthRatio: { label: '膝蓋內夾（兩膝距離 ÷ 兩踝距離）', aria: '兩膝距離與兩踝距離比值時間曲線；無效取樣為斷點', axis: '比值（1 = 同寬）', domain: [0, 'auto'], bilateral: false },
+  kneeToe: { label: '膝蓋對腳尖線（膝蓋內夾）', aria: '左右膝相對腳尖鉛垂線位置時間曲線；無效取樣為斷點', axis: '骨盆寬（+ = 膝在內側）', domain: ['auto', 'auto'], bilateral: true },
 };
 function values(s: Sample, metric: ChartMetric): { left: number | null; right: number | null; value: number | null } {
   const p = s.posture?.final;
   if (metric === 'knee') return { left: s.left.rawAngleDeg, right: s.right.rawAngleDeg, value: null };
   if (metric === 'hip') return { left: p?.hip.left.rawAngleDeg ?? null, right: p?.hip.right.rawAngleDeg ?? null, value: null };
   if (metric === 'trunkLean') return { left: null, right: null, value: p?.trunkLean.rawAngleDeg ?? null };
-  return { left: null, right: null, value: p?.kneeWidthRatio.value ?? null };
+  return { left: p?.kneeToe.left.value ?? null, right: p?.kneeToe.right.value ?? null, value: null };
 }
 export function AngleChart({ samples, side, timeMs, metric = 'knee' }: { samples: Sample[]; side: 'left' | 'right' | 'both'; timeMs: number; metric?: ChartMetric }) {
   const spec = CHART_METRICS[metric];
@@ -25,7 +25,7 @@ export function AngleChart({ samples, side, timeMs, metric = 'knee' }: { samples
       {spec.bilateral && side !== 'right' && <Line dataKey="left" name={`左${name}`} stroke="#007d68" dot={{ r: 2 }} connectNulls={false} isAnimationActive={false} />}
       {spec.bilateral && side !== 'left' && <Line dataKey="right" name={`右${name}`} stroke="#b34b1b" dot={{ r: 2 }} connectNulls={false} isAnimationActive={false} />}
       {!spec.bilateral && <Line dataKey="value" name={spec.label} stroke="#3b5bdb" dot={{ r: 2 }} connectNulls={false} isAnimationActive={false} />}
-      {metric === 'kneeWidthRatio' && <ReferenceLine y={1} stroke="#8a94a6" strokeDasharray="4 4" />}
+      {metric === 'kneeToe' && <ReferenceLine y={0} stroke="#8a94a6" strokeDasharray="4 4" />}
       <ReferenceLine x={timeMs / 1000} stroke="#4a5870" />
     </LineChart></ResponsiveContainer>
   </div>;

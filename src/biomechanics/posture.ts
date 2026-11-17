@@ -11,19 +11,19 @@ export const POSTURE_POLICY = {
   hipDefinition: 'hip-image-interior-v1',
   hipProxyDefinition: 'hip-flexion-proxy-180-minus-interior-v1',
   trunkLeanDefinition: 'trunk-lean-image-vertical-v1',
-  kneeWidthRatioDefinition: 'knee-ankle-width-ratio-image-v1',
+  kneeToeDefinition: 'knee-toe-plumb-offset-hip-width-image-v1',
   /** Shoulder-midpoint to hip-midpoint length below this is treated as degenerate. */
   minTorsoPx: 8,
-  /** Ankle separation below this makes the ratio unstable (side view / feet together). */
-  minAnkleWidthPx: 8,
+  /** Hip separation below this makes the normalized offset unstable (side view). */
+  minHipWidthPx: 8,
 } as const;
 
 /** MediaPipe shoulder / hip / knee for each anatomical side. */
 export const HIP_INDICES = { left: [11, 23, 25], right: [12, 24, 26] } as const;
 /** Left shoulder, right shoulder, left hip, right hip. */
 export const TRUNK_INDICES = [11, 12, 23, 24] as const;
-/** Left knee, right knee, left ankle, right ankle. */
-export const KNEE_WIDTH_INDICES = [25, 26, 27, 28] as const;
+/** Left hip, right hip, then knee and foot index (toe) for each side. */
+export const KNEE_TOE_INDICES = { left: [23, 24, 25, 31], right: [23, 24, 26, 32] } as const;
 
 const invalidAngle = (reason: InvalidReason): AngleValue => ({ valid: false, rawAngleDeg: null, invalidReasons: [reason] });
 const invalidScalar = (reason: InvalidReason): ScalarValue => ({ valid: false, value: null, invalidReasons: [reason] });
@@ -58,19 +58,23 @@ export function trunkLean(landmarks: readonly Landmark[], width: number, height:
 }
 
 /**
- * Knee width ÷ ankle width (distance between knees over distance between ankles).
- * 1 = knees as wide as ankles; below 1 = knees closer together (dynamic knee valgus pattern).
- * Meaningful only from a frontal view.
+ * Knee vs toe plumb line (Movement analysis handout p.11, frontal view): horizontal distance of the
+ * knee from the image-vertical line through the toe (MediaPipe foot index ≈ toe tip, closest
+ * available point to the 2nd toe), in hip widths. Positive = knee medial (inside the line, valgus
+ * pattern); 0 = on the line; negative = lateral. Handout: knee should be on or slightly lateral to
+ * the line, and symmetric left/right. Meaningful only from a frontal view; assumes a level camera.
  */
-export function kneeWidthRatio(landmarks: readonly Landmark[], width: number, height: number): ScalarValue {
-  const p = sourcePoints(landmarks, KNEE_WIDTH_INDICES, width, height);
+export function kneeToeOffset(landmarks: readonly Landmark[], side: AnatomicalSide, width: number, height: number): ScalarValue {
+  const p = sourcePoints(landmarks, KNEE_TOE_INDICES[side], width, height);
   if (typeof p === 'string') return invalidScalar(p);
-  const knees = Math.hypot(p[0]!.x - p[1]!.x, p[0]!.y - p[1]!.y);
-  const ankles = Math.hypot(p[2]!.x - p[3]!.x, p[2]!.y - p[3]!.y);
-  if (![knees, ankles].every(Number.isFinite)) return invalidScalar('non-finite');
-  if (ankles < POSTURE_POLICY.minAnkleWidthPx) return invalidScalar('degenerate-geometry');
-  const ratio = knees / ankles;
-  return Number.isFinite(ratio) ? { valid: true, value: ratio, invalidReasons: [] } : invalidScalar('non-finite');
+  const [leftHip, rightHip, knee, toe] = p as [Point, Point, Point, Point];
+  const hipWidth = Math.hypot(leftHip.x - rightHip.x, leftHip.y - rightHip.y);
+  if (!Number.isFinite(hipWidth)) return invalidScalar('non-finite');
+  if (Math.abs(leftHip.x - rightHip.x) < POSTURE_POLICY.minHipWidthPx) return invalidScalar('degenerate-geometry');
+  // Medial = toward the other hip in the image (anatomical, works for mirrored or facing-camera video).
+  const medial = side === 'left' ? Math.sign(rightHip.x - leftHip.x) : Math.sign(leftHip.x - rightHip.x);
+  const offset = (knee.x - toe.x) * medial / hipWidth;
+  return Number.isFinite(offset) ? { valid: true, value: offset, invalidReasons: [] } : invalidScalar('non-finite');
 }
 
 /** Ungated posture measurements for one pose. Video and camera must both call this. */
@@ -78,6 +82,6 @@ export function measurePosture(landmarks: readonly Landmark[], width: number, he
   return {
     hip: { left: hipAngle(landmarks, 'left', width, height), right: hipAngle(landmarks, 'right', width, height) },
     trunkLean: trunkLean(landmarks, width, height),
-    kneeWidthRatio: kneeWidthRatio(landmarks, width, height),
+    kneeToe: { left: kneeToeOffset(landmarks, 'left', width, height), right: kneeToeOffset(landmarks, 'right', width, height) },
   };
 }

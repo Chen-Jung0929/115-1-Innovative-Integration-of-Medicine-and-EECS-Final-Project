@@ -1,4 +1,4 @@
-import type { AngleValue,AnatomicalSide,InvalidReason,PostureSet } from '../domain/measurement';
+import type { AngleValue,AnatomicalSide,InvalidReason,PostureSet,ScalarValue } from '../domain/measurement';
 import type { TrackingQuality } from '../domain/tracking';
 export function gateAngle(angle: AngleValue, tracking: TrackingQuality, side?:AnatomicalSide): AngleValue {
   const q=side?tracking.joints?.[side]:Object.values(tracking.joints??{}).find(j=>!j.valid);
@@ -22,21 +22,25 @@ const gatedAngle=(angle:AngleValue,tracking:TrackingQuality,sides:readonly Anato
   return reason?{valid:false,rawAngleDeg:null,invalidReasons:[reason]}:angle;
 };
 /**
- * Posture gating: subject identity must be accepted. Hip uses that side's joint QC (shares hip/knee points);
- * knee width ratio needs both sides; trunk lean depends only on torso anchors / subject identity.
+ * Posture gating: subject identity must be accepted. Hip and knee–toe use that side's joint QC
+ * (they share hip/knee points); trunk lean depends only on torso anchors / subject identity.
  */
 export function gatePosture(raw: PostureSet, tracking: TrackingQuality): PostureSet {
-  const ratio=raw.kneeWidthRatio;
-  const ratioReason=tracking.accepted&&!ratio.valid?null:gateReason(tracking,['left','right']);
+  const scalar=(value:ScalarValue,side:AnatomicalSide):ScalarValue=>{
+    if(tracking.accepted&&!value.valid)return value;
+    const reason=gateReason(tracking,[side]);
+    return reason?{valid:false,value:null,invalidReasons:[reason]}:value;
+  };
   return {
     hip:{left:gatedAngle(raw.hip.left,tracking,['left']),right:gatedAngle(raw.hip.right,tracking,['right'])},
     trunkLean:gatedAngle(raw.trunkLean,tracking,[]),
-    kneeWidthRatio:ratioReason?{valid:false,value:null,invalidReasons:[ratioReason]}:ratio,
+    kneeToe:{left:scalar(raw.kneeToe.left,'left'),right:scalar(raw.kneeToe.right,'right')},
   };
 }
 /** Human review: anything other than correct-target invalidates every final posture value. */
 export function reviewedPosture(automatic: PostureSet, allowed: boolean): PostureSet {
   if(allowed)return automatic;
   const no={valid:false as const,rawAngleDeg:null,invalidReasons:['identity-uncertain'] as ['identity-uncertain']};
-  return {hip:{left:no,right:no},trunkLean:no,kneeWidthRatio:{valid:false,value:null,invalidReasons:['identity-uncertain']}};
+  const noScalar={valid:false as const,value:null,invalidReasons:['identity-uncertain'] as ['identity-uncertain']};
+  return {hip:{left:no,right:no},trunkLean:no,kneeToe:{left:noScalar,right:noScalar}};
 }

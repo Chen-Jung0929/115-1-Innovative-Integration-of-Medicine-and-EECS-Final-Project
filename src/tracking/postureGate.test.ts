@@ -12,21 +12,21 @@ describe('posture gating follows subject identity and joint QC', () => {
   it('invalidates every metric when identity is uncertain or lost', () => {
     const lost: TrackingQuality = { ...accepted, accepted: false, identity: 'target-lost' };
     const g = gatePosture(raw, lost);
-    expect([g.hip.left, g.hip.right, g.trunkLean, g.kneeWidthRatio].map(v => v.invalidReasons)).toEqual([['target-lost'], ['target-lost'], ['target-lost'], ['target-lost']]);
+    expect([g.hip.left, g.hip.right, g.trunkLean, g.kneeToe.left, g.kneeToe.right].map(v => v.invalidReasons)).toEqual([['target-lost'], ['target-lost'], ['target-lost'], ['target-lost'], ['target-lost']]);
     expect(gateReason({ ...accepted, accepted: false, identity: 'identity-uncertain' }, [])).toBe('identity-uncertain');
   });
-  it('a failing left joint invalidates left hip and the bilateral ratio, not right hip or trunk', () => {
+  it('a failing left joint invalidates left hip and left knee–toe, not the right side or trunk', () => {
     const t: TrackingQuality = { ...accepted, joints: { left: joint(false), right: joint(true) } };
     const g = gatePosture(raw, t);
     expect(g.hip.left.invalidReasons).toEqual(['joint-landmark-invalid']);
-    expect(g.kneeWidthRatio.invalidReasons).toEqual(['joint-landmark-invalid']);
-    expect(g.hip.right.valid).toBe(true); expect(g.trunkLean.valid).toBe(true);
+    expect(g.kneeToe.left.invalidReasons).toEqual(['joint-landmark-invalid']);
+    expect(g.kneeToe.right.valid).toBe(true); expect(g.hip.right.valid).toBe(true); expect(g.trunkLean.valid).toBe(true);
     expect(gatePosture(raw, { ...accepted, joints: { left: joint(true), right: joint(false, 'RECOVERING') } }).hip.right.invalidReasons).toEqual(['joint-recovery-pending']);
   });
   it('keeps the measurement reason when the subject is accepted but geometry is invalid', () => {
     const empty = measurePosture([], 100, 100);
     expect(gatePosture(empty, accepted).trunkLean.invalidReasons).toEqual(['missing-landmark']);
-    expect(gatePosture(empty, { ...accepted, accepted: false, identity: 'target-lost' }).kneeWidthRatio.invalidReasons).toEqual(['target-lost']);
+    expect(gatePosture(empty, { ...accepted, accepted: false, identity: 'target-lost' }).kneeToe.right.invalidReasons).toEqual(['target-lost']);
   });
 });
 
@@ -36,7 +36,7 @@ describe('human review', () => {
     const sample = makeSample({ posture: { raw, automatic: raw, final: raw } });
     const wrong = applyReview(sample, { label: 'wrong-target', identityId: 'B', reviewerId: 'r' });
     expect(wrong.posture!.final.trunkLean.invalidReasons).toEqual(['identity-uncertain']);
-    expect(wrong.posture!.final.kneeWidthRatio.value).toBeNull();
+    expect(wrong.posture!.final.kneeToe.left.value).toBeNull();
     expect(wrong.posture!.automatic.trunkLean.valid).toBe(true);
     const restored = applyReview(wrong, undefined);
     expect(restored.posture!.final).toEqual(raw);

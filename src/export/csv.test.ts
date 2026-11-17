@@ -39,19 +39,20 @@ it('serializes actual per-sample ROI and state rather than reusing the initial s
  expect(row.source_time_ms).toBe('200');expect(row.timestamp_basis).toBe('presentation');
 });
 
-it('adds hip, trunk lean and knee width ratio rows only when posture metrics exist',async()=>{
+it('adds hip, trunk lean and knee–toe rows only when posture metrics exist',async()=>{
  const {measurePosture}=await import('../biomechanics/posture');
  const {humanPose}=await import('../test/fixtures');
- const raw=measurePosture(humanPose(),200,100);
+ const pose=humanPose();pose[31]={x:.4,y:.95,visibility:1};pose[32]={x:.6,y:.95,visibility:1};
+ const raw=measurePosture(pose,200,100);
  const final={...raw,hip:{...raw.hip,right:{valid:false as const,rawAngleDeg:null,invalidReasons:['low-confidence'] as ['low-confidence']}}};
  const sample=makeSample({posture:{raw,automatic:final,final}});
- const rows=toCsv({...session,samples:[sample]}).replace(/^﻿/,'').trim().split('\r\n').map(line=>[...line.matchAll(/"((?:[^"]|"")*)"(?:,|$)/g)].map(match=>match[1]!.replaceAll('""','"')));
+ const rows=toCsv({...session,samples:[sample]}).replace(/^\uFEFF/,'').trim().split('\r\n').map(line=>[...line.matchAll(/"((?:[^"]|"")*)"(?:,|$)/g)].map(match=>match[1]!.replaceAll('""','"')));
  const header=rows[0]!;const get=(r:number)=>Object.fromEntries(header.map((name,i)=>[name,rows[r]![i]]));
- expect(rows).toHaveLength(7);
- expect(rows.slice(1).map(r=>[r[5],r[6]])).toEqual([['knee','left'],['knee','right'],['hip','left'],['hip','right'],['trunk_lean','midline'],['knee_width_ratio','bilateral']]);
+ expect(rows).toHaveLength(8);
+ expect(rows.slice(1).map(r=>[r[5],r[6]])).toEqual([['knee','left'],['knee','right'],['hip','left'],['hip','right'],['trunk_lean','midline'],['knee_toe_offset','left'],['knee_toe_offset','right']]);
  expect(get(3).raw_angle_deg).toBe('180');expect(get(3).provisional_flexion_proxy_deg).toBe('0');expect(get(3).angle_definition_version).toBe('hip-image-interior-v1');expect(get(3).metric_unit).toBe('deg');
  expect(get(4).valid).toBe('false');expect(get(4).raw_angle_deg).toBe('');expect(get(4).invalid_reason).toBe('low-confidence');expect(get(4).ungated_geometric_angle_deg).toBe('180');
  expect(get(5).raw_angle_deg).toBe('0');expect(get(5).angle_definition_version).toBe('trunk-lean-image-vertical-v1');expect(get(5).joint_qc_state).toBe('');
- expect(get(6).raw_angle_deg).toBe('');expect(get(6).metric_value).toBe('1');expect(get(6).metric_unit).toBe('ratio');expect(get(6).ungated_metric_value).toBe('1');expect(get(6).ungated_geometric_angle_deg).toBe('');
+ expect(get(6).raw_angle_deg).toBe('');expect(get(6).metric_value).toBe('0');expect(get(6).metric_unit).toBe('hip-width');expect(get(6).ungated_metric_value).toBe('0');expect(get(6).angle_definition_version).toBe('knee-toe-plumb-offset-hip-width-image-v1');
  expect(get(1).metric_value).toBe(get(1).raw_angle_deg);
 });

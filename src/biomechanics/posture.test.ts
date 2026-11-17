@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hipAngle, hipFlexionProxy, trunkLean, kneeWidthRatio, measurePosture, HIP_INDICES, TRUNK_INDICES, KNEE_WIDTH_INDICES, POSTURE_POLICY } from './posture';
+import { hipAngle, hipFlexionProxy, trunkLean, kneeToeOffset, measurePosture, HIP_INDICES, TRUNK_INDICES, KNEE_TOE_INDICES, POSTURE_POLICY } from './posture';
 import { humanPose } from '../test/fixtures';
 import type { Landmark } from '../domain/analysis';
 const v = (x: number, y: number): Landmark => ({ x, y, visibility: 1 });
@@ -66,35 +66,46 @@ describe('trunk (upper body) forward lean vs image vertical', () => {
   });
 });
 
-describe('knee width ratio (knees ÷ ankles, frontal view)', () => {
-  it('uses knees 25/26 and ankles 27/28', () => expect(KNEE_WIDTH_INDICES).toEqual([25, 26, 27, 28]));
-  it('is 1 when knees are as wide as ankles', () => expect(kneeWidthRatio(humanPose(), 100, 100).value).toBeCloseTo(1, 8));
-  it('falls below 1 when knees move inward and rises when they move outward', () => {
-    const p = humanPose(); p[25] = v(.45, .7); p[26] = v(.55, .7);
-    expect(kneeWidthRatio(p, 100, 100).value).toBeCloseTo(.5, 8);
-    p[25] = v(.35, .7); p[26] = v(.65, .7);
-    expect(kneeWidthRatio(p, 100, 100).value).toBeCloseTo(1.5, 8);
+describe('knee vs toe plumb line (handout p.11, frontal view)', () => {
+  // Hips at x .4/.6 (hip width 20 px at 100 px), toes directly under the knees.
+  function frontal(): Landmark[] { const p = humanPose(); p[31] = v(.4, .95); p[32] = v(.6, .95); return p; }
+  it('uses both hips plus knee 25 / toe 31 (left) and knee 26 / toe 32 (right)', () =>
+    expect(KNEE_TOE_INDICES).toEqual({ left: [23, 24, 25, 31], right: [23, 24, 26, 32] }));
+  it('is 0 when the knee is on the toe line', () => {
+    expect(kneeToeOffset(frontal(), 'left', 100, 100).value).toBeCloseTo(0, 8);
+    expect(kneeToeOffset(frontal(), 'right', 100, 100).value).toBeCloseTo(0, 8);
+  });
+  it('is positive when the knee moves medially and negative laterally, per anatomical side', () => {
+    const p = frontal(); p[25] = v(.45, .7); p[26] = v(.65, .7); // left knee inward 5 px, right knee outward 5 px
+    expect(kneeToeOffset(p, 'left', 100, 100).value).toBeCloseTo(.25, 8);
+    expect(kneeToeOffset(p, 'right', 100, 100).value).toBeCloseTo(-.25, 8);
+  });
+  it('keeps medial = positive when the person faces away (left/right swapped on screen)', () => {
+    const p = frontal(); p[23] = v(.6, .5); p[24] = v(.4, .5); p[25] = v(.55, .7); p[31] = v(.6, .95); p[26] = v(.4, .7); p[32] = v(.4, .95);
+    expect(kneeToeOffset(p, 'left', 100, 100).value).toBeCloseTo(.25, 8);
+    expect(kneeToeOffset(p, 'right', 100, 100).value).toBeCloseTo(0, 8);
   });
   it('is scale invariant and aspect corrected', () => {
-    const p = humanPose(); p[25] = v(.45, .7); p[26] = v(.55, .7);
-    expect(kneeWidthRatio(p, 400, 400).value).toBeCloseTo(.5, 8);
-    p[27] = v(.5, .8); p[28] = v(.5, 1); // ankles separated vertically only (20 px at 100 px height)
-    expect(kneeWidthRatio(p, 200, 100).value).toBeCloseTo(1, 8); // knees 20 px wide in a 200 px frame
+    const p = frontal(); p[25] = v(.45, .7);
+    expect(kneeToeOffset(p, 'left', 400, 400).value).toBeCloseTo(.25, 8);
+    expect(kneeToeOffset(p, 'left', 200, 100).value).toBeCloseTo(.25, 8);
   });
-  it('rejects feet together / side view instead of exploding', () => {
-    const p = humanPose(); p[27] = v(.5, .9); p[28] = v(.52, .9);
-    expect(kneeWidthRatio(p, 100, 100)).toEqual({ valid: false, value: null, invalidReasons: ['degenerate-geometry'] });
+  it('rejects a side view (hips overlap horizontally) instead of exploding', () => {
+    const p = frontal(); p[24] = v(.42, .5);
+    expect(kneeToeOffset(p, 'left', 100, 100)).toEqual({ valid: false, value: null, invalidReasons: ['degenerate-geometry'] });
   });
-  it('reports a missing ankle as N/A', () => {
-    const p = humanPose().slice(0, 28);
-    expect(kneeWidthRatio(p, 100, 100).invalidReasons).toEqual(['missing-landmark']);
+  it('reports a missing or unreliable toe as N/A', () => {
+    expect(kneeToeOffset(humanPose().slice(0, 31), 'left', 100, 100).invalidReasons).toEqual(['missing-landmark']);
+    const p = frontal(); p[32] = { x: .6, y: .95, visibility: .2 };
+    expect(kneeToeOffset(p, 'right', 100, 100).invalidReasons).toEqual(['low-confidence']);
+    expect(kneeToeOffset(p, 'left', 100, 100).valid).toBe(true);
   });
 });
 
 it('measurePosture returns every metric and handles an empty pose without numbers', () => {
   const ok = measurePosture(humanPose(), 100, 100);
-  expect([ok.hip.left.valid, ok.hip.right.valid, ok.trunkLean.valid, ok.kneeWidthRatio.valid]).toEqual([true, true, true, true]);
+  expect([ok.hip.left.valid, ok.hip.right.valid, ok.trunkLean.valid, ok.kneeToe.left.valid, ok.kneeToe.right.valid]).toEqual([true, true, true, true, true]);
   const none = measurePosture([], 100, 100);
-  expect([none.hip.left.rawAngleDeg, none.hip.right.rawAngleDeg, none.trunkLean.rawAngleDeg, none.kneeWidthRatio.value]).toEqual([null, null, null, null]);
+  expect([none.hip.left.rawAngleDeg, none.hip.right.rawAngleDeg, none.trunkLean.rawAngleDeg, none.kneeToe.left.value, none.kneeToe.right.value]).toEqual([null, null, null, null, null]);
   expect(measurePosture(humanPose(), 0, 100).trunkLean.invalidReasons).toEqual(['non-finite']);
 });

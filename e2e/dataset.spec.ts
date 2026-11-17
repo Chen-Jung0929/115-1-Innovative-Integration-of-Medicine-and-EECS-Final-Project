@@ -122,7 +122,7 @@ test('synthetic pose adapter: pipeline, gaps, chart, CSV, reanalysis and selecti
   await expect(page.locator('.measurements article')).toHaveCount(1);
   const pending=page.waitForEvent('download'); await page.getByRole('button',{name:'下載 CSV',exact:true}).click();
   const download=await pending; const text=readFileSync((await download.path())!, 'utf8');
-  expect(text.split('\r\n')).toHaveLength(32); expect(text).toContain('"trunk_lean","midline"'); expect(text).toContain('knee-ankle-width-ratio-image-v1'); expect(text).toContain('low-confidence'); expect(text).toContain('synthetic-adapter-test');
+  expect(text.split('\r\n')).toHaveLength(37); expect(text).toContain('"trunk_lean","midline"'); expect(text).toContain('knee-toe-plumb-offset-hip-width-image-v1'); expect(text).toContain('low-confidence'); expect(text).toContain('synthetic-adapter-test');
   const jsonDownload=page.waitForEvent('download'); await page.getByRole('button',{name:/下載研究 JSON/}).click();
   const first=JSON.parse(readFileSync((await (await jsonDownload).path())!, 'utf8'));
   await page.getByRole('button',{name:'重新分析'}).click(); await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
