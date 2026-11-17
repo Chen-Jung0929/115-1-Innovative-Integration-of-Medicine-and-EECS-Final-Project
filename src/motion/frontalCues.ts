@@ -1,4 +1,5 @@
 import type { FrontalMetrics } from '../biomechanics/frontal';
+import type { LateralMetrics } from '../biomechanics/lateral';
 
 /**
  * Plain-language prompts for the frontal checks in the Movement analysis handout. Thresholds are
@@ -19,10 +20,14 @@ export const CUE_POLICY = {
   /** A condition must hold this long before its prompt appears (≈ 2 samples at 5 Hz). */
   holdMs: 200,
   maxShown: 2,
+  /** Side view (handout p.12). Knee ahead of the toe line, in shank lengths. */
+  kneeForwardShank: 0.6,
+  /** Side view trunk forward lean vs vertical, degrees. */
+  trunkForwardDeg: 45,
 } as const;
 
-export type CueId = 'trunk' | 'pelvis' | 'knee-left' | 'knee-right' | 'head' | 'shoulder' | 'shift';
-export type BodyPart = 'head' | 'shoulder' | 'trunk' | 'pelvis' | 'knee-left' | 'knee-right';
+export type CueId = 'trunk' | 'pelvis' | 'knee-left' | 'knee-right' | 'head' | 'shoulder' | 'shift' | 'knee-forward' | 'trunk-forward';
+export type BodyPart = 'head' | 'shoulder' | 'trunk' | 'pelvis' | 'knee-left' | 'knee-right' | 'side-knee' | 'side-trunk';
 export interface Cue {
   id: CueId;
   /** Handout page the check comes from. */
@@ -63,6 +68,15 @@ export function instantCues(m: FrontalMetrics, kneeFlexionDeg: { left: number | 
   if (head !== null && !headFromTrunk) cues.push({ id: 'head', page: 7, text: `頭偏離中線（往${side(head)}）`, parts: ['head'] });
   if (shoulder !== null && !shoulderFromTrunk) cues.push({ id: 'shoulder', page: 8, text: `${shoulder > 0 ? '左' : '右'}肩比較低（兩肩不平）`, parts: ['shoulder'] });
   if (over(m.shift, p.shiftHipWidths) && trunk === null) cues.push({ id: 'shift', page: 9, text: `重心往${side(m.shift.value!)}偏`, parts: ['trunk'] });
+  return cues;
+}
+
+/** Side-view prompts (handout p.12). Knee check only once the near knee is clearly bent. */
+export function lateralCues(m: LateralMetrics, nearKneeFlexionDeg: number | null, p: typeof CUE_POLICY = CUE_POLICY): Cue[] {
+  const cues: Cue[] = [];
+  if (m.trunkLean.valid && m.trunkLean.value > p.trunkForwardDeg) cues.push({ id: 'trunk-forward', page: 12, text: '上身前傾太多', parts: ['side-trunk'] });
+  if (nearKneeFlexionDeg !== null && nearKneeFlexionDeg >= p.kneeMinFlexionDeg && m.kneeForward.valid && m.kneeForward.value > p.kneeForwardShank)
+    cues.push({ id: 'knee-forward', page: 12, text: '膝蓋超過腳尖太多', parts: ['side-knee'] });
   return cues;
 }
 

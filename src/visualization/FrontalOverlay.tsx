@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import type { Sample } from '../domain/analysis';
 import { FRONTAL_LANDMARKS as L, frontalFrame, headPoint } from '../biomechanics/frontal';
 import { sourcePoint, type Point } from '../biomechanics/knee';
+import { LATERAL_INDICES } from '../biomechanics/lateral';
 import type { BodyPart } from '../motion/frontalCues';
 import type { FrontalFrame } from '../motion/frontalTimeline';
 
@@ -38,9 +39,34 @@ export function FrontalOverlay({ sample, frame, width, height }: { sample: Sampl
     };
     const n = frame.neutral;
 
+    // Side view (handout p.12): toe plumb line, trunk vs vertical, values next to the body.
+    if (frame.view === 'side' && frame.lateral) {
+      const lat = frame.lateral;
+      const [S, H, K, A, E, T] = LATERAL_INDICES[lat.side].map(i => pt(i));
+      const kc = hot.has('side-knee') ? ALERT : TOE, tc = hot.has('side-trunk') ? ALERT : TRUNK;
+      if (T && K) {
+        line({ x: T.x, y: T.y }, { x: T.x, y: K.y - unit * 14 }, kc, unit, [unit * 2.5, unit * 1.8]);
+        label('腳尖線', { x: T.x + unit * 3, y: T.y - unit * 6 }, kc);
+      }
+      if (H && S) {
+        const len = Math.hypot(S.x - H.x, S.y - H.y);
+        line(H, { x: H.x, y: H.y - len }, 'rgba(255,255,255,.9)', unit * 0.7, [unit * 2.5, unit * 2]);
+        line(H, S, tc, unit * 1.2);
+        if (lat.trunkLean.valid) label(`上身前傾 ${Math.round(lat.trunkLean.value)}°`, { x: Math.max(H.x, S.x) + unit * 4, y: (H.y + S.y) / 2 }, tc);
+      }
+      if (A && K) line(A, K, 'rgba(255,255,255,.75)', unit * 0.8);
+      if (K && lat.kneeForward.valid) {
+        const v = lat.kneeForward.value;
+        label(v > 0 ? `膝超過腳尖 ${Math.round(v * 100)}%小腿長` : '膝在腳尖後方', { x: K.x + unit * 5, y: K.y }, kc);
+      }
+      for (const q of [S, H, A, E]) if (q) dot(q, '#fff', unit * 1.6);
+      if (K) dot(K, hot.has('side-knee') ? ALERT : '#fff', unit * 2.2);
+      if (T) dot(T, TOE);
+      return;
+    }
     const f = frontalFrame(sample.landmarks, width, height);
-    // Every line here is a FRONTAL check: in an oblique/side view draw nothing (the prompt box asks for a frontal recording).
-    if (typeof f === 'string') return;
+    // Every remaining line is a FRONTAL check: in an oblique view draw nothing (the prompt box asks for a frontal/side recording).
+    if (frame.view !== 'frontal' || typeof f === 'string') return;
     // Vertical baseline, locked at the standing calibration.
     const b = frame.baseline;
     if (b.state === 'locked') { line({ x: b.x, y: 0 }, { x: b.x, y: Math.min(height, b.heelY + unit * 4) }, BASE, unit * 1.3); label('基準線', { x: b.x + unit * 3, y: unit * 8 }, BASE); }
@@ -78,14 +104,17 @@ export function FrontalOverlay({ sample, frame, width, height }: { sample: Sampl
     const h = headPoint(sample.landmarks, width, height);
     if (typeof h !== 'string') dot(h, hot.has('head') ? ALERT : '#fff', unit * 2.2);
   }, [sample, frame, width, height]);
-  return <canvas ref={ref} width={width} height={height} className="frontal-layer" aria-label="醫學組正面檢查疊圖：點位、基準線與檢查線" />;
+  return <canvas ref={ref} width={width} height={height} className="frontal-layer" aria-label="醫學組檢查疊圖：點位、基準線與檢查線" />;
 }
 
 /** Plain-language prompt box shown over the video. */
 export function FrontalCuePanel({ frame, hasSample }: { frame: FrontalFrame | undefined; hasSample: boolean }) {
   let body: ReactNode;
   if (!hasSample || !frame) body = <p className="cue-muted">此影格沒有分析結果</p>;
-  else if (frame.metrics.trunkSide.valid === false && frame.metrics.trunkSide.invalidReasons[0] === 'unsupported-view') body = <p className="cue-muted">請正面拍攝（目前角度太斜，不判斷）</p>;
+  else if (!frame.tracked) body = <p className="cue-muted">這一格沒有穩定追到個案（例如被別人擋住、畫面有其他人），暫不判斷</p>;
+  else if (frame.view === 'oblique') body = <p className="cue-muted">請正面或正側面拍攝（目前角度太斜，不判斷）</p>;
+  else if (frame.view === 'side') body = frame.cues.length ? <ul>{frame.cues.map(c => <li key={c.id}>⚠ {c.text}<span className="cue-page">講義 p.{c.page}</span></li>)}</ul> : <p className="cue-ok">✓ 側面：膝蓋與上身在範圍內</p>;
+  else if (frame.view !== 'frontal') body = <p className="cue-muted">看不清楚軀幹點位，暫不判斷</p>;
   else if (frame.baseline.state !== 'locked') body = <p className="cue-muted">請先站直、不動約 1 秒，建立基準線</p>;
   else if (frame.cues.length === 0) body = <p className="cue-ok">✓ 姿勢在基準線附近</p>;
   else body = <ul>{frame.cues.map(c => <li key={c.id}>⚠ {c.text}<span className="cue-page">講義 p.{c.page}</span></li>)}</ul>;
@@ -93,8 +122,10 @@ export function FrontalCuePanel({ frame, hasSample }: { frame: FrontalFrame | un
 }
 
 /** Colour key for the frontal overlay. */
-export function FrontalLegend() {
-  const items: [string, string, boolean][] = [
+export function FrontalLegend({ view }: { view: FrontalFrame['view'] | undefined }) {
+  const items: [string, string, boolean][] = view === 'side' ? [
+    ['腳尖鉛垂線（看膝蓋有沒有超過）', TOE, true], ['軀幹（髖→肩）', TRUNK, false], ['垂直參考線／小腿', '#ffffff', true], ['超過門檻（看提示）', ALERT, false],
+  ] : [
     ['基準線（站直時的身體中線）', BASE, false], ['肩線／骨盆線', LINE, false], ['站直時的肩線／骨盆線', '#ffffff', true],
     ['軀幹', TRUNK, true], ['腳尖鉛垂線', TOE, true], ['偏離（看提示）', ALERT, false],
   ];

@@ -221,7 +221,7 @@ export function App() {
       <button onClick={()=>downloadFile(`archived-${storedSession.metadata.sessionId}.json`,JSON.stringify(storedSession,null,2),'application/json')}>下載舊分析 JSON（原設定）</button></aside>}
     {history.length>0 && <details><summary>先前分析存檔（不修改原始 session）</summary>{history.map(s=><p key={s.metadata.sessionId}><button onClick={()=>downloadFile(`archived-${s.metadata.sessionId}.json`,JSON.stringify(s,null,2),'application/json')}>下載 {s.metadata.sessionId}</button></p>)}</details>}
     <section aria-labelledby="review-title"><h2 id="review-title">2. 影格與角度檢查</h2>
-      <label className="inline"><input type="checkbox" checked={frontalView} onChange={e=>setFrontalView(e.target.checked)} />醫學組正面檢查（點位、基準線、提示；依 Movement analysis 講義 p.5–p.11）</label>
+      <label className="inline"><input type="checkbox" checked={frontalView} onChange={e=>setFrontalView(e.target.checked)} />醫學組檢查（正面：點位、基準線、提示，講義 p.5–p.11；側面：膝蓋前移、上身前傾，講義 p.12；自動判斷拍攝角度）</label>
       {frontalView && <label>基準線位置<select aria-label="基準線位置" value={baselineSource} onChange={e=>setBaselineSource(e.target.value as BaselineSource)}><option value="standing-trunk">個案站直時的軀幹中線（預設）</option><option value="heel-midpoint">兩腳跟中點（講義 p.5 原始定義）</option></select></label>}
       <label>顯示側別<select value={side} onChange={e => setSide(e.target.value as typeof side)}><option value="both">左右膝 Both</option><option value="left">左膝 Left Knee</option><option value="right">右膝 Right Knee</option></select></label>
       {sample?.tracking.state==='MANUAL_REVIEW_REQUIRED'&&<aside>人物一致性無法確認，量測已暫停。請確認單人、完整入鏡後重新分析；必要時可在實驗區人工校正。局部膝部缺點不會單獨造成這個鎖定。</aside>}
@@ -233,7 +233,7 @@ export function App() {
         const known = session?.samples.find(s => Math.abs(s.requestedTimeMs - v.currentTime * 1000) <= 1);
         setTimeMs(known?.sourceTimeMs ?? v.currentTime * 1000); setSeeking(false);
       }} onError={() => { if (info) { setError('影片播放解碼失敗，請改用 H.264 MP4。'); setSession(null); } }} /><Overlay sample={sample} width={info?.width ?? 640} height={info?.height ?? 360} side={side} diagnostic={diagnostic} muted={frontalView && !!session && !selecting} />
-      {frontalView && session && !selecting && <><FrontalOverlay sample={sample} frame={frontalFrame} width={info?.width ?? 640} height={info?.height ?? 360} /><FrontalCuePanel frame={frontalFrame} hasSample={!!sample} /><FrontalLegend /></>}
+      {frontalView && session && !selecting && <><FrontalOverlay sample={sample} frame={frontalFrame} width={info?.width ?? 640} height={info?.height ?? 360} /><FrontalCuePanel frame={frontalFrame} hasSample={!!sample} /><FrontalLegend view={frontalFrame?.view} /></>}
       {selecting && info && !seeking && <RoiSelector width={info.width} height={info.height} roi={draft} onChange={setDraft} drawNew={drawNew} onDrawEnd={()=>setDrawNew(false)} />}
       {experiments && selection && info && !selecting && <svg className="roi-border" viewBox={`0 0 ${info.width} ${info.height}`} aria-label="受測者 ROI 範圍"><rect {...(pipeline==='roi-crop'?(sample?.roi??displayedRoi(session?.samples??[],timeMs)??roiAt(selection,timeMs,info.width,info.height).roi):(sample?.targetReferenceRoi??selection.roi))} fill="none" stroke="#ffda57" strokeWidth={Math.max(2,info.width/250)} /></svg>}</div>
         <p>來源影格時間：{(timeMs/1000).toFixed(3)} 秒。{sample ? `對應取樣 #${sample.sampleIndex}（${sample.decode.timeBasis}）` : '此影格沒有對應分析結果，骨架與角度不顯示。'}</p>

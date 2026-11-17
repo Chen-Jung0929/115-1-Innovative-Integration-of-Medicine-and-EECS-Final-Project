@@ -65,3 +65,23 @@ describe('frontal timeline over analysed samples', () => {
     expect(t[9]!.cues.map(c => c.text)).toEqual(['左肩比較低（兩肩不平）']);
   });
 });
+
+describe('side view in the timeline', () => {
+  const sidePose = (lean = 0): Landmark[] => {
+    const p = humanPose();
+    p[11] = v(.5 + lean, .3); p[12] = v(.51 + lean, .3); p[23] = v(.5, .6); p[24] = v(.51, .6);
+    p[25] = v(.5, .75); p[26] = v(.51, .75); p[27] = v(.5, .9); p[28] = v(.51, .9);
+    p[29] = v(.47, .92); p[30] = v(.48, .92); p[31] = v(.56, .92); p[32] = v(.57, .92);
+    return p;
+  };
+  it('detects the side view and prompts sustained forward trunk lean without needing a baseline', () => {
+    const t = frontalTimeline([0, 1, 2].map(i => at(i, sidePose(.4))), 100, 100);
+    expect(t.every(f => f.view === 'side' && f.baseline.state === 'searching')).toBe(true);
+    expect(t[0]!.lateral!.trunkLean.value).toBeGreaterThan(45);
+    expect(t[1]!.cues.map(c => c.text)).toEqual(['上身前傾太多']);
+  });
+  it('upright side view gives no prompt', () => {
+    const t = frontalTimeline([0, 1, 2].map(i => at(i, sidePose())), 100, 100);
+    expect(t[2]!.view).toBe('side'); expect(t[2]!.cues).toEqual([]);
+  });
+});

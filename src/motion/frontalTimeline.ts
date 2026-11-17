@@ -4,7 +4,8 @@ import { frontalFrame, heelMidpoint, measureFrontal, type FrontalMetrics } from 
 import { flexionProxy } from '../biomechanics/knee';
 import { gateReason } from '../tracking/gate';
 import { createBaselineAnchor, type BaselineState } from './baseline';
-import { createCueTracker, instantCues, type Cue } from './frontalCues';
+import { createCueTracker, instantCues, lateralCues, type Cue } from './frontalCues';
+import { classifyView, measureLateral, type LateralMetrics, type ViewKind } from '../biomechanics/lateral';
 
 /**
  * Where the baseline sits once locked.
@@ -19,6 +20,8 @@ export const STANDING_MAX_KNEE_FLEXION_DEG = 20;
 
 export interface FrontalFrame {
   sampleIndex: number;
+  /** False when person tracking rejected this sample (lost/switched subject) or review rejected it. */
+  tracked: boolean;
   baseline: BaselineState;
   /**
    * Gated metrics. Head, shift, shoulder tilt, pelvis tilt and trunk side lean are RELATIVE to the
@@ -29,6 +32,10 @@ export interface FrontalFrame {
   metrics: FrontalMetrics;
   /** Standing values subtracted from the metrics, for display/audit. */
   neutral: Neutral | null;
+  /** Detected camera view for this sample (null when the torso points are unusable). */
+  view: ViewKind | null;
+  /** Side-view metrics (handout p.12); null unless the view is 'side' and the subject passed QC. */
+  lateral: LateralMetrics | null;
   cues: Cue[];
 }
 export interface Neutral { head: number; shift: number; shoulderTilt: number; pelvisTilt: number; trunkSide: number }
@@ -76,8 +83,16 @@ export function frontalTimeline(samples: readonly Sample[], width: number, heigh
     if (baseline.state !== 'locked') { neutral = null; lockedAt = null; }
     else if (baseline.lockedAtMs !== lockedAt) { lockedAt = baseline.lockedAtMs; neutral = neutralFrom(standingBuf.map(b => b.m)); }
     const metrics = relative(raw, neutral);
-    const cues = tracker.update(s.sourceTimeMs, usable ? instantCues(metrics, knee) : []);
-    return { sampleIndex: s.sampleIndex, baseline, metrics, neutral, cues };
+    const view = usable ? classifyView(s.landmarks, width, height) : null;
+    let lateral: LateralMetrics | null = null;
+    if (view === 'side') {
+      const m = measureLateral(s.landmarks, width, height);
+      const reason = gateReason(s.tracking, [m.side]);
+      lateral = reason ? { side: m.side, kneeForward: blocked(reason), trunkLean: blocked(reason), tibiaLean: blocked(reason) } : m;
+    }
+    const instant = !usable ? [] : view === 'frontal' ? instantCues(metrics, knee) : view === 'side' && lateral ? lateralCues(lateral, knee[lateral.side]) : [];
+    const cues = tracker.update(s.sourceTimeMs, instant);
+    return { sampleIndex: s.sampleIndex, tracked: usable, baseline, metrics, neutral, view, lateral, cues };
   });
 }
 
