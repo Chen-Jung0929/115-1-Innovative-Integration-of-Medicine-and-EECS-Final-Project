@@ -2,7 +2,7 @@ import type {Landmark,Sample,Session} from '../domain/analysis';
 import {QC_POLICY,ANALYSIS_SCHEMA_VERSION} from '../domain/analysis';
 import {kneeObservation} from '../biomechanics/jointQuality';
 import {kneeAngle} from '../biomechanics/knee';
-import {createFullFrameIdentity,IDENTITY_POLICY} from '../tracking/identity';
+import {createFullFrameIdentity,IDENTITY_POLICY,SINGLE_RECOVERY_POLICY} from '../tracking/identity';
 import {createTargetTracker} from '../tracking/target';
 import {createFullFrameIdentity as legacyIdentity,IDENTITY_POLICY as LEGACY_IDENTITY_POLICY} from '../tracking/legacy/identity';
 import {createTargetTracker as legacyTarget,TRACKING_POLICY as LEGACY_TRACKING_POLICY} from '../tracking/legacy/target';
@@ -26,14 +26,15 @@ const samePoints=(a:Landmark[],b:Landmark[])=>JSON.stringify(a)===JSON.stringify
 export function replaySession(original:Session,strategy:ReplayStrategy):ReplayResult {
   const crop=original.run?.inputSpace==='roi-crop';
   const w=original.metadata.sourceWidthPx,h=original.metadata.sourceHeightPx;
+  const controlledSingle=original.run?.pipeline.id==='full-frame-single'&&original.subjectSelection.correctionSource==='controlled-single-default';
   const legacy=strategy==='frozen-v0.5.0',confirmations=strategy==='separated-3'?3:2;
-  let full=legacy?legacyIdentity(w,h):createFullFrameIdentity(w,h,{jointConfirmations:confirmations});
+  let full=legacy?legacyIdentity(w,h):createFullFrameIdentity(w,h,{jointConfirmations:confirmations,controlledSingle});
   let target=legacy?legacyTarget(original.subjectSelection.roi,w,h):createTargetTracker(original.subjectSelection.roi,w,h,{jointConfirmations:confirmations});
   let key:string|null|undefined;
   const changes:ReplayChange[]=[];
   const samples=original.samples.map(saved=>{
     if(saved.manualKeyframeId!==key){
-      full=legacy?legacyIdentity(w,h):createFullFrameIdentity(w,h,{jointConfirmations:confirmations});
+      full=legacy?legacyIdentity(w,h):createFullFrameIdentity(w,h,{jointConfirmations:confirmations,controlledSingle});
       target=legacy?legacyTarget(saved.roi,w,h):createTargetTracker(saved.roi,w,h,{jointConfirmations:confirmations});
       key=saved.manualKeyframeId;
     }
@@ -63,7 +64,7 @@ export function replaySession(original:Session,strategy:ReplayStrategy):ReplayRe
   // Original inference timing belongs to the parent; replay is not a new MediaPipe run.
   delete session.run;
   session.qcReplay={strategy,originalSessionId:original.metadata.sessionId,usesSavedObservations:true,...(original.run?{detectionRun:structuredClone(original.run)}:{})};
-  session.trackingPolicy=legacy?{...LEGACY_TRACKING_POLICY,identityPolicy:crop?'legacy-roi-controller':LEGACY_IDENTITY_POLICY,replayStrategy:strategy}:{...TRACKING_POLICY,identityPolicy:IDENTITY_POLICY,jointPolicy:JOINT_POLICY.version,jointRecoveryConfirmations:confirmations,...Object.fromEntries(Object.entries(JOINT_POLICY).map(([key,value])=>[`joint_${key}`,key==='recoveryConfirmations'?confirmations:value])),replayStrategy:strategy};
+  session.trackingPolicy=legacy?{...LEGACY_TRACKING_POLICY,identityPolicy:crop?'legacy-roi-controller':LEGACY_IDENTITY_POLICY,replayStrategy:strategy}:{...TRACKING_POLICY,identityPolicy:IDENTITY_POLICY,...Object.fromEntries(Object.entries(SINGLE_RECOVERY_POLICY).map(([key,value])=>[`controlled_${key}`,value])),jointPolicy:JOINT_POLICY.version,jointRecoveryConfirmations:confirmations,...Object.fromEntries(Object.entries(JOINT_POLICY).map(([key,value])=>[`joint_${key}`,key==='recoveryConfirmations'?confirmations:value])),replayStrategy:strategy};
   return {strategy,session,changes,originalSessionId:original.metadata.sessionId};
 }
 

@@ -69,3 +69,7 @@ Use the existing checkout. Do not create worktrees unless explicitly requested.
 - ROI, Multi-Pose and comparisons are experimental, collapsed by default; preserve their regression tests without expanding algorithms.
 - Read docs/SINGLE_SUBJECT_DEMO.md. Local anomalies must remain side-local and recover conservatively; ambiguity/manual identity locks still reject.
 - Separate software verification from real single-person Squat acceptance. Do not declare human stability from synthetic or mock tests.
+
+## v0.6.1 bounded exception
+- Only full-frame-single with controlled-single-default may treat a torso discontinuity as a bounded tentative recovery. Preserve hard ambiguity, explicit manual, timeout and out-of-anchor locks.
+- Do not broaden ROI or multi-person tracking. Reports from saved candidates are QC replay, not new MediaPipe or identity/angle accuracy evidence.

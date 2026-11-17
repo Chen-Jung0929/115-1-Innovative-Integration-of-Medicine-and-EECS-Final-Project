@@ -26,6 +26,7 @@ export interface JointQuality {
   temporal: 'consistent'|'discontinuous'|'recovering'|'unassessed';
 }
 export interface TrackingQuality {
+  recovery?:{kind:'controlled-single-temporal';confirmations:number;required:number;elapsedMs:number};
   // accepted describes torso/subject consistency only; joint gates are independent.
   joints?: {left:JointQuality;right:JointQuality};
   state:TrackingState;

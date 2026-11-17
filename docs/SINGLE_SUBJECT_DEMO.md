@@ -1,5 +1,7 @@
 # v0.6 — 單人 Dataset Demo 核心與驗收
 
+> v0.6.1：controlled-single-default 的短暫torso跳變改為有界恢復，詳見 [iteration-12](updates/iteration-12-controlled-recovery.md)。非受控／實驗模式、真正歧義與人工鎖定維持原規則。
+
 2026-11-17 · app 0.6.0 · schema9 · controlled-single-core-qc-v6。
 
 ## 收斂決策

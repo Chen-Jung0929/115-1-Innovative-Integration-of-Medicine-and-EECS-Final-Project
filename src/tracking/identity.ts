@@ -3,8 +3,10 @@ import type {Roi,TrackingQuality,TrackingState} from '../domain/tracking';
 import {poseQuality,torsoOf,confident,type Torso} from '../biomechanics/poseQuality';
 import {selectInitialSubject,type CandidateSelection} from '../selection/subject';
 import {TRACKING_POLICY as POLICY} from './policy';
+import {kneeObservation} from '../biomechanics/jointQuality';
 import {createJointQuality} from './jointQuality';
-export const IDENTITY_POLICY='torso-identity-independent-joints-v3';
+export const IDENTITY_POLICY='controlled-single-bounded-recovery-v4';
+export const SINGLE_RECOVERY_POLICY={version:'controlled-single-bounded-v1',windowMs:1600,confirmations:3,maxStepGapMs:300,maxAnchorDistanceTorso:2,maxAnchorScale:1.5} as const;
 export function associateByContinuity(candidates:readonly Landmark[][],previous:Torso,dtSeconds:number,width:number,height:number):CandidateSelection {
  if(!(dtSeconds>0))return {selectedIndex:null,proposedIndex:null,reason:'non-increasing-source-time'};
  const ranked=candidates.map((p,index)=>({index,b:torsoOf(p,width,height)})).filter(c=>c.b).map(c=>({...c,d:Math.hypot(c.b!.x-previous.x,c.b!.y-previous.y)/Math.max(c.b!.length,previous.length),scale:Math.max(c.b!.length/previous.length,previous.length/c.b!.length)})).sort((a,b)=>a.d-b.d);
@@ -13,12 +15,14 @@ export function associateByContinuity(candidates:readonly Landmark[][],previous:
  return {selectedIndex:null,proposedIndex:ranked[0]?.index??(candidates.length===1?0:null),reason:consistent.length>1?'ambiguous-temporal-subject':candidates.length?'target-not-continuous':'no-pose'};
 }
 /** Torso identity history is independent of joint validity. Manual identity locks never auto-clear. */
-export function createFullFrameIdentity(width:number,height:number,options:{crop?:boolean;jointConfirmations?:2|3}={}) {
+export function createFullFrameIdentity(width:number,height:number,options:{crop?:boolean;jointConfirmations?:2|3;controlledSingle?:boolean}={}) {
  let previous:{body:Torso;time:number}|null=null,state:TrackingState='TRACKING',returns=0,manualReason='';
+ let transient:{anchor:Torso;start:number;last:Torso|null;lastTime:number;count:number}|null=null;
+ const controlled=options.controlledSingle===true&&!options.crop;
  const joints=createJointQuality(width,height,options.jointConfirmations??2);
  return {requireManual(reason:string){state='MANUAL_REVIEW_REQUIRED';manualReason=reason;},observe(candidates:readonly Landmark[][],time:number,reference:Roi){
   let decision=previous?associateByContinuity(candidates,previous.body,(time-previous.time)/1000,width,height):selectInitialSubject(candidates,reference,width,height);
-  if(options.crop&&candidates.length>1)decision={selectedIndex:null,proposedIndex:null,reason:'ambiguous-candidates'};
+  if((options.crop||controlled)&&candidates.length>1)decision={selectedIndex:null,proposedIndex:null,reason:'ambiguous-candidates'};
   const points=decision.proposedIndex===null?[]:candidates[decision.proposedIndex]!;
   const qc=poseQuality(points,width,height),body=torsoOf(points,width,height);
   const reasons:string[]=[];
@@ -27,7 +31,7 @@ export function createFullFrameIdentity(width:number,height:number,options:{crop
   const lock=(reason:string)=>{state='MANUAL_REVIEW_REQUIRED';manualReason=reason;accepted=false;};
   if(!Number.isFinite(time))lock('invalid-source-time');
   if(decision.reason.startsWith('ambiguous')||decision.reason==='non-increasing-source-time')lock(decision.reason);
-  if(previous&&time-previous.time>POLICY.recoveryGapMs)lock('identity-observation-gap-exceeded');
+  if(previous&&!transient&&time-previous.time>POLICY.recoveryGapMs)lock('identity-observation-gap-exceeded');
   if(options.crop&&body){
    const anchors=[11,12,23,24].map(i=>points[i]!).filter(confident);
    if(anchors.some(p=>{const x=(p.x*width-reference.x)/reference.width,y=(p.y*height-reference.y)/reference.height;return x<POLICY.roiMargin||x>1-POLICY.roiMargin||y<POLICY.roiMargin||y>1-POLICY.roiMargin;})){
@@ -35,6 +39,33 @@ export function createFullFrameIdentity(width:number,height:number,options:{crop
    }
    if(!previous&&(Math.abs((body.x-reference.x)/reference.width-.5)>POLICY.maxInitialCenterOffset||Math.abs((body.y-reference.y)/reference.height-.5)>POLICY.maxInitialCenterOffset))lock('initial-target-not-centered');
   }
+  let handled=false;
+  let recovery:TrackingQuality['recovery'];
+  if(controlled&&state!=='MANUAL_REVIEW_REQUIRED'&&previous&&body&&decision.reason==='target-not-continuous'&&!transient){
+   transient={anchor:previous.body,start:previous.time,last:null,lastTime:time,count:0};
+   reasons.push('temporal-torso-discontinuity');
+  }
+  if(transient&&state!=='MANUAL_REVIEW_REQUIRED'){
+   handled=true;accepted=false;state=candidates.length?'UNCERTAIN':'LOST';continuity='discontinuous';
+   const r=transient,p=SINGLE_RECOVERY_POLICY;
+   if(time-r.start>p.windowMs)lock('controlled-recovery-window-exceeded');
+   else if(body&&candidates.length===1){
+    const distance=Math.hypot(body.x-r.anchor.x,body.y-r.anchor.y)/Math.max(body.length,r.anchor.length);
+    const scale=Math.max(body.length/r.anchor.length,r.anchor.length/body.length);
+    if(distance>p.maxAnchorDistanceTorso||scale>p.maxAnchorScale)lock('controlled-recovery-outside-anchor');
+    else if(qc.accepted&&(['left','right'] as const).some(side=>kneeObservation(points,side,width,height).reasons.length===0)){
+     const dt=time-r.lastTime;
+     const close=r.last&&Math.hypot(body.x-r.last.x,body.y-r.last.y)/Math.max(body.length,r.last.length)<=POLICY.recoveryCenterTorso;
+     const stable=r.last&&Math.max(body.length/r.last.length,r.last.length/body.length)<=POLICY.recoveryScaleChange;
+     r.count=dt>0&&dt<=p.maxStepGapMs&&close&&stable?r.count+1:0;
+     r.last=body;r.lastTime=time;
+     if(r.count>=p.confirmations){accepted=true;decision={...decision,selectedIndex:decision.proposedIndex};reasons.push('controlled-single-recovery-confirmed');transient=null;}
+    }else {r.count=0;r.last=null;}
+   }else {r.count=0;r.last=null;}
+   recovery={kind:'controlled-single-temporal',confirmations:r.count,required:p.confirmations,elapsedMs:time-r.start};
+   if(!accepted)reasons.push('controlled-single-recovery-pending');
+  }
+  if(!handled){
   // A reliable but discontinuous torso is independent identity evidence; a leg alone is not.
   if(previous&&body&&decision.selectedIndex===null&&decision.reason==='target-not-continuous')lock('temporal-torso-jump-or-scale-change');
   if(!body&&candidates.length)reasons.push('unreliable-torso-anchors');
@@ -54,11 +85,12 @@ export function createFullFrameIdentity(width:number,height:number,options:{crop
    if(!close||!stable)lock('recovery-not-identity-consistent');
    else if(++returns<POLICY.recoveryConfirmations){state='UNCERTAIN';accepted=false;reasons.push('identity-recovery-confirmation-pending');}
   }
+  }
   if(state==='MANUAL_REVIEW_REQUIRED')reasons.push(manualReason,'manual-reselection-required');
   if(accepted){previous={body:body!,time};state='TRACKING';returns=0;}
   if(reasons.includes('temporal-torso-jump-or-scale-change'))continuity='discontinuous';
   const jointQuality=joints.observe(points,time,accepted,options.crop?reference:undefined);
-  const tracking:TrackingQuality={state,accepted,identity:accepted?'consistent-unverified':!candidates.length?'target-lost':'identity-uncertain',landmarkConfidence:qc.landmarkConfidence,plausibility:qc.plausibility,continuity,reasons:[...new Set(reasons)],joints:jointQuality};
+  const tracking:TrackingQuality={...(recovery?{recovery}:{}),state,accepted,identity:accepted?'consistent-unverified':!candidates.length?'target-lost':'identity-uncertain',landmarkConfidence:qc.landmarkConfidence,plausibility:qc.plausibility,continuity,reasons:[...new Set(reasons)],joints:jointQuality};
   decision={...decision,selectedIndex:accepted?decision.selectedIndex:null};
   return {decision,tracking,landmarks:points};
  }};

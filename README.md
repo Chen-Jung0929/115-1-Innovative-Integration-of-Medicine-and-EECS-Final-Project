@@ -7,30 +7,44 @@
 
 ## 目前成果與驗證狀態
 
-v0.6.0 將 Dataset Demo 收斂為**單人完整影格分析**：上傳 MP4 後直接開始，不必框選或比較多種管線。
+v0.6.1 沿用單人主要流程並修正暫態軀幹跳變恢復。v0.6.0 將 Dataset Demo 收斂為**單人完整影格分析**：上傳 MP4 後直接開始，不必框選或比較多種管線。
 適用條件為單一受測者、固定鏡頭、完整人體入鏡的 Squat。ROI、自動跟隨、多姿態與 A/B/C 比較保留在
 預設收合的「實驗性功能」，研究診斷及人工標註另行收合，不再是一般操作的前置步驟。
 
 目前已完成主要流程與自動回歸驗證；**真實單人 Squat 穩定性待驗收，尚未宣稱 Dataset Demo 的人體驗收完成**。
-本環境沒有指定真實影片、有效官方模型或團隊研究 JSON，測試中的合成姿態不是人體準確度證據。
+本次已取得上傳影片、CSV與研究JSON並完成QC重播；沒有有效官方模型，未重新執行MediaPipe或完成人工準確度驗證。
 
 團隊先前回報 v0.5 三法各只有 4/155 筆自動有效，原因之一是腿段尺度跳變被升級為永久身分鎖定。
 v0.5.1 已分離 QC，本版沿用：局部腿部異常只使受影響側角度暫時無效，連續可靠觀測後才恢復。
 另修正首筆沒有可靠姿態時的鎖定：初始化期間保留 N/A，等待可信觀測，不將未取得姿態視為已換人。
 多人歧義、明顯軀幹跳換及已追蹤目標的長時間遺失仍拒絕，不會無條件接受所有候選。
 
-實際檢查：134 個單元測試、typecheck、build 通過；Chromium 31 通過／2 項真實資產測試跳過，見 [本次迭代紀錄](docs/updates/iteration-11-single-subject-demo.md)。
+實際檢查：139 個單元測試、typecheck、build 通過；Chromium 31 通過／2 項真實資產測試跳過，見 [本次迭代紀錄](docs/updates/iteration-11-single-subject-demo.md)。
 build 仍有 bundle 大小警告。原始觀測、無效原因、模型 hash、版本與研究 JSON 都保留。
 [單人分析方法與驗收](docs/SINGLE_SUBJECT_DEMO.md) 說明研究邊界；可用率增加不等於準確度改善。
 
+## v0.6.1 實測附件修正
+
+已核對上傳的 `subject_010_squat_good_side.mp4`、CSV 與研究 JSON：影片29.733秒，
+原結果148筆、左膝有效16筆、3.2秒起132筆人工鎖定。來源影片hash與JSON紀錄一致。
+
+只有受控單人預設模式可將短暫torso跳變先記為UNCERTAIN：相對最後可信位置有界、
+1600ms內取得三次連續嚴格確認，再完成原有各側關節確認才恢復。等待期間角度仍無效。
+多候選歧義、超界、逾時與既有人工要求仍鎖定；ROI／多人實驗策略不變。
+
+同一份已保存候選的QC重播：3.2–3.6秒無效，3.8秒身分規則恢復、4.0秒左膝量測恢復；
+左膝143/148、右膝0/148，新增127筆自動放行皆待人工核對。這不是重新執行MediaPipe或accuracy驗證。
+影片抽查有背景人物；numPoses1不能證明現場只有一人，不能據此宣稱完整單人實測驗收通過。
+詳見 [本次修正與實際結果](docs/updates/iteration-12-controlled-recovery.md)。
+
 ## 安裝與啟動
 
-先安裝 Node.js（本次使用 24.22.1，見 `.nvmrc`）。本版目前在 `feature/dataset-demo-v06`，尚未合併 main；
+先安裝 Node.js（本次使用 24.22.1，見 `.nvmrc`）。本版目前在 `feature/controlled-single-recovery`，尚未合併 main；
 請取得這個分支的檔案。已有 Git checkout 的組員可在專案目錄執行：
 
 ```sh
 git fetch origin
-git switch feature/dataset-demo-v06
+git switch feature/controlled-single-recovery
 ```
 
 接著安裝並啟動：

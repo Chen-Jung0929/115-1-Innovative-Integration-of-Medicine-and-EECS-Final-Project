@@ -412,7 +412,7 @@ for(const pipeline of ['full-frame-single','roi-crop','full-frame-multi']){
   await page.getByLabel('分析管線',{exact:true}).selectOption(pipeline);
   await page.getByRole('button',{name:'開始分析',exact:true}).click();await expect(page.getByText('分析完成；',{exact:false})).toBeVisible();
   const pending=page.waitForEvent('download');await page.getByRole('button',{name:/下載研究 JSON/}).click();const r=JSON.parse(readFileSync((await(await pending).path())!,'utf8'));
-  expect(r.metadata.applicationVersion).toBe('0.6.0');expect(r.metadata.schemaVersion).toBe('9');
+  expect(r.metadata.applicationVersion).toBe('0.6.1');expect(r.metadata.schemaVersion).toBe('9');
   expect(r.samples.map((s:any)=>s.tracking.state)).toEqual(Array(5).fill('TRACKING'));
   expect(r.samples.map((s:any)=>s.left.valid)).toEqual([true,false,false,true,true]);
   expect(r.samples.every((s:any)=>s.right.valid)).toBe(true);expect(r.samples[1].rawAngles.left.valid).toBe(true);
@@ -436,7 +436,7 @@ for(const scenario of ['main-stable','single-confidence','single-temporal','init
   await expect(page.getByRole('img',{name:/左右膝影像/})).toBeVisible();
   const pending=page.waitForEvent('download');await page.getByRole('button',{name:/下載研究 JSON/}).click();const r=JSON.parse(readFileSync((await(await pending).path())!,'utf8'));
   expect(r.run.pipeline).toEqual({id:'full-frame-single',numPoses:1});expect(r.run.inputSpace).toBe('full-frame');
-  expect(r.metadata.applicationVersion).toBe('0.6.0');expect(r.metadata.schemaVersion).toBe('9');
+  expect(r.metadata.applicationVersion).toBe('0.6.1');expect(r.metadata.schemaVersion).toBe('9');
   expect(r.subjectSelection.correctionSource).toBe('controlled-single-default');expect(r.subjectSelection.keyframes[0].source).toBe('controlled-single-default');
   expect(r.samples.map((s:any)=>s.sourceTimeMs)).toEqual([0,200,400,600,800]);expect(r.samples.every((s:any)=>s.roi.width===320&&s.roi.height===180&&s.search===null&&s.manualKeyframeId===null)).toBe(true);
   expect(r.samples.every((s:any)=>s.tracking.state!=='MANUAL_REVIEW_REQUIRED')).toBe(true);

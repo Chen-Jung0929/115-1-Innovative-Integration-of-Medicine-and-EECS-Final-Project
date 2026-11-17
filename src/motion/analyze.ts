@@ -1,6 +1,6 @@
 import { checkedPipeline,DEFAULT_PIPELINE,type PipelineConfig } from '../domain/pipeline';
 import {LANDMARK_QUALITY_POLICY} from '../biomechanics/poseQuality';
-import { createFullFrameIdentity,IDENTITY_POLICY } from '../tracking/identity';
+import { createFullFrameIdentity,IDENTITY_POLICY,SINGLE_RECOVERY_POLICY } from '../tracking/identity';
 import type { Session, Sample } from '../domain/analysis';
 import { ANGLE_DEFINITION, QC_POLICY, SAMPLING_HZ, ANALYSIS_SCHEMA_VERSION } from '../domain/analysis';
 import { kneeAngle } from '../biomechanics/knee';
@@ -41,7 +41,7 @@ export async function analyze(url: string, filename: string, model: File | null,
     const roi = checkedRoi(selection.roi, decoder.videoWidth, decoder.videoHeight);
     canvas.width = roi.width; canvas.height = roi.height;
     if(selection.method!=='manual-fixed-roi')checkedKeyframes(selection.keyframes,decoder.videoWidth,decoder.videoHeight,decoder.duration*1000);
-    let identity=createFullFrameIdentity(decoder.videoWidth,decoder.videoHeight);
+    let identity=createFullFrameIdentity(decoder.videoWidth,decoder.videoHeight,{controlledSingle:pipeline.id==='full-frame-single'&&selection.correctionSource==='controlled-single-default'});
     let referenceKey:string|null=null;
     let previousTrackingState:TrackingState='TRACKING';
     const controller = createRoiController(selection,decoder.videoWidth,decoder.videoHeight);
@@ -59,7 +59,7 @@ export async function analyze(url: string, filename: string, model: File | null,
       const referenceSelection={...selection,method:'manual-keyframes' as const,keyframes:selection.keyframes.length?selection.keyframes:[{id:selection.id,timeMs:0,roi:selection.roi,source:'manual-target-confirmation' as const}]};
       const reference=roiAt(referenceSelection,time*1000,decoder.videoWidth,decoder.videoHeight);
       const proposal:FramePlan=cropping?controller.propose(time*1000):{roi:{x:0,y:0,width:decoder.videoWidth,height:decoder.videoHeight},roiSource:'full-frame',roiUpdateReason:'original-source-image-no-crop',manualKeyframeId:reference.manualKeyframeId,resetModel:false,searchDue:false,previousState:previousTrackingState};
-      if(!cropping&&reference.manualKeyframeId!==referenceKey){identity=createFullFrameIdentity(decoder.videoWidth,decoder.videoHeight);referenceKey=reference.manualKeyframeId;}
+      if(!cropping&&reference.manualKeyframeId!==referenceKey){identity=createFullFrameIdentity(decoder.videoWidth,decoder.videoHeight,{controlledSingle:pipeline.id==='full-frame-single'&&selection.correctionSource==='controlled-single-default'});referenceKey=reference.manualKeyframeId;}
       const usedRoi=proposal.roi;
       if(proposal.resetModel){engine.close();engine=await createPoseEngine(asset.bytes);signal.throwIfAborted();proposal.roiUpdateReason+=':new-model-after-manual-confirmation';}
       canvas.width=usedRoi.width;canvas.height=usedRoi.height;
@@ -88,7 +88,7 @@ export async function analyze(url: string, filename: string, model: File | null,
     if (!samples.length) throw new Error('沒有可分析的影格。');
     completed={
       run:{pipeline,inputSpace:cropping?'roi-crop':'full-frame',sourceSha256:options.sourceSha256??null,comparisonId:options.comparisonId??null,analysisDurationMs:performance.now()-started,modelPreparationMs,requestedSamples:times.length},
-      analysisRevision:{parentSessionId:null,selectionRevision:selection.revision,correctionSource:selection.correctionSource},trackingPolicy:{...TRACKING_POLICY,identityPolicy:IDENTITY_POLICY,jointPolicy:JOINT_POLICY.version,jointRecoveryConfirmations:JOINT_POLICY.recoveryConfirmations,...Object.fromEntries(Object.entries(JOINT_POLICY).map(([key,value])=>[`joint_${key}`,value])),landmarkQualityPolicy:LANDMARK_QUALITY_POLICY.version,...Object.fromEntries(Object.entries(FOLLOW_POLICY).map(([key,value])=>[`follow_${key}`,value]))}, subjectSelection: {...selection,roi}, sourceFilename: filename, durationMs: decoder.duration * 1000, samplingHz: SAMPLING_HZ, samples,
+      analysisRevision:{parentSessionId:null,selectionRevision:selection.revision,correctionSource:selection.correctionSource},trackingPolicy:{...TRACKING_POLICY,identityPolicy:IDENTITY_POLICY,...Object.fromEntries(Object.entries(SINGLE_RECOVERY_POLICY).map(([key,value])=>[`controlled_${key}`,value])),jointPolicy:JOINT_POLICY.version,jointRecoveryConfirmations:JOINT_POLICY.recoveryConfirmations,...Object.fromEntries(Object.entries(JOINT_POLICY).map(([key,value])=>[`joint_${key}`,value])),landmarkQualityPolicy:LANDMARK_QUALITY_POLICY.version,...Object.fromEntries(Object.entries(FOLLOW_POLICY).map(([key,value])=>[`follow_${key}`,value]))}, subjectSelection: {...selection,roi}, sourceFilename: filename, durationMs: decoder.duration * 1000, samplingHz: SAMPLING_HZ, samples,
       metadata: { schemaVersion: ANALYSIS_SCHEMA_VERSION, sessionId: crypto.randomUUID(), sourceId: crypto.randomUUID(), inputKind: 'video',
         sourceWidthPx: decoder.videoWidth, sourceHeightPx: decoder.videoHeight, inferenceMirrored: false, displayMirrored: false,
         model: { packageVersion: MODEL_VERSION, assetId: asset.id, assetSha256: asset.hash, delegate: 'CPU' },

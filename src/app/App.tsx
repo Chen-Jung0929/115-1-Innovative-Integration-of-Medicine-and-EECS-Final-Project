@@ -166,7 +166,7 @@ export function App() {
   const pct = (s: 'left' | 'right') => { const value = session ? coverage(session.samples, s) : null; return value === null ? 'N/A' : `${(value * 100).toFixed(1)}%`; };
 
   return <main>
-    <header><p className="eyebrow">臺大 115-1 醫學電資創意整合專題 · Dataset Demo v0.6.0</p><h1>關節動作分析研究工作台</h1><p>上傳單人 MP4 → 開始分析 → 查看膝角度與曲線 → 匯出 CSV</p></header>
+    <header><p className="eyebrow">臺大 115-1 醫學電資創意整合專題 · Dataset Demo v0.6.1</p><h1>關節動作分析研究工作台</h1><p>上傳單人 MP4 → 開始分析 → 查看膝角度與曲線 → 匯出 CSV</p></header>
     <aside>本系統為學術概念驗證，不提供醫療診斷或治療建議。2D 影像平面幾何角不是經驗證的臨床角度；側面視角較適合觀察，遮蔽與透視會影響結果。</aside>
     <section className="setup" aria-labelledby="input-title"><h2 id="input-title">1. 選擇影片與模型</h2>
       <label>MP4 影片（最多 500 MB、10 分鐘）<input type="file" accept=".mp4,video/mp4" disabled={busy || loading} onChange={e => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; void choose(f); }} /></label>
