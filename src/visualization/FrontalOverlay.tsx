@@ -38,11 +38,13 @@ export function FrontalOverlay({ sample, frame, width, height }: { sample: Sampl
     };
     const n = frame.neutral;
 
+    const f = frontalFrame(sample.landmarks, width, height);
+    // Every line here is a FRONTAL check: in an oblique/side view draw nothing (the prompt box asks for a frontal recording).
+    if (typeof f === 'string') return;
     // Vertical baseline, locked at the standing calibration.
     const b = frame.baseline;
     if (b.state === 'locked') { line({ x: b.x, y: 0 }, { x: b.x, y: Math.min(height, b.heelY + unit * 4) }, BASE, unit * 1.3); label('基準線', { x: b.x + unit * 3, y: unit * 8 }, BASE); }
 
-    const f = frontalFrame(sample.landmarks, width, height);
     if (typeof f !== 'string') {
       const half = (a: Point, c: Point) => Math.hypot(a.x - c.x, a.y - c.y) / 2 * 1.6;
       const sideX = (a: Point, c: Point) => Math.max(a.x, c.x) + unit * 4;
