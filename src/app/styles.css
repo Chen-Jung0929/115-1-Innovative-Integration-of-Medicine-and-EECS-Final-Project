@@ -52,3 +52,5 @@ table {border-collapse:collapse;width:100%;} th,td {padding:12px;border-bottom:1
 .cue-muted { color:#e6eeec !important; font-weight:500 !important; }
 label.inline { display:flex; align-items:center; gap:8px; }
 .frontal-note { font-size:.92rem; color:#376a65; }
+.frontal-legend { position:absolute; left:12px; bottom:56px; margin:0; padding:8px 12px; list-style:none; background:rgba(16,27,30,.72); color:#fff; border-radius:10px; font-size:clamp(.7rem,1.6vw,.85rem); line-height:1.6; pointer-events:none; }
+.frontal-legend .swatch { display:inline-block; width:22px; height:0; border-top-width:3px; margin-right:8px; vertical-align:middle; }

@@ -23,7 +23,7 @@ import { AngleChart, CHART_METRICS, type ChartMetric } from '../visualization/An
 import { hipFlexionProxy } from '../biomechanics/posture';
 import type { AngleValue, ScalarValue } from '../domain/measurement';
 import { frontalTimeline, type BaselineSource } from '../motion/frontalTimeline';
-import { FrontalOverlay, FrontalCuePanel } from '../visualization/FrontalOverlay';
+import { FrontalOverlay, FrontalCuePanel, FrontalLegend } from '../visualization/FrontalOverlay';
 import { CUE_POLICY } from '../motion/frontalCues';
 
 export function App() {
@@ -232,8 +232,8 @@ export function App() {
         // maps to the decoded frame recorded by the analysis decoder.
         const known = session?.samples.find(s => Math.abs(s.requestedTimeMs - v.currentTime * 1000) <= 1);
         setTimeMs(known?.sourceTimeMs ?? v.currentTime * 1000); setSeeking(false);
-      }} onError={() => { if (info) { setError('影片播放解碼失敗，請改用 H.264 MP4。'); setSession(null); } }} /><Overlay sample={sample} width={info?.width ?? 640} height={info?.height ?? 360} side={side} diagnostic={diagnostic} />
-      {frontalView && session && !selecting && <><FrontalOverlay sample={sample} frame={frontalFrame} width={info?.width ?? 640} height={info?.height ?? 360} /><FrontalCuePanel frame={frontalFrame} hasSample={!!sample} /></>}
+      }} onError={() => { if (info) { setError('影片播放解碼失敗，請改用 H.264 MP4。'); setSession(null); } }} /><Overlay sample={sample} width={info?.width ?? 640} height={info?.height ?? 360} side={side} diagnostic={diagnostic} muted={frontalView && !!session && !selecting} />
+      {frontalView && session && !selecting && <><FrontalOverlay sample={sample} frame={frontalFrame} width={info?.width ?? 640} height={info?.height ?? 360} /><FrontalCuePanel frame={frontalFrame} hasSample={!!sample} /><FrontalLegend /></>}
       {selecting && info && !seeking && <RoiSelector width={info.width} height={info.height} roi={draft} onChange={setDraft} drawNew={drawNew} onDrawEnd={()=>setDrawNew(false)} />}
       {experiments && selection && info && !selecting && <svg className="roi-border" viewBox={`0 0 ${info.width} ${info.height}`} aria-label="受測者 ROI 範圍"><rect {...(pipeline==='roi-crop'?(sample?.roi??displayedRoi(session?.samples??[],timeMs)??roiAt(selection,timeMs,info.width,info.height).roi):(sample?.targetReferenceRoi??selection.roi))} fill="none" stroke="#ffda57" strokeWidth={Math.max(2,info.width/250)} /></svg>}</div>
         <p>來源影格時間：{(timeMs/1000).toFixed(3)} 秒。{sample ? `對應取樣 #${sample.sampleIndex}（${sample.decode.timeBasis}）` : '此影格沒有對應分析結果，骨架與角度不顯示。'}</p>
@@ -245,7 +245,7 @@ export function App() {
         })}
       </div></div>
       <p>定義：髖–膝–踝於膝點的影像平面內角（0–180°）。暫定屈曲 proxy = 180° − 內角；不是已確認的臨床屈曲角。左右為人體解剖側，影片不鏡像。</p>
-      {frontalView && <p className="frontal-note">正面檢查說明：紅色直線是基準線。個案先站直、不動約 1 秒，系統以這段時間的軀幹中線（兩肩中點與兩髖中點）定出位置並固定；之後身體怎麼動線都不動，腳跟明顯移動才重新定位。也可切換成講義 p.5 的「兩腳跟中點」。拍攝角度太斜時不判斷。黃線為兩肩線、骨盆線（以髖關節代替 ASIS）與過腳尖的鉛垂線，藍色虛線為軀幹；偏離時變紅並出現提示。左右指個案本身的左右。提示門檻為暫定值（頭 {CUE_POLICY.headHipWidths} 個骨盆寬、肩 {CUE_POLICY.shoulderDeg}°、軀幹 {CUE_POLICY.trunkDeg}°、骨盆 {CUE_POLICY.pelvisDeg}°、膝 {CUE_POLICY.kneeToeHipWidths} 個骨盆寬），待醫學組確認；只適用正面拍攝，皆為 2D 影像平面幾何。</p>}
+      {frontalView && <p className="frontal-note">正面檢查說明：紅色直線是基準線。個案先站直、不動約 1 秒，系統以這段時間的軀幹中線（兩肩中點與兩髖中點）定出位置並固定；之後身體怎麼動線都不動，腳跟明顯移動才重新定位。也可切換成講義 p.5 的「兩腳跟中點」。拍攝角度太斜時不判斷。黃線為目前的兩肩線、骨盆線（以髖關節代替 ASIS），白色虛線是「站直時」的肩線／骨盆線，兩條線張開代表變歪了；藍色虛線為軀幹，綠色虛線為過腳尖的鉛垂線；偏離時變紅並出現提示。綠色骨架在此模式下會淡化。左右指個案本身的左右。提示門檻為暫定值（頭 {CUE_POLICY.headHipWidths} 個骨盆寬、肩 {CUE_POLICY.shoulderDeg}°、軀幹 {CUE_POLICY.trunkDeg}°、骨盆 {CUE_POLICY.pelvisDeg}°、膝 {CUE_POLICY.kneeToeHipWidths} 個骨盆寬），待醫學組確認；只適用正面拍攝，皆為 2D 影像平面幾何。</p>}
       <h3>深蹲姿勢指標（暫定，待物理治療師確認）</h3>
       <div className="posture-measurements">
         {(['left','right'] as const).filter(s => side === 'both' || side === s).map(s => {
