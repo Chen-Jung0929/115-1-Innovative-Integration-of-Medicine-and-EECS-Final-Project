@@ -8,7 +8,7 @@ import type { Session } from '../domain/analysis';
 import { MODEL_URL, PROJECT_MODEL_URL } from '../pose/mediapipe';
 import { checkFile, loadVideo, seekFrame, observePresentedFrame } from '../input/video';
 import { analyze } from '../motion/analyze';
-import { coverage, matchingSample, displayedRoi } from '../motion/series';
+import { coverage, matchingSample, displayedRoi, heldSample } from '../motion/series';
 import { flexionProxy } from '../biomechanics/knee';
 import { downloadFile, toCsv } from '../export/csv';
 import { Overlay } from '../visualization/Overlay';
@@ -67,6 +67,7 @@ export function App() {
   const [frontalView,setFrontalView]=useState(true);
   const [baselineSource,setBaselineSource]=useState<BaselineSource>('standing-trunk');
   const [mode, setMode] = useState<'video' | 'camera'>('video');
+  const [playing, setPlaying] = useState(false);
 
   useEffect(() => {
     const v = video.current!;
@@ -173,7 +174,10 @@ export function App() {
       setSelecting(false);setError('');
     }catch(e){setError(message(e));}
   }
-  const sample = session && !seeking ? (matchingSample(session.samples, timeMs) ?? (video.current?.paused ? session.samples.find(s=>s.decode.timeBasis==='seek-position-estimate' && Math.abs(s.requestedTimeMs-video.current!.currentTime*1000)<.001):undefined)) : undefined;
+  const exact = session && !seeking ? (matchingSample(session.samples, timeMs) ?? (video.current?.paused ? session.samples.find(s=>s.decode.timeBasis==='seek-position-estimate' && Math.abs(s.requestedTimeMs-video.current!.currentTime*1000)<.001):undefined)) : undefined;
+  // While playing, keep the latest analyzed frame on screen between 5 Hz samples instead of flashing "no result".
+  const held = !exact && session && playing && !seeking ? heldSample(session.samples, timeMs, PLAYBACK_HOLD_MS) : undefined;
+  const sample = exact ?? held;
   const frontal = useMemo(() => session && info ? frontalTimeline(session.samples, info.width, info.height, baselineSource) : [], [session, info, baselineSource]);
   const frontalFrame = sample ? frontal.find(f => f.sampleIndex === sample.sampleIndex) : undefined;
   const pct = (s: 'left' | 'right') => { const value = session ? coverage(session.samples, s) : null; return value === null ? 'N/A' : `${(value * 100).toFixed(1)}%`; };
@@ -224,7 +228,7 @@ export function App() {
         </div>
       </div>
       {sample?.tracking.state==='MANUAL_REVIEW_REQUIRED'&&<aside className="banner warn">人物一致性無法確認，量測已暫停。請確認單人、完整入鏡後重新分析；必要時可在實驗區人工校正。局部膝部缺點不會單獨造成這個鎖定。</aside>}
-      <div className="workspace"><div className="stage-col"><div className="video-stage"><video ref={video} controls={!selecting} playsInline onPlay={()=>{if(selecting)video.current?.pause();}} onSeeking={() => setSeeking(true)} onSeeked={() => {
+      <div className="workspace"><div className="stage-col"><div className="video-stage"><video ref={video} controls={!selecting} playsInline onPlay={()=>{if(selecting)video.current?.pause();else setPlaying(true);}} onPause={()=>setPlaying(false)} onEnded={()=>setPlaying(false)} onSeeking={() => setSeeking(true)} onSeeked={() => {
         const v = video.current;
         if (!v) return;
         // Paused/off-screen videos may throttle rVFC. The same completed seek target
@@ -238,7 +242,7 @@ export function App() {
       {!info && !loading && <p className="stage-empty">選擇影片後，畫面會出現在這裡</p>}</div>
         {frontalView && session && !selecting && <FrontalLegend view={frontalFrame?.view} />}
         {session && <label className="scrub">逐格檢查<input aria-label="已分析取樣" type="range" min={0} max={session.samples.length-1} disabled={selecting} value={sampleIndex} onChange={e => jump(Number(e.target.value))} /><span className="muted">#{sampleIndex} / {session.samples.length-1}</span></label>}
-        <p className="muted small">來源影格時間：{(timeMs/1000).toFixed(3)} 秒。{sample ? `對應取樣 #${sample.sampleIndex}（${sample.decode.timeBasis}）` : '這一格沒有分析結果，骨架與角度不顯示。'}</p>
+        <p className="muted small">來源影格時間：{(timeMs/1000).toFixed(3)} 秒。{held ? `播放中：顯示最近一次分析（取樣 #${held.sampleIndex}，${Math.max(0,(timeMs-(held.decode.timeBasis==='presentation'?held.sourceTimeMs:held.requestedTimeMs))/1000).toFixed(2)} 秒前；每秒分析 5 次）` : sample ? `對應取樣 #${sample.sampleIndex}（${sample.decode.timeBasis}）` : '這一格沒有分析結果，骨架與角度不顯示。暫停時只顯示真正分析過的影格，可用「逐格檢查」跳過去。'}</p>
       </div><div className="readout">
         <div className="group"><h3 className="group-title">膝蓋</h3><div className="measurements">
         {sides.map(s => {
@@ -313,4 +317,6 @@ export function App() {
     <footer className="disclaimer">本系統為學術概念驗證，不提供醫療診斷或治療建議。2D 影像平面幾何角不是經驗證的臨床角度；側面視角較適合觀察，遮蔽與透視會影響結果。</footer>
   </div>;
 }
+/** Playback only: one 5 Hz sample interval plus a little decoder jitter. */
+const PLAYBACK_HOLD_MS = 250;
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }

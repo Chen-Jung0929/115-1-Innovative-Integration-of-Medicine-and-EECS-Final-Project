@@ -1,6 +1,6 @@
 import { makeSample } from '../test/fixtures';
 import { expect, it } from 'vitest';
-import { sampleTimes, matchingSample, coverage } from './series';
+import { sampleTimes, matchingSample, coverage, heldSample } from './series';
 import type { Sample } from '../domain/analysis';
 const samples: Sample[] = [
   makeSample({sampleIndex:0,requestedTimeMs:0,sourceTimeMs:0,landmarks:[],left:{valid:true,rawAngleDeg:0,invalidReasons:[]},right:{valid:false,rawAngleDeg:null,invalidReasons:['missing-landmark']}}),
@@ -22,4 +22,14 @@ it('holds actual adaptive ROI between frames without inventing angle samples',as
  const a=makeSample({sourceTimeMs:0,roi:{x:0,y:0,width:100,height:100}});
  const b=makeSample({sampleIndex:1,sourceTimeMs:166.667,requestedTimeMs:200,roi:{x:50,y:0,width:100,height:100}});
  expect(displayedRoi([a,b],180)?.x).toBe(50);expect(matchingSample([a,b],180)).toBeUndefined();expect(a.roi.x).toBe(0);
+});
+
+it('playback display holds the latest analyzed frame for a short time, never a future one', () => {
+  const at = (i: number, t: number) => makeSample({ sampleIndex: i, sourceTimeMs: t, requestedTimeMs: t });
+  const samples = [at(0, 0), at(1, 200), at(2, 400)];
+  expect(heldSample(samples, 120, 250)?.sampleIndex).toBe(0);
+  expect(heldSample(samples, 398, 250)?.sampleIndex).toBe(1);
+  expect(heldSample(samples, 400, 250)?.sampleIndex).toBe(2);
+  expect(heldSample(samples, 700, 250)).toBeUndefined();
+  expect(heldSample([at(0, 500)], 100, 250)).toBeUndefined();
 });
