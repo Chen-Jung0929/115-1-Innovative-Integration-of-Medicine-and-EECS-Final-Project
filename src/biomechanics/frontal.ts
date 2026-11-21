@@ -68,7 +68,7 @@ export function headPoint(landmarks: readonly Landmark[], width: number, height:
 }
 
 /** Torso frame shared by every frontal check, or why the pose is not a usable frontal view. */
-export function frontalFrame(landmarks: readonly Landmark[], width: number, height: number) {
+export function frontalFrame(landmarks: readonly Landmark[], width: number, height: number, minShoulderRatio: number = FRONTAL_POLICY.minFrontalShoulderRatio) {
   const p = sourcePoints(landmarks, [11, 12, 23, 24], width, height);
   if (typeof p === 'string') return p;
   const [ls, rs, lh, rh] = p as [Point, Point, Point, Point];
@@ -78,7 +78,7 @@ export function frontalFrame(landmarks: readonly Landmark[], width: number, heig
   const shoulderMid = mid(ls, rs), hipMid = mid(lh, rh);
   const torso = Math.hypot(shoulderMid.x - hipMid.x, shoulderMid.y - hipMid.y);
   if (torso < 1e-6) return 'degenerate-geometry' as const;
-  if (Math.abs(ls.x - rs.x) / torso < FRONTAL_POLICY.minFrontalShoulderRatio) return 'unsupported-view' as const;
+  if (Math.abs(ls.x - rs.x) / torso < minShoulderRatio) return 'unsupported-view' as const;
   /** +1 when the person's left is toward +x on screen. */
   const leftDir = Math.sign(lh.x - rh.x);
   return { ls, rs, lh, rh, hipWidth, shoulderMid, hipMid, leftDir };
@@ -94,9 +94,9 @@ function tilt(left: Point, right: Point): number {
  * motion/baseline.ts); head and shift are N/A while no baseline is locked. Video and camera must
  * both call this.
  */
-export function measureFrontal(landmarks: readonly Landmark[], width: number, height: number, baselineX: number | null): FrontalMetrics {
+export function measureFrontal(landmarks: readonly Landmark[], width: number, height: number, baselineX: number | null, minShoulderRatio: number = FRONTAL_POLICY.minFrontalShoulderRatio): FrontalMetrics {
   const kneeToe = { left: kneeToeOffset(landmarks, 'left', width, height), right: kneeToeOffset(landmarks, 'right', width, height) };
-  const f = frontalFrame(landmarks, width, height);
+  const f = frontalFrame(landmarks, width, height, minShoulderRatio);
   if (typeof f === 'string') {
     const no = bad(f);
     // An oblique/side view also invalidates the frontal knee check.

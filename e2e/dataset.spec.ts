@@ -130,7 +130,8 @@ test('synthetic pose adapter: pipeline, gaps, chart, CSV, reanalysis and selecti
   const second=JSON.parse(readFileSync((await (await secondDownload).path())!, 'utf8'));
   expect(first.samples.map(({decode,...s}:any)=>s)).toEqual(second.samples.map(({decode,...s}:any)=>s)); expect(first.metadata.sessionId).not.toBe(second.metadata.sessionId);
   await page.locator('video').evaluate((v: HTMLVideoElement) => {v.currentTime=.12;});
-  await expect(page.locator('.measurements .angle').first()).toHaveText('N/A');
+  // Paused between samples: the closest analyzed frame is shown and labelled as such (display only).
+  await expect(page.getByText('顯示最近的分析影格',{exact:false})).toBeVisible();
   expect(errors).toEqual([]); expect(outgoing).toEqual([]);
 });
 

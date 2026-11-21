@@ -8,7 +8,7 @@ import type { Session } from '../domain/analysis';
 import { MODEL_URL, PROJECT_MODEL_URL } from '../pose/mediapipe';
 import { checkFile, loadVideo, seekFrame, observePresentedFrame } from '../input/video';
 import { analyze } from '../motion/analyze';
-import { coverage, matchingSample, displayedRoi } from '../motion/series';
+import { coverage, matchingSample, displayedRoi, nearestSample, smoothedSample } from '../motion/series';
 import { flexionProxy } from '../biomechanics/knee';
 import { downloadFile, toCsv } from '../export/csv';
 import { Overlay } from '../visualization/Overlay';
@@ -21,10 +21,12 @@ import { ReviewPanel } from '../validation/ReviewPanel';
 import { applyReview } from '../validation/targetMetrics';
 import { AngleChart, CHART_METRICS, type ChartMetric } from '../visualization/AngleChart';
 import { hipFlexionProxy } from '../biomechanics/posture';
-import type { AngleValue, ScalarValue } from '../domain/measurement';
+import { Metric } from './Metric';
+import { plainReason, qcStatus, showAngle, showFlexion } from './plain';
 import { frontalTimeline, type BaselineSource } from '../motion/frontalTimeline';
 import { FrontalOverlay, FrontalCuePanel, FrontalLegend } from '../visualization/FrontalOverlay';
 import { CUE_POLICY } from '../motion/frontalCues';
+import { LivePanel } from './LivePanel';
 
 export function App() {
   const [pipeline,setPipeline]=useState<PipelineId>(DEFAULT_PIPELINE.id);
@@ -56,6 +58,8 @@ export function App() {
   const [timeMs, setTimeMs] = useState(0);
   const [seeking, setSeeking] = useState(false);
   const [side, setSide] = useState<'left' | 'right' | 'both'>('both');
+  const [speed, setSpeed] = useState<number>(DEFAULT_SPEED);
+  useEffect(() => { const v = video.current; if (v) { v.defaultPlaybackRate = speed; v.playbackRate = speed; } }, [speed]);
   const [selection,setSelection]=useState<SubjectSelection|null>(null);
   const [selecting,setSelecting]=useState(false);
   const [draft,setDraft]=useState<Roi>({x:0,y:0,width:640,height:360});
@@ -64,6 +68,8 @@ export function App() {
   const [chartMetric,setChartMetric]=useState<ChartMetric>('knee');
   const [frontalView,setFrontalView]=useState(true);
   const [baselineSource,setBaselineSource]=useState<BaselineSource>('standing-trunk');
+  const [obliqueRef,setObliqueRef]=useState(false);
+  const [mode, setMode] = useState<'video' | 'camera'>('video');
 
   useEffect(() => {
     const v = video.current!;
@@ -170,32 +176,122 @@ export function App() {
       setSelecting(false);setError('');
     }catch(e){setError(message(e));}
   }
-  const sample = session && !seeking ? (matchingSample(session.samples, timeMs) ?? (video.current?.paused ? session.samples.find(s=>s.decode.timeBasis==='seek-position-estimate' && Math.abs(s.requestedTimeMs-video.current!.currentTime*1000)<.001):undefined)) : undefined;
-  const frontal = useMemo(() => session && info ? frontalTimeline(session.samples, info.width, info.height, baselineSource) : [], [session, info, baselineSource]);
+  const exact = session && !seeking ? (matchingSample(session.samples, timeMs) ?? (video.current?.paused ? session.samples.find(s=>s.decode.timeBasis==='seek-position-estimate' && Math.abs(s.requestedTimeMs-video.current!.currentTime*1000)<.001):undefined)) : undefined;
+  // Between 5 Hz samples (playing or paused): show the closest analyzed frame (at most ~0.1 s away) and say so.
+  const held = !exact && session && !seeking ? nearestSample(session.samples, timeMs, NEAREST_MS) : undefined;
+  const sample = exact ?? held;
+  // Drawing only: skeleton and check lines glide between samples; every number still comes from `sample`.
+  const drawn = held && session ? smoothedSample(session.samples, timeMs, held, SMOOTH_MAX_GAP_MS) : sample;
+  const heldGapS = held ? Math.abs(timeMs - (held.decode.timeBasis === 'presentation' ? held.sourceTimeMs : held.requestedTimeMs)) / 1000 : 0;
+  const frontal = useMemo(() => session && info ? frontalTimeline(session.samples, info.width, info.height, baselineSource, obliqueRef) : [], [session, info, baselineSource, obliqueRef]);
   const frontalFrame = sample ? frontal.find(f => f.sampleIndex === sample.sampleIndex) : undefined;
   const pct = (s: 'left' | 'right') => { const value = session ? coverage(session.samples, s) : null; return value === null ? 'N/A' : `${(value * 100).toFixed(1)}%`; };
 
-  return <main>
-    <header><p className="eyebrow">臺大 115-1 醫學電資創意整合專題 · Dataset Demo v0.6.1</p><h1>關節動作分析研究工作台</h1><p>上傳單人 MP4 → 開始分析 → 查看膝、髖、上身前傾、膝蓋對腳尖線與曲線 → 匯出 CSV</p></header>
-    <aside>本系統為學術概念驗證，不提供醫療診斷或治療建議。2D 影像平面幾何角不是經驗證的臨床角度；側面視角較適合觀察，遮蔽與透視會影響結果。</aside>
-    <section className="setup" aria-labelledby="input-title"><h2 id="input-title">1. 選擇影片與模型</h2>
-      <label>MP4 影片（最多 500 MB、10 分鐘）<input type="file" accept=".mp4,video/mp4" disabled={busy || loading} onChange={e => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; void choose(f); }} /></label>
-      <details><summary>模型設定與資料隱私</summary><p>影片不會上傳。預設先讀取專案本機模型；手動選取的 .task 檔優先。WASM 與已安裝 npm 版本一致，從本站載入，不使用外部 CDN。沒有模型時可改選本機檔案，其他介面仍可操作。</p>
+  const knee = (s: 'left' | 'right') => sample?.[s];
+  const sideName = (s: 'left' | 'right') => s === 'left' ? '左' : '右';
+  const sides = (['left','right'] as const).filter(s => side === 'both' || side === s);
+
+  return <div className="app">
+    <header className="topbar"><div className="brand"><h1>關節動作分析</h1><p>深蹲 · 影像只在這台裝置上處理，不會上傳</p></div>
+      <div className="segmented" role="group" aria-label="輸入來源">
+        <button aria-pressed={mode==='video'} onClick={()=>setMode('video')}>上傳影片</button>
+        <button aria-pressed={mode==='camera'} disabled={busy||loading||selecting} onClick={()=>{video.current?.pause();setMode('camera');}}>即時鏡頭</button>
+      </div>
+    </header>
+    <main>
+    {mode==='camera' && <LivePanel model={model} allowDownload={allowDownload} side={side} onSide={setSide} disabled={busy||loading} />}
+    <div hidden={mode!=='video'}>
+    <section className="card setup" aria-labelledby="input-title"><h2 id="input-title">選擇影片</h2>
+      <div className="setup-row">
+        <label className="file-pick"><span className="file-btn">選擇影片</span><span className="hint">MP4 影片（最多 500 MB、10 分鐘）</span><input type="file" accept=".mp4,video/mp4" disabled={busy || loading} onChange={e => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; void choose(f); }} /></label>
+        <div className="actions"><button className="primary" disabled={!info || !selection || selecting || busy || loading} onClick={() => void run()}>{session ? '重新分析' : '開始分析'}</button>{busy && <button className="secondary" onClick={cancel}>取消分析</button>}</div>
+      </div>
+      {loading && <p role="status">讀取影片中…</p>}
+      {info && <p className="file-info">{info.name} · {info.duration.toFixed(2)} 秒 · {info.width} × {info.height} 像素</p>}
+      {busy && <div role="status" className="progress"><p>{progress.phase} · {progress.done} / {progress.total || '準備中'}</p><progress max={progress.total || 1} value={progress.done} /></div>}
+      {error && <p role="alert" className="error">{error}</p>}{notice && <p role="status" className="notice">{notice}</p>}
+      <p className="muted">適用：單人、鏡頭固定、頭到腳完整入鏡，不需框選。目前模式：{pipeline===DEFAULT_PIPELINE.id&&selection?.correctionSource==='controlled-single-default'?'單人完整影格（主要模式）':info?`${PIPELINE_NAMES[pipeline]}（實驗設定）`:'單人完整影格（主要模式）'}。</p>
+      {info&&(pipeline!==DEFAULT_PIPELINE.id||selection?.correctionSource!=='controlled-single-default')&&<button className="secondary" disabled={busy||loading} onClick={restoreMainMode}>回到單人主要模式</button>}
+      <details className="fold"><summary>模型設定與資料隱私</summary><p>影片不會上傳。預設先讀取專案本機模型；手動選取的 .task 檔優先。WASM 與已安裝 npm 版本一致，從本站載入，不使用外部 CDN。沒有模型時可改選本機檔案，其他介面仍可操作。</p>
         <p><a href={MODEL_URL} target="_blank" rel="noreferrer">官方 Lite 模型下載</a>（模型來源與 SHA-256 會記錄於研究 JSON）。</p>
         <label>本機 .task 模型<input type="file" accept=".task" disabled={busy} onChange={e => { setModel(e.target.files?.[0] ?? null); e.target.value = ''; if(storedSession)setStale(true); }} /></label>
-        <button disabled={busy || !model} onClick={() => { setModel(null); if(storedSession)setStale(true); }}>改用專案本機模型</button>
-        <label><input type="checkbox" checked={allowDownload} disabled={busy} onChange={e => setAllowDownload(e.target.checked)} />本機模型不存在時，允許從 Google 官方下載（選用）</label>
+        <button className="secondary" disabled={busy || !model} onClick={() => { setModel(null); if(storedSession)setStale(true); }}>改用專案本機模型</button>
+        <label className="check"><input type="checkbox" checked={allowDownload} disabled={busy} onChange={e => setAllowDownload(e.target.checked)} />本機模型不存在時，允許從 Google 官方下載（選用）</label>
         <p>放置方式：將官方模型存成 public/models/pose_landmarker_lite.task，或直接從 Mac 選取檔案，不需上傳伺服器。</p>
         <p>目前模型：{model ? model.name : `專案本機路徑 ${PROJECT_MODEL_URL}`} 。本機模型須由使用者核對來源與授權。</p>
       </details>
-      {loading && <p role="status">讀取影片中…</p>}
-      {info && <p className="file-info">{info.name} · {info.duration.toFixed(2)} 秒 · {info.width} × {info.height} 像素</p>}
-      <p>目前模式：{pipeline===DEFAULT_PIPELINE.id&&selection?.correctionSource==='controlled-single-default'?'單人完整影格（主要模式）':info?`${PIPELINE_NAMES[pipeline]}（實驗設定）`:'單人完整影格（主要模式）'}。適用單人、固定鏡頭、完整人體入鏡；不需框選。</p>
-      {info&&(pipeline!==DEFAULT_PIPELINE.id||selection?.correctionSource!=='controlled-single-default')&&<button disabled={busy||loading} onClick={restoreMainMode}>回到單人主要模式</button>}
-      <div className="actions"><button disabled={!info || !selection || selecting || busy || loading} onClick={() => void run()}>{session ? '重新分析' : '開始分析'}</button>{busy && <button onClick={cancel}>取消分析</button>}</div>
-      {busy && <div role="status"><p>{progress.phase} · {progress.done} / {progress.total || '準備中'}</p><progress max={progress.total || 1} value={progress.done} /></div>}
-      {error && <p role="alert" className="error">{error}</p>}{notice && <p role="status">{notice}</p>}
     </section>
+    {stale && storedSession && <aside className="banner" role="status">舊分析已過期（stale），請重新分析。舊設定的角度、圖表及一般匯出已隱藏。
+      <button className="secondary" onClick={()=>downloadFile(`archived-${storedSession.metadata.sessionId}.json`,JSON.stringify(storedSession,null,2),'application/json')}>下載舊分析 JSON（原設定）</button></aside>}
+    {history.length>0 && <details className="fold"><summary>先前分析存檔（不修改原始 session）</summary>{history.map(s=><p key={s.metadata.sessionId}><button className="secondary" onClick={()=>downloadFile(`archived-${s.metadata.sessionId}.json`,JSON.stringify(s,null,2),'application/json')}>下載 {s.metadata.sessionId}</button></p>)}</details>}
+    <section className="card" aria-labelledby="review-title">
+      <div className="card-head"><h2 id="review-title">動作檢查</h2>
+        <div className="toolbar">
+          <label className="switch"><input type="checkbox" role="switch" checked={frontalView} onChange={e=>setFrontalView(e.target.checked)} /><span>醫學組檢查線</span></label>
+          {frontalView && <label className="compact">基準線位置<select aria-label="基準線位置" value={baselineSource} onChange={e=>setBaselineSource(e.target.value as BaselineSource)}><option value="standing-trunk">站直時的軀幹中線（預設）</option><option value="heel-midpoint">兩腳跟中點（講義 p.5）</option></select></label>}
+          {frontalView && <label className="switch"><input type="checkbox" role="switch" checked={obliqueRef} onChange={e=>setObliqueRef(e.target.checked)} /><span>斜角也顯示（僅供參考）</span></label>}
+          <label className="compact">顯示側別<select value={side} onChange={e => setSide(e.target.value as typeof side)}><option value="both">左右都看</option><option value="left">只看左邊</option><option value="right">只看右邊</option></select></label>
+        </div>
+      </div>
+      {sample?.tracking.state==='MANUAL_REVIEW_REQUIRED'&&<aside className="banner warn">人物一致性無法確認，量測已暫停。請確認單人、完整入鏡後重新分析；必要時可在實驗區人工校正。局部膝部缺點不會單獨造成這個鎖定。</aside>}
+      <div className="workspace"><div className="stage-col"><div className="video-stage"><video ref={video} controls={!selecting} playsInline onPlay={()=>{if(selecting)video.current?.pause();}} onLoadedMetadata={e=>{e.currentTarget.defaultPlaybackRate=speed;e.currentTarget.playbackRate=speed;}} onSeeking={() => setSeeking(true)} onSeeked={() => {
+        const v = video.current;
+        if (!v) return;
+        // Paused/off-screen videos may throttle rVFC. The same completed seek target
+        // maps to the decoded frame recorded by the analysis decoder.
+        const known = session?.samples.find(s => Math.abs(s.requestedTimeMs - v.currentTime * 1000) <= 1);
+        setTimeMs(known?.sourceTimeMs ?? v.currentTime * 1000); setSeeking(false);
+      }} onError={() => { if (info) { setError('影片播放解碼失敗，請改用 H.264 MP4。'); setSession(null); } }} /><Overlay sample={drawn} width={info?.width ?? 640} height={info?.height ?? 360} side={side} diagnostic={diagnostic} muted={frontalView && !!session && !selecting} />
+      {frontalView && session && !selecting && <><FrontalOverlay sample={drawn} frame={frontalFrame} width={info?.width ?? 640} height={info?.height ?? 360} /><FrontalCuePanel frame={frontalFrame} hasSample={!!sample} /></>}
+      {selecting && info && !seeking && <RoiSelector width={info.width} height={info.height} roi={draft} onChange={setDraft} drawNew={drawNew} onDrawEnd={()=>setDrawNew(false)} />}
+      {experiments && selection && info && !selecting && <svg className="roi-border" viewBox={`0 0 ${info.width} ${info.height}`} aria-label="受測者 ROI 範圍"><rect {...(pipeline==='roi-crop'?(sample?.roi??displayedRoi(session?.samples??[],timeMs)??roiAt(selection,timeMs,info.width,info.height).roi):(sample?.targetReferenceRoi??selection.roi))} fill="none" stroke="#ffda57" strokeWidth={Math.max(2,info.width/250)} /></svg>}
+      {!info && !loading && <p className="stage-empty">選擇影片後，畫面會出現在這裡</p>}</div>
+        {frontalView && session && !selecting && <FrontalLegend view={frontalFrame?.view} />}
+        {frontalView && session && !selecting && frontalFrame?.calibration==='whole-video' && <p className="muted small">這段影片裡沒有「站直不動 1 秒」的片段，基準線改用整段影片中站得最直的幾格來定。</p>}
+        <div className="speed" role="group" aria-label="播放速度"><span className="muted small">播放速度</span><div className="segmented small-seg">{SPEEDS.map(r=><button key={r} aria-pressed={speed===r} onClick={()=>setSpeed(r)}>{r===1?'正常':`${r}×`}</button>)}</div></div>
+        {session && <label className="scrub">逐格檢查<input aria-label="已分析取樣" type="range" min={0} max={session.samples.length-1} disabled={selecting} value={sampleIndex} onChange={e => jump(Number(e.target.value))} /><span className="muted">#{sampleIndex} / {session.samples.length-1}</span></label>}
+        <p className="muted small">來源影格時間：{(timeMs/1000).toFixed(3)} 秒。{held ? `顯示最近的分析影格（取樣 #${held.sampleIndex}，相差 ${heldGapS.toFixed(2)} 秒；影片每秒分析 5 次）` : sample ? `對應取樣 #${sample.sampleIndex}（${sample.decode.timeBasis}）` : '這附近沒有分析結果（可能在分析範圍外），骨架與角度不顯示。'}</p>
+      </div><div className="readout">
+        <div className="group"><h3 className="group-title">膝蓋</h3><div className="measurements">
+        {sides.map(s => {
+          const angle = knee(s);
+          return <Metric key={s} name={`${sideName(s)}膝彎曲`} value={showFlexion(angle, flexionProxy)} note={angle?.valid ? '站直約 0°，蹲越低數字越大' : plainReason(angle, !!sample)}>
+            <p>膝彎曲 = 180° − 膝角（自訂，採臨床習慣：站直 0°）。膝角 = 髖–膝–踝在膝蓋的夾角（影像平面，0–180°），內角：{showAngle(angle)}。</p><p>暫定屈曲 proxy：{angle?.valid ? `${flexionProxy(angle)!.toFixed(1)}°` : 'N/A'}（= 180° − 內角，不是已確認的臨床屈曲角）</p><p>Tracking Status：{qcStatus(angle, !!sample)}</p><p>有效取樣比例：{pct(s)}</p></Metric>;
+        })}
+        </div></div>
+        <div className="group"><h3 className="group-title">深蹲姿勢（暫定，待物理治療師確認）</h3><div className="posture-measurements">
+        {sides.map(s => {
+          const angle = sample?.posture?.final.hip[s];
+          return <Metric key={s} name={`${sideName(s)}髖彎曲`} value={showFlexion(angle, hipFlexionProxy)} note={angle?.valid ? '站直約 0°，身體越往前折數字越大' : plainReason(angle, !!sample)}>
+            <p>髖彎曲 = 180° − 髖角（自訂，站直 0°）。髖角 = 肩–髖–膝在髖的夾角（影像平面，0–180°），內角：{showAngle(angle)}。暫定髖屈曲 proxy：{angle?.valid ? `${hipFlexionProxy(angle)!.toFixed(1)}°` : 'N/A'}（= 180° − 內角）。</p><p>{qcStatus(angle, !!sample)}</p></Metric>;
+        })}
+        <Metric name="上身（軀幹）前傾" value={showAngle(sample?.posture?.final.trunkLean)} note={sample?.posture?.final.trunkLean.valid ? '0° = 上身直立' : plainReason(sample?.posture?.final.trunkLean, !!sample)}>
+          <p>兩髖中點→兩肩中點連線與畫面垂直線的夾角（0° = 直立；手機需擺正）。</p><p>{qcStatus(sample?.posture?.final.trunkLean, !!sample)}</p></Metric>
+        {sides.map(s => {
+          const v = sample?.posture?.final.kneeToe[s];
+          return <Metric key={`toe-${s}`} name={`${sideName(s)}膝對腳尖線`} value={v?.valid ? `${v.value >= 0 ? '+' : ''}${v.value.toFixed(2)}` : 'N/A'} warn={!!v?.valid && v.value > CUE_POLICY.kneeToeHipWidths} note={v?.valid ? (v.value > 0 ? '膝蓋偏向內側（膝蓋內夾方向）' : '膝蓋在腳尖線上或外側') : '只適用正面拍攝'}>
+            <p>依講義 p.11：膝蓋離「過腳尖的鉛垂線」多遠，以骨盆寬為單位；+ = 膝在內側（膝蓋內夾）。講義標準為在線上或微外側，且左右對稱；只適用正面拍攝。</p><p>{qcStatus(v, !!sample)}</p></Metric>;
+        })}
+        </div></div>
+      </div></div>
+      <details className="fold"><summary>畫面上的線和數字代表什麼？</summary>
+        <p>膝彎曲（大數字與曲線）= 180° − 膝角，站直約 0°，蹲越低越大（自訂，採臨床習慣；講義沒有規定角度數值）。膝角定義：髖–膝–踝於膝點的影像平面內角（0–180°）。暫定屈曲 proxy = 180° − 內角；不是已確認的臨床屈曲角。左右為人體解剖側，影片不鏡像。</p>
+        {frontalView && <p className="frontal-note">正面檢查說明：紅色直線是基準線。個案先站直、不動約 1 秒，系統以這段時間的軀幹中線（兩肩中點與兩髖中點）定出位置並固定；之後身體怎麼動線都不動，腳跟明顯移動才重新定位。也可切換成講義 p.5 的「兩腳跟中點」。拍攝角度太斜時預設不判斷；打開「斜角也顯示（僅供參考）」後斜角影片也會畫線與提示，但 2D 投影誤差大、僅供參考。黃線為目前的兩肩線、骨盆線（以髖關節代替 ASIS），白色虛線是「站直時」的肩線／骨盆線，兩條線張開代表變歪了；藍色虛線為軀幹，綠色虛線為過腳尖的鉛垂線；偏離時變紅並出現提示。綠色骨架在此模式下會淡化。左右指個案本身的左右。提示門檻為暫定值（頭 {CUE_POLICY.headHipWidths} 個骨盆寬、肩 {CUE_POLICY.shoulderDeg}°、軀幹 {CUE_POLICY.trunkDeg}°、骨盆 {CUE_POLICY.pelvisDeg}°、膝 {CUE_POLICY.kneeToeHipWidths} 個骨盆寬），待醫學組確認；只適用正面拍攝，皆為 2D 影像平面幾何。</p>}
+        <p>姿勢指標定義：髖角 = 肩–髖–膝於髖點的影像平面內角（0–180°），暫定髖屈曲 proxy = 180° − 內角。上身（軀幹）前傾 = 兩髖中點→兩肩中點連線與畫面垂直線的夾角（0° = 直立；手機需擺正）。膝蓋對腳尖線（依講義 p.11）= 膝蓋離「過腳尖的鉛垂線」多遠，以骨盆寬為單位；+ = 膝在內側（膝蓋內夾），講義標準為在線上或微外側，且左右對稱；只適用正面拍攝。三者都是 2D 影像平面幾何，不是經驗證的臨床角度；點位不可靠時顯示 N/A，不補值。</p>
+      </details>
+    </section>
+    {experiments && sample?.search && <aside className="banner">全畫面搜尋：{sample.search.status}（候選不代表確認身分）。{sample.search.error && <p>全畫面搜尋不可用，請改用 Manual Keyframes 並人工確認；本次搜尋不作身分放行依據。</p>}
+      {sample.search.suggestedRoi && <button className="secondary" disabled={busy||seeking} onClick={()=>{beginSelection();setDraft(sample.search!.suggestedRoi!);setDraftMode('adaptive-roi');}}>檢查搜尋建議 ROI（仍需人工 Apply）</button>}</aside>}
+    <section className="card" aria-labelledby="chart-title"><div className="card-head"><h2 id="chart-title">角度曲線與匯出</h2>
+      {session && <label className="compact">曲線指標<select aria-label="曲線指標" value={chartMetric} onChange={e=>setChartMetric(e.target.value as ChartMetric)}>{(Object.keys(CHART_METRICS) as ChartMetric[]).map(k=><option key={k} value={k}>{CHART_METRICS[k].label}</option>)}</select></label>}</div>
+      {session ? <><AngleChart samples={session.samples} side={side} timeMs={timeMs} metric={chartMetric} />{chartMetric!=='knee'&&!session.samples.some(s=>s.posture)&&<p>此分析版本沒有姿勢指標，請重新分析。</p>}
+        <p className="muted small">已分析 {session.samples.length} 個取樣；每秒 5 次目標取樣，不代表全部影格。可辨識的重複呈現時間已排除；無效取樣保留為曲線斷點。</p>
+        <div className="actions">
+        <button className="secondary" onClick={() => downloadFile(`knee-${session.metadata.sessionId}.csv`, toCsv(session), 'text/csv;charset=utf-8')}>下載 CSV</button>
+        <button className="secondary" onClick={() => downloadFile(`research-${session.metadata.sessionId}.json`, JSON.stringify(session, null, 2), 'application/json')}>下載研究 JSON（含 landmarks）</button>
+      </div><p className="muted small">輸出含來源檔名、角度及人體特徵，請保存於受限空間，不要提交到 Public GitHub。</p></> : <p className="muted">完成分析後顯示曲線與匯出按鈕；目前沒有分析結果。</p>}
+    </section>
+    <h2 className="section-label">進階（研究用）</h2>
     <details className="experimental" open={experiments} onToggle={e=>{setExperiments(e.currentTarget.open);if(!e.currentTarget.open)setSelecting(false);}}>
       <summary>實驗性功能（ROI／多人／A/B/C 比較）</summary>
       <p>以下保留供研究查核，未列為單人 Dataset Demo 的主要操作。多人身分與裁切追蹤尚未驗證；開啟或收合此區不會改變結果。</p>
@@ -217,57 +313,6 @@ export function App() {
       {selection && <p>模式：{selection.method} · 設定版本 {selection.revision} · Keyframes：{selection.keyframes.map(k=>`${(k.timeMs/1000).toFixed(3)} s`).join(", ")}</p>}
     </section>}
     </details>
-    {stale && storedSession && <aside role="status">舊分析已過期（stale），請重新分析。舊設定的角度、圖表及一般匯出已隱藏。
-      <button onClick={()=>downloadFile(`archived-${storedSession.metadata.sessionId}.json`,JSON.stringify(storedSession,null,2),'application/json')}>下載舊分析 JSON（原設定）</button></aside>}
-    {history.length>0 && <details><summary>先前分析存檔（不修改原始 session）</summary>{history.map(s=><p key={s.metadata.sessionId}><button onClick={()=>downloadFile(`archived-${s.metadata.sessionId}.json`,JSON.stringify(s,null,2),'application/json')}>下載 {s.metadata.sessionId}</button></p>)}</details>}
-    <section aria-labelledby="review-title"><h2 id="review-title">2. 影格與角度檢查</h2>
-      <label className="inline"><input type="checkbox" checked={frontalView} onChange={e=>setFrontalView(e.target.checked)} />醫學組檢查（正面：點位、基準線、提示，講義 p.5–p.11；側面：膝蓋前移、上身前傾，講義 p.12；自動判斷拍攝角度）</label>
-      {frontalView && <label>基準線位置<select aria-label="基準線位置" value={baselineSource} onChange={e=>setBaselineSource(e.target.value as BaselineSource)}><option value="standing-trunk">個案站直時的軀幹中線（預設）</option><option value="heel-midpoint">兩腳跟中點（講義 p.5 原始定義）</option></select></label>}
-      <label>顯示側別<select value={side} onChange={e => setSide(e.target.value as typeof side)}><option value="both">左右膝 Both</option><option value="left">左膝 Left Knee</option><option value="right">右膝 Right Knee</option></select></label>
-      {sample?.tracking.state==='MANUAL_REVIEW_REQUIRED'&&<aside>人物一致性無法確認，量測已暫停。請確認單人、完整入鏡後重新分析；必要時可在實驗區人工校正。局部膝部缺點不會單獨造成這個鎖定。</aside>}
-      <div className="workspace"><div><div className="video-stage"><video ref={video} controls={!selecting} playsInline onPlay={()=>{if(selecting)video.current?.pause();}} onSeeking={() => setSeeking(true)} onSeeked={() => {
-        const v = video.current;
-        if (!v) return;
-        // Paused/off-screen videos may throttle rVFC. The same completed seek target
-        // maps to the decoded frame recorded by the analysis decoder.
-        const known = session?.samples.find(s => Math.abs(s.requestedTimeMs - v.currentTime * 1000) <= 1);
-        setTimeMs(known?.sourceTimeMs ?? v.currentTime * 1000); setSeeking(false);
-      }} onError={() => { if (info) { setError('影片播放解碼失敗，請改用 H.264 MP4。'); setSession(null); } }} /><Overlay sample={sample} width={info?.width ?? 640} height={info?.height ?? 360} side={side} diagnostic={diagnostic} muted={frontalView && !!session && !selecting} />
-      {frontalView && session && !selecting && <><FrontalOverlay sample={sample} frame={frontalFrame} width={info?.width ?? 640} height={info?.height ?? 360} /><FrontalCuePanel frame={frontalFrame} hasSample={!!sample} /><FrontalLegend view={frontalFrame?.view} /></>}
-      {selecting && info && !seeking && <RoiSelector width={info.width} height={info.height} roi={draft} onChange={setDraft} drawNew={drawNew} onDrawEnd={()=>setDrawNew(false)} />}
-      {experiments && selection && info && !selecting && <svg className="roi-border" viewBox={`0 0 ${info.width} ${info.height}`} aria-label="受測者 ROI 範圍"><rect {...(pipeline==='roi-crop'?(sample?.roi??displayedRoi(session?.samples??[],timeMs)??roiAt(selection,timeMs,info.width,info.height).roi):(sample?.targetReferenceRoi??selection.roi))} fill="none" stroke="#ffda57" strokeWidth={Math.max(2,info.width/250)} /></svg>}</div>
-        <p>來源影格時間：{(timeMs/1000).toFixed(3)} 秒。{sample ? `對應取樣 #${sample.sampleIndex}（${sample.decode.timeBasis}）` : '此影格沒有對應分析結果，骨架與角度不顯示。'}</p>
-        {session && <label>檢查已分析取樣 #{sampleIndex}<input aria-label="已分析取樣" type="range" min={0} max={session.samples.length-1} disabled={selecting} value={sampleIndex} onChange={e => jump(Number(e.target.value))} /></label>}
-      </div><div className="measurements">
-        {(['left','right'] as const).filter(s => side === 'both' || side === s).map(s => {
-          const angle = sample?.[s];
-          return <article key={s}><h3>{s === 'left' ? '左膝 Left Knee' : '右膝 Right Knee'}</h3><p className="angle">{angle?.valid ? `${angle.rawAngleDeg.toFixed(1)}°` : 'N/A'}</p><p>暫定屈曲 proxy：{angle?.valid ? `${flexionProxy(angle)!.toFixed(1)}°` : 'N/A'}</p><p>Tracking Status：{angle ? angle.valid ? '自動 QC 通過（身分仍待人工確認）' : `無效（${angle.invalidReasons.join(', ')}）` : '無對應取樣'}</p><p>有效取樣比例：{pct(s)}</p></article>;
-        })}
-      </div></div>
-      <p>定義：髖–膝–踝於膝點的影像平面內角（0–180°）。暫定屈曲 proxy = 180° − 內角；不是已確認的臨床屈曲角。左右為人體解剖側，影片不鏡像。</p>
-      {frontalView && <p className="frontal-note">正面檢查說明：紅色直線是基準線。個案先站直、不動約 1 秒，系統以這段時間的軀幹中線（兩肩中點與兩髖中點）定出位置並固定；之後身體怎麼動線都不動，腳跟明顯移動才重新定位。也可切換成講義 p.5 的「兩腳跟中點」。拍攝角度太斜時不判斷。黃線為目前的兩肩線、骨盆線（以髖關節代替 ASIS），白色虛線是「站直時」的肩線／骨盆線，兩條線張開代表變歪了；藍色虛線為軀幹，綠色虛線為過腳尖的鉛垂線；偏離時變紅並出現提示。綠色骨架在此模式下會淡化。左右指個案本身的左右。提示門檻為暫定值（頭 {CUE_POLICY.headHipWidths} 個骨盆寬、肩 {CUE_POLICY.shoulderDeg}°、軀幹 {CUE_POLICY.trunkDeg}°、骨盆 {CUE_POLICY.pelvisDeg}°、膝 {CUE_POLICY.kneeToeHipWidths} 個骨盆寬），待醫學組確認；只適用正面拍攝，皆為 2D 影像平面幾何。</p>}
-      <h3>深蹲姿勢指標（暫定，待物理治療師確認）</h3>
-      <div className="posture-measurements">
-        {(['left','right'] as const).filter(s => side === 'both' || side === s).map(s => {
-          const angle = sample?.posture?.final.hip[s];
-          return <article key={s}><h3>{s === 'left' ? '左髖 Left Hip' : '右髖 Right Hip'}</h3><p className="angle">{showAngle(angle)}</p><p>暫定髖屈曲 proxy：{angle?.valid ? `${hipFlexionProxy(angle)!.toFixed(1)}°` : 'N/A'}</p><p>{status(angle, !!sample)}</p></article>;
-        })}
-        <article><h3>上身（軀幹）前傾 Trunk Lean</h3><p className="angle">{showAngle(sample?.posture?.final.trunkLean)}</p><p>{status(sample?.posture?.final.trunkLean, !!sample)}</p></article>
-        {(['left','right'] as const).filter(s => side === 'both' || side === s).map(s => {
-          const v = sample?.posture?.final.kneeToe[s];
-          return <article key={`toe-${s}`}><h3>{s === 'left' ? '左膝對腳尖線 Left Knee–Toe' : '右膝對腳尖線 Right Knee–Toe'}</h3><p className="angle">{v?.valid ? `${v.value >= 0 ? '+' : ''}${v.value.toFixed(2)}` : 'N/A'}</p><p>{v?.valid ? (v.value > 0 ? '膝蓋在腳尖線內側（膝蓋內夾方向）' : '膝蓋在腳尖線上或外側') : '只適用正面拍攝'}</p><p>{status(v, !!sample)}</p></article>;
-        })}
-      </div>
-      <p>定義：髖角 = 肩–髖–膝於髖點的影像平面內角（0–180°），暫定髖屈曲 proxy = 180° − 內角。上身（軀幹）前傾 = 兩髖中點→兩肩中點連線與畫面垂直線的夾角（0° = 直立；手機需擺正）。膝蓋對腳尖線（依講義 p.11）= 膝蓋離「過腳尖的鉛垂線」多遠，以骨盆寬為單位；+ = 膝在內側（膝蓋內夾），講義標準為在線上或微外側，且左右對稱；只適用正面拍攝。三者都是 2D 影像平面幾何，不是經驗證的臨床角度；點位不可靠時顯示 N/A，不補值。</p>
-    </section>
-    {experiments && sample?.search && <aside>全畫面搜尋：{sample.search.status}（候選不代表確認身分）。{sample.search.error && <p>全畫面搜尋不可用，請改用 Manual Keyframes 並人工確認；本次搜尋不作身分放行依據。</p>}
-      {sample.search.suggestedRoi && <button disabled={busy||seeking} onClick={()=>{beginSelection();setDraft(sample.search!.suggestedRoi!);setDraftMode('adaptive-roi');}}>檢查搜尋建議 ROI（仍需人工 Apply）</button>}</aside>}
-    <section><h2>3. 角度時間曲線與匯出</h2>
-      {session ? <><p>已分析 {session.samples.length} 個取樣；每秒 5 次目標取樣，不代表全部影格。可辨識的重複呈現時間已排除；無效取樣保留為曲線斷點。</p><label>曲線指標<select aria-label="曲線指標" value={chartMetric} onChange={e=>setChartMetric(e.target.value as ChartMetric)}>{(Object.keys(CHART_METRICS) as ChartMetric[]).map(k=><option key={k} value={k}>{CHART_METRICS[k].label}</option>)}</select></label><AngleChart samples={session.samples} side={side} timeMs={timeMs} metric={chartMetric} />{chartMetric!=='knee'&&!session.samples.some(s=>s.posture)&&<p>此分析版本沒有姿勢指標，請重新分析。</p>}<div className="actions">
-        <button onClick={() => downloadFile(`knee-${session.metadata.sessionId}.csv`, toCsv(session), 'text/csv;charset=utf-8')}>下載 CSV</button>
-        <button onClick={() => downloadFile(`research-${session.metadata.sessionId}.json`, JSON.stringify(session, null, 2), 'application/json')}>下載研究 JSON（含 landmarks）</button>
-      </div><p>輸出含來源檔名、角度及人體特徵，請保存於受限空間，不要提交到 Public GitHub。</p></> : <p>完成分析後顯示曲線與匯出按鈕；目前沒有分析結果。</p>}
-    </section>
     <details className="research"><summary>研究診斷與人工檢查</summary>
       <label><input type="checkbox" checked={diagnostic} onChange={e=>setDiagnostic(e.target.checked)} />顯示被拒絕骨架供人工檢查（紅色，不代表有效量測）</label>
       {session?.run && <p>結果管線：{PIPELINE_NAMES[session.run.pipeline.id]} · 模型 hash：{session.metadata.model.assetSha256.slice(0,16)} · session：{session.metadata.sessionId}</p>}
@@ -275,13 +320,16 @@ export function App() {
       {sample && <p role="status">人工判斷：{sample.review?.label??'尚未標註'} · 追蹤狀態：{sample.tracking.state} · 人物一致性：{sample.tracking.identity}（未經人工確認） · 點位信心：{sample.tracking.landmarkConfidence} · 幾何：{sample.tracking.plausibility} · 連續性：{sample.tracking.continuity} · 原因：{sample.tracking.reasons.join(', ')||'未觸發篩檢警示；仍可能選錯或混合人物'}</p>}
     {session && <ReviewPanel session={session} sample={sample} onReview={(index,review)=>{if(!storedSession)return;const next={...storedSession,samples:storedSession.samples.map(s=>s.sampleIndex===index?applyReview(s,review):s)};setSession(next);setComparison(previous=>previous?{...previous,entries:previous.entries.map(e=>e.session?.metadata.sessionId===next.metadata.sessionId?{...e,session:next}:e)}:null);}} />}
     </details>
-
-  </main>;
+    </div>
+    </main>
+    <footer className="disclaimer">本系統為學術概念驗證，不提供醫療診斷或治療建議。2D 影像平面幾何角不是經驗證的臨床角度；側面視角較適合觀察，遮蔽與透視會影響結果。</footer>
+  </div>;
 }
-function showAngle(angle: AngleValue | undefined): string { return angle?.valid ? `${angle.rawAngleDeg.toFixed(1)}°` : 'N/A'; }
-function status(value: AngleValue | ScalarValue | undefined, hasSample: boolean): string {
-  if (!hasSample) return '無對應取樣';
-  if (!value) return '此分析版本沒有此指標，請重新分析';
-  return value.valid ? '自動 QC 通過（身分仍待人工確認）' : `無效（${value.invalidReasons.join(', ')}）`;
-}
+/** Half a 5 Hz interval plus decoder jitter: every frame maps to its closest analyzed sample, so the skeleton lags at most ~0.1 s. */
+const NEAREST_MS = 120;
+/** Skeleton smoothing only bridges neighbouring 5 Hz samples (one interval plus jitter), never a gap. */
+const SMOOTH_MAX_GAP_MS = 250;
+/** Slow motion by default: easier for PTs to follow, and the 5 Hz skeleton keeps up with the body better. */
+const SPEEDS = [0.25, 0.5, 1] as const;
+const DEFAULT_SPEED = 0.5;
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }

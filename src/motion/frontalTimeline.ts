@@ -1,11 +1,11 @@
 import type { Sample } from '../domain/analysis';
 import type { InvalidReason, ScalarValue } from '../domain/measurement';
-import { frontalFrame, heelMidpoint, measureFrontal, type FrontalMetrics } from '../biomechanics/frontal';
+import { FRONTAL_POLICY, frontalFrame, heelMidpoint, measureFrontal, type FrontalMetrics } from '../biomechanics/frontal';
 import { flexionProxy } from '../biomechanics/knee';
 import { gateReason } from '../tracking/gate';
 import { createBaselineAnchor, type BaselineState } from './baseline';
 import { createCueTracker, instantCues, lateralCues, type Cue } from './frontalCues';
-import { classifyView, measureLateral, type LateralMetrics, type ViewKind } from '../biomechanics/lateral';
+import { LATERAL_POLICY, classifyView, measureLateral, type LateralMetrics, type ViewKind } from '../biomechanics/lateral';
 
 /**
  * Where the baseline sits once locked.
@@ -17,6 +17,30 @@ import { classifyView, measureLateral, type LateralMetrics, type ViewKind } from
 export type BaselineSource = 'standing-trunk' | 'heel-midpoint';
 /** Both knees below this flexion proxy (degrees) count as standing for calibration. */
 export const STANDING_MAX_KNEE_FLEXION_DEG = 20;
+/**
+ * Uploaded video only (whole recording is available): when the person never stands still for the
+ * one-second lock (e.g. the clip starts mid-squat or they keep moving), calibrate from the most
+ * upright samples anywhere in the video instead of showing "stand still" forever.
+ * Provisional engineering values (offline-standing-calibration-v1).
+ */
+/**
+ * Camera-view smoothing (view-hold-v1): a new view (frontal / side / oblique) is adopted only after it
+ * persists this long, so a momentary shoulder-width dip (hands crossing, a small turn, landmark jitter)
+ * does not flash "too oblique" for a single frame. Provisional.
+ */
+export const VIEW_HOLD_MS = 600;
+/**
+ * Uploaded video: the camera does not move, so one view is decided for the whole clip when at least
+ * this share of usable samples agree (whole-video-view-v1). Mixed clips (person really turns) fall
+ * back to the 600 ms hold per sample.
+ */
+export const WHOLE_VIDEO_VIEW_MIN_SHARE = 0.6;
+/**
+ * oblique-reference-v1: when the user opts in, oblique views (shoulder/torso ratio between the side
+ * and frontal limits) are measured with the frontal checks and labelled reference-only. Off by default.
+ */
+export const OBLIQUE_MIN_SHOULDER_RATIO = LATERAL_POLICY.sideMaxRatio;
+export const OFFLINE_CALIBRATION = { version: 'offline-standing-calibration-v1', relaxedMaxKneeFlexionDeg: 35, minSamples: 3 } as const;
 
 export interface FrontalFrame {
   sampleIndex: number;
@@ -37,6 +61,15 @@ export interface FrontalFrame {
   /** Side-view metrics (handout p.12); null unless the view is 'side' and the subject passed QC. */
   lateral: LateralMetrics | null;
   cues: Cue[];
+  /** How the baseline in use was found: a live one-second standing lock, or the whole-video fallback. */
+  calibration: 'standing-lock' | 'whole-video' | null;
+  /** View decided once for the whole clip (fixed camera), or null when the clip is mixed. */
+  clipView: ViewKind | null;
+  /**
+   * True when an oblique view is being checked as if it were frontal because the user turned on
+   * "oblique as reference" (oblique-reference-v1). Numbers are 2D projections: reference only.
+   */
+  approximate: boolean;
 }
 export interface Neutral { head: number; shift: number; shoulderTilt: number; pelvisTilt: number; trunkSide: number }
 type Tilt = keyof Neutral;
@@ -61,8 +94,13 @@ function gated(m: FrontalMetrics, s: Sample): FrontalMetrics {
  * saved session. Only samples whose subject passed QC (and was not rejected by human review) feed
  * the baseline or produce prompts.
  */
-export function frontalTimeline(samples: readonly Sample[], width: number, height: number, source: BaselineSource = 'standing-trunk'): FrontalFrame[] {
+export function frontalTimeline(samples: readonly Sample[], width: number, height: number, source: BaselineSource = 'standing-trunk', obliqueAsFrontal = false): FrontalFrame[] {
+  const ratio = obliqueAsFrontal ? OBLIQUE_MIN_SHOULDER_RATIO : FRONTAL_POLICY.minFrontalShoulderRatio;
+  const offline = offlineCalibration(samples, width, height, source, ratio);
   const anchor = createBaselineAnchor();
+  const clipView = wholeVideoView(samples, width, height);
+  let stableView: ViewKind | null = null;
+  let pendingView: { view: ViewKind; since: number } | null = null;
   const tracker = createCueTracker();
   let standingBuf: { timeMs: number; m: FrontalMetrics }[] = [];
   let neutral: Neutral | null = null;
@@ -70,20 +108,34 @@ export function frontalTimeline(samples: readonly Sample[], width: number, heigh
   return [...samples].sort((a, b) => a.sourceTimeMs - b.sourceTimeMs).map(s => {
     const rejected = s.review !== undefined && s.review.label !== 'correct-target';
     const usable = !rejected && s.tracking.accepted;
-    const frame = usable ? frontalFrame(s.landmarks, width, height) : null;
+    const frame = usable ? frontalFrame(s.landmarks, width, height, ratio) : null;
     const heel = usable ? heelMidpoint(s.landmarks, width, height) : null;
     const f = frame && typeof frame !== 'string' ? frame : null;
     const h = heel && typeof heel !== 'string' ? heel : null;
     const knee = { left: flexionProxy(s.left), right: flexionProxy(s.right) };
     const standing = knee.left !== null && knee.right !== null && Math.max(knee.left, knee.right) <= STANDING_MAX_KNEE_FLEXION_DEG;
     const centerX = source === 'heel-midpoint' ? h?.x ?? null : f ? (f.shoulderMid.x + f.hipMid.x) / 2 : null;
-    const baseline = anchor.update({ timeMs: s.sourceTimeMs, heel: h, hipWidthPx: f?.hipWidth ?? null, centerX, standing });
-    const raw = gated(measureFrontal(s.landmarks, width, height, baseline.x), s);
-    if (usable && standing) standingBuf = [...standingBuf.filter(b => s.sourceTimeMs - b.timeMs <= 1000), { timeMs: s.sourceTimeMs, m: raw }];
-    if (baseline.state !== 'locked') { neutral = null; lockedAt = null; }
-    else if (baseline.lockedAtMs !== lockedAt) { lockedAt = baseline.lockedAtMs; neutral = neutralFrom(standingBuf.map(b => b.m)); }
-    const metrics = relative(raw, neutral);
-    const view = usable ? classifyView(s.landmarks, width, height) : null;
+    const live = anchor.update({ timeMs: s.sourceTimeMs, heel: h, hipWidthPx: f?.hipWidth ?? null, centerX, standing });
+    const liveRaw = gated(measureFrontal(s.landmarks, width, height, live.x, ratio), s);
+    if (usable && standing) standingBuf = [...standingBuf.filter(b => s.sourceTimeMs - b.timeMs <= 1000), { timeMs: s.sourceTimeMs, m: liveRaw }];
+    if (live.state !== 'locked') { neutral = null; lockedAt = null; }
+    else if (live.lockedAtMs !== lockedAt) { lockedAt = live.lockedAtMs; neutral = neutralFrom(standingBuf.map(b => b.m)); }
+    const useOffline = live.state !== 'locked' && offline !== null;
+    const baseline = useOffline ? offline.baseline : live;
+    const raw = useOffline ? gated(measureFrontal(s.landmarks, width, height, offline.baseline.x, ratio), s) : liveRaw;
+    const metrics = relative(raw, useOffline ? offline.neutral : neutral);
+    const calibration = baseline.state !== 'locked' ? null : useOffline ? 'whole-video' as const : 'standing-lock' as const;
+    const rawView = usable ? classifyView(s.landmarks, width, height) : null;
+    if (rawView !== null) {
+      if (stableView === null || rawView === stableView) { stableView = rawView; pendingView = null; }
+      else {
+        if (pendingView?.view !== rawView) pendingView = { view: rawView, since: s.sourceTimeMs };
+        if (s.sourceTimeMs - pendingView.since >= VIEW_HOLD_MS) { stableView = rawView; pendingView = null; }
+      }
+    }
+    const detected = usable && rawView !== null ? clipView ?? stableView : null;
+    const approximate = obliqueAsFrontal && detected === 'oblique';
+    const view = approximate ? 'frontal' : detected;
     let lateral: LateralMetrics | null = null;
     if (view === 'side') {
       const m = measureLateral(s.landmarks, width, height);
@@ -92,8 +144,52 @@ export function frontalTimeline(samples: readonly Sample[], width: number, heigh
     }
     const instant = !usable ? [] : view === 'frontal' ? instantCues(metrics, knee) : view === 'side' && lateral ? lateralCues(lateral, knee[lateral.side]) : [];
     const cues = tracker.update(s.sourceTimeMs, instant);
-    return { sampleIndex: s.sampleIndex, tracked: usable, baseline, metrics, neutral, view, lateral, cues };
+    return { sampleIndex: s.sampleIndex, tracked: usable, baseline, metrics, neutral: useOffline ? offline.neutral : neutral, view, lateral, cues, calibration, clipView, approximate };
   });
+}
+
+/**
+ * Whole-video standing calibration: the most upright usable frontal samples (both knee flexion
+ * proxies ≤ 20°, or ≤ 35° when fewer than 3 exist), line at the median centre, neutral tilts = mean
+ * of those samples measured against that line. Null when no such samples exist.
+ */
+function offlineCalibration(samples: readonly Sample[], width: number, height: number, source: BaselineSource, ratio: number = FRONTAL_POLICY.minFrontalShoulderRatio): { baseline: Extract<BaselineState, { state: 'locked' }>; neutral: Neutral | null } | null {
+  const pool = samples.flatMap(s => {
+    if ((s.review !== undefined && s.review.label !== 'correct-target') || !s.tracking.accepted) return [];
+    const v = classifyView(s.landmarks, width, height);
+    if (v !== 'frontal' && !(ratio < FRONTAL_POLICY.minFrontalShoulderRatio && v === 'oblique')) return [];
+    const f = frontalFrame(s.landmarks, width, height, ratio), h = heelMidpoint(s.landmarks, width, height);
+    const l = flexionProxy(s.left), r = flexionProxy(s.right);
+    if (typeof f === 'string' || typeof h === 'string' || l === null || r === null) return [];
+    const cx = source === 'heel-midpoint' ? h.x : (f.shoulderMid.x + f.hipMid.x) / 2;
+    return [{ s, cx, heelY: h.y, flex: Math.max(l, r) }];
+  });
+  let chosen = pool.filter(p => p.flex <= STANDING_MAX_KNEE_FLEXION_DEG);
+  if (chosen.length < OFFLINE_CALIBRATION.minSamples) chosen = pool.filter(p => p.flex <= OFFLINE_CALIBRATION.relaxedMaxKneeFlexionDeg);
+  if (chosen.length < OFFLINE_CALIBRATION.minSamples) return null;
+  const median = (v: number[]) => { const a = [...v].sort((x, y) => x - y); return a[Math.floor(a.length / 2)]!; };
+  const x = median(chosen.map(c => c.cx)), heelY = median(chosen.map(c => c.heelY));
+  const neutral = neutralFrom(chosen.map(c => gated(measureFrontal(c.s.landmarks, width, height, x, ratio), c.s)));
+  return { baseline: { state: 'locked', x, heelY, lockedAtMs: chosen[0]!.s.sourceTimeMs }, neutral };
+}
+
+/** The camera view most usable samples agree on, or null when no view reaches the required share. */
+function wholeVideoView(samples: readonly Sample[], width: number, height: number): ViewKind | null {
+  // Judge the view while the person is upright: in a deep squat the trunk leans forward, looks shorter
+  // in the image and makes a diagonal camera look frontal. Fall back to all samples if too few are upright.
+  const usable = samples.flatMap(s => {
+    if ((s.review !== undefined && s.review.label !== 'correct-target') || !s.tracking.accepted) return [];
+    const v = classifyView(s.landmarks, width, height);
+    const l = flexionProxy(s.left), r = flexionProxy(s.right);
+    return v === null ? [] : [{ v, upright: l !== null && r !== null && Math.max(l, r) <= OFFLINE_CALIBRATION.relaxedMaxKneeFlexionDeg }];
+  });
+  const upright = usable.filter(u => u.upright);
+  const pool = upright.length >= OFFLINE_CALIBRATION.minSamples ? upright : usable;
+  const counts = new Map<ViewKind, number>();
+  const total = pool.length;
+  for (const { v } of pool) counts.set(v, (counts.get(v) ?? 0) + 1);
+  for (const [v, n] of counts) if (total > 0 && n / total >= WHOLE_VIDEO_VIEW_MIN_SHARE) return v;
+  return null;
 }
 
 /** Mean standing tilt per metric; a metric without any valid standing value stays uncalibrated. */
