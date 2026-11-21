@@ -29,6 +29,12 @@ export const STANDING_MAX_KNEE_FLEXION_DEG = 20;
  * does not flash "too oblique" for a single frame. Provisional.
  */
 export const VIEW_HOLD_MS = 600;
+/**
+ * Uploaded video: the camera does not move, so one view is decided for the whole clip when at least
+ * this share of usable samples agree (whole-video-view-v1). Mixed clips (person really turns) fall
+ * back to the 600 ms hold per sample.
+ */
+export const WHOLE_VIDEO_VIEW_MIN_SHARE = 0.6;
 export const OFFLINE_CALIBRATION = { version: 'offline-standing-calibration-v1', relaxedMaxKneeFlexionDeg: 35, minSamples: 3 } as const;
 
 export interface FrontalFrame {
@@ -79,6 +85,7 @@ function gated(m: FrontalMetrics, s: Sample): FrontalMetrics {
 export function frontalTimeline(samples: readonly Sample[], width: number, height: number, source: BaselineSource = 'standing-trunk'): FrontalFrame[] {
   const offline = offlineCalibration(samples, width, height, source);
   const anchor = createBaselineAnchor();
+  const clipView = wholeVideoView(samples, width, height);
   let stableView: ViewKind | null = null;
   let pendingView: { view: ViewKind; since: number } | null = null;
   const tracker = createCueTracker();
@@ -113,7 +120,7 @@ export function frontalTimeline(samples: readonly Sample[], width: number, heigh
         if (s.sourceTimeMs - pendingView.since >= VIEW_HOLD_MS) { stableView = rawView; pendingView = null; }
       }
     }
-    const view = usable && rawView !== null ? stableView : null;
+    const view = usable && rawView !== null ? clipView ?? stableView : null;
     let lateral: LateralMetrics | null = null;
     if (view === 'side') {
       const m = measureLateral(s.landmarks, width, height);
@@ -148,6 +155,20 @@ function offlineCalibration(samples: readonly Sample[], width: number, height: n
   const x = median(chosen.map(c => c.cx)), heelY = median(chosen.map(c => c.heelY));
   const neutral = neutralFrom(chosen.map(c => gated(measureFrontal(c.s.landmarks, width, height, x), c.s)));
   return { baseline: { state: 'locked', x, heelY, lockedAtMs: chosen[0]!.s.sourceTimeMs }, neutral };
+}
+
+/** The camera view most usable samples agree on, or null when no view reaches the required share. */
+function wholeVideoView(samples: readonly Sample[], width: number, height: number): ViewKind | null {
+  const counts = new Map<ViewKind, number>();
+  let total = 0;
+  for (const s of samples) {
+    if ((s.review !== undefined && s.review.label !== 'correct-target') || !s.tracking.accepted) continue;
+    const v = classifyView(s.landmarks, width, height);
+    if (v === null) continue;
+    counts.set(v, (counts.get(v) ?? 0) + 1); total++;
+  }
+  for (const [v, n] of counts) if (total > 0 && n / total >= WHOLE_VIDEO_VIEW_MIN_SHARE) return v;
+  return null;
 }
 
 /** Mean standing tilt per metric; a metric without any valid standing value stays uncalibrated. */
