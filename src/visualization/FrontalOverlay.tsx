@@ -115,7 +115,7 @@ export function FrontalCuePanel({ frame, hasSample }: { frame: FrontalFrame | un
   else if (frame.view === 'oblique') body = <p className="cue-muted">請正面或正側面拍攝（目前角度太斜，不判斷）</p>;
   else if (frame.view === 'side') body = frame.cues.length ? <ul>{frame.cues.map(c => <li key={c.id}>⚠ {c.text}<span className="cue-page">講義 p.{c.page}</span></li>)}</ul> : <p className="cue-ok">✓ 側面：膝蓋與上身在範圍內</p>;
   else if (frame.view !== 'frontal') body = <p className="cue-muted">看不清楚軀幹點位，暫不判斷</p>;
-  else if (frame.baseline.state !== 'locked') body = <p className="cue-muted">請先站直、不動約 1 秒，建立基準線</p>;
+  else if (frame.baseline.state !== 'locked') body = <p className="cue-muted">還找不到站直的畫面：請個案先站直、不動約 1 秒，才能畫基準線</p>;
   else if (frame.cues.length === 0) body = <p className="cue-ok">✓ 姿勢在基準線附近</p>;
   else body = <ul>{frame.cues.map(c => <li key={c.id}>⚠ {c.text}<span className="cue-page">講義 p.{c.page}</span></li>)}</ul>;
   return <div className="cue-panel" role="status" aria-live="polite">{body}</div>;

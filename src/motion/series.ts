@@ -25,6 +25,15 @@ export function heldSample(samples: readonly Sample[], timeMs: number, holdMs: n
   }
   return undefined;
 }
+/** Display only, while paused between samples: the closest analyzed frame within maxMs (either side). */
+export function nearestSample(samples: readonly Sample[], timeMs: number, maxMs: number): Sample | undefined {
+  let best: Sample | undefined, bestD = Infinity;
+  for (const s of samples) {
+    const d = Math.abs((s.decode.timeBasis === 'presentation' ? s.sourceTimeMs : s.requestedTimeMs) - timeMs);
+    if (d < bestD) { best = s; bestD = d; }
+  }
+  return bestD <= maxMs ? best : undefined;
+}
 /** Display only: hold the last actually used crop between analyzed frames, never interpolate angles. */
 export function displayedRoi(samples:readonly Sample[],timeMs:number) {
   for(let i=samples.length-1;i>=0;i--){const s=samples[i]!;const t=s.decode.timeBasis==='presentation'?s.sourceTimeMs:s.requestedTimeMs;if(t<=timeMs+.001)return s.roi;}

@@ -17,6 +17,13 @@ import { classifyView, measureLateral, type LateralMetrics, type ViewKind } from
 export type BaselineSource = 'standing-trunk' | 'heel-midpoint';
 /** Both knees below this flexion proxy (degrees) count as standing for calibration. */
 export const STANDING_MAX_KNEE_FLEXION_DEG = 20;
+/**
+ * Uploaded video only (whole recording is available): when the person never stands still for the
+ * one-second lock (e.g. the clip starts mid-squat or they keep moving), calibrate from the most
+ * upright samples anywhere in the video instead of showing "stand still" forever.
+ * Provisional engineering values (offline-standing-calibration-v1).
+ */
+export const OFFLINE_CALIBRATION = { version: 'offline-standing-calibration-v1', relaxedMaxKneeFlexionDeg: 35, minSamples: 3 } as const;
 
 export interface FrontalFrame {
   sampleIndex: number;
@@ -37,6 +44,8 @@ export interface FrontalFrame {
   /** Side-view metrics (handout p.12); null unless the view is 'side' and the subject passed QC. */
   lateral: LateralMetrics | null;
   cues: Cue[];
+  /** How the baseline in use was found: a live one-second standing lock, or the whole-video fallback. */
+  calibration: 'standing-lock' | 'whole-video' | null;
 }
 export interface Neutral { head: number; shift: number; shoulderTilt: number; pelvisTilt: number; trunkSide: number }
 type Tilt = keyof Neutral;
@@ -62,6 +71,7 @@ function gated(m: FrontalMetrics, s: Sample): FrontalMetrics {
  * the baseline or produce prompts.
  */
 export function frontalTimeline(samples: readonly Sample[], width: number, height: number, source: BaselineSource = 'standing-trunk'): FrontalFrame[] {
+  const offline = offlineCalibration(samples, width, height, source);
   const anchor = createBaselineAnchor();
   const tracker = createCueTracker();
   let standingBuf: { timeMs: number; m: FrontalMetrics }[] = [];
@@ -77,12 +87,16 @@ export function frontalTimeline(samples: readonly Sample[], width: number, heigh
     const knee = { left: flexionProxy(s.left), right: flexionProxy(s.right) };
     const standing = knee.left !== null && knee.right !== null && Math.max(knee.left, knee.right) <= STANDING_MAX_KNEE_FLEXION_DEG;
     const centerX = source === 'heel-midpoint' ? h?.x ?? null : f ? (f.shoulderMid.x + f.hipMid.x) / 2 : null;
-    const baseline = anchor.update({ timeMs: s.sourceTimeMs, heel: h, hipWidthPx: f?.hipWidth ?? null, centerX, standing });
-    const raw = gated(measureFrontal(s.landmarks, width, height, baseline.x), s);
-    if (usable && standing) standingBuf = [...standingBuf.filter(b => s.sourceTimeMs - b.timeMs <= 1000), { timeMs: s.sourceTimeMs, m: raw }];
-    if (baseline.state !== 'locked') { neutral = null; lockedAt = null; }
-    else if (baseline.lockedAtMs !== lockedAt) { lockedAt = baseline.lockedAtMs; neutral = neutralFrom(standingBuf.map(b => b.m)); }
-    const metrics = relative(raw, neutral);
+    const live = anchor.update({ timeMs: s.sourceTimeMs, heel: h, hipWidthPx: f?.hipWidth ?? null, centerX, standing });
+    const liveRaw = gated(measureFrontal(s.landmarks, width, height, live.x), s);
+    if (usable && standing) standingBuf = [...standingBuf.filter(b => s.sourceTimeMs - b.timeMs <= 1000), { timeMs: s.sourceTimeMs, m: liveRaw }];
+    if (live.state !== 'locked') { neutral = null; lockedAt = null; }
+    else if (live.lockedAtMs !== lockedAt) { lockedAt = live.lockedAtMs; neutral = neutralFrom(standingBuf.map(b => b.m)); }
+    const useOffline = live.state !== 'locked' && offline !== null;
+    const baseline = useOffline ? offline.baseline : live;
+    const raw = useOffline ? gated(measureFrontal(s.landmarks, width, height, offline.baseline.x), s) : liveRaw;
+    const metrics = relative(raw, useOffline ? offline.neutral : neutral);
+    const calibration = baseline.state !== 'locked' ? null : useOffline ? 'whole-video' as const : 'standing-lock' as const;
     const view = usable ? classifyView(s.landmarks, width, height) : null;
     let lateral: LateralMetrics | null = null;
     if (view === 'side') {
@@ -92,8 +106,32 @@ export function frontalTimeline(samples: readonly Sample[], width: number, heigh
     }
     const instant = !usable ? [] : view === 'frontal' ? instantCues(metrics, knee) : view === 'side' && lateral ? lateralCues(lateral, knee[lateral.side]) : [];
     const cues = tracker.update(s.sourceTimeMs, instant);
-    return { sampleIndex: s.sampleIndex, tracked: usable, baseline, metrics, neutral, view, lateral, cues };
+    return { sampleIndex: s.sampleIndex, tracked: usable, baseline, metrics, neutral: useOffline ? offline.neutral : neutral, view, lateral, cues, calibration };
   });
+}
+
+/**
+ * Whole-video standing calibration: the most upright usable frontal samples (both knee flexion
+ * proxies ≤ 20°, or ≤ 35° when fewer than 3 exist), line at the median centre, neutral tilts = mean
+ * of those samples measured against that line. Null when no such samples exist.
+ */
+function offlineCalibration(samples: readonly Sample[], width: number, height: number, source: BaselineSource): { baseline: Extract<BaselineState, { state: 'locked' }>; neutral: Neutral | null } | null {
+  const pool = samples.flatMap(s => {
+    if ((s.review !== undefined && s.review.label !== 'correct-target') || !s.tracking.accepted) return [];
+    if (classifyView(s.landmarks, width, height) !== 'frontal') return [];
+    const f = frontalFrame(s.landmarks, width, height), h = heelMidpoint(s.landmarks, width, height);
+    const l = flexionProxy(s.left), r = flexionProxy(s.right);
+    if (typeof f === 'string' || typeof h === 'string' || l === null || r === null) return [];
+    const cx = source === 'heel-midpoint' ? h.x : (f.shoulderMid.x + f.hipMid.x) / 2;
+    return [{ s, cx, heelY: h.y, flex: Math.max(l, r) }];
+  });
+  let chosen = pool.filter(p => p.flex <= STANDING_MAX_KNEE_FLEXION_DEG);
+  if (chosen.length < OFFLINE_CALIBRATION.minSamples) chosen = pool.filter(p => p.flex <= OFFLINE_CALIBRATION.relaxedMaxKneeFlexionDeg);
+  if (chosen.length < OFFLINE_CALIBRATION.minSamples) return null;
+  const median = (v: number[]) => { const a = [...v].sort((x, y) => x - y); return a[Math.floor(a.length / 2)]!; };
+  const x = median(chosen.map(c => c.cx)), heelY = median(chosen.map(c => c.heelY));
+  const neutral = neutralFrom(chosen.map(c => gated(measureFrontal(c.s.landmarks, width, height, x), c.s)));
+  return { baseline: { state: 'locked', x, heelY, lockedAtMs: chosen[0]!.s.sourceTimeMs }, neutral };
 }
 
 /** Mean standing tilt per metric; a metric without any valid standing value stays uncalibrated. */

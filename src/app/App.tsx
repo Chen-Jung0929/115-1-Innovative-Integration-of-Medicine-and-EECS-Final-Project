@@ -8,7 +8,7 @@ import type { Session } from '../domain/analysis';
 import { MODEL_URL, PROJECT_MODEL_URL } from '../pose/mediapipe';
 import { checkFile, loadVideo, seekFrame, observePresentedFrame } from '../input/video';
 import { analyze } from '../motion/analyze';
-import { coverage, matchingSample, displayedRoi, heldSample } from '../motion/series';
+import { coverage, matchingSample, displayedRoi, heldSample, nearestSample } from '../motion/series';
 import { flexionProxy } from '../biomechanics/knee';
 import { downloadFile, toCsv } from '../export/csv';
 import { Overlay } from '../visualization/Overlay';
@@ -176,8 +176,10 @@ export function App() {
   }
   const exact = session && !seeking ? (matchingSample(session.samples, timeMs) ?? (video.current?.paused ? session.samples.find(s=>s.decode.timeBasis==='seek-position-estimate' && Math.abs(s.requestedTimeMs-video.current!.currentTime*1000)<.001):undefined)) : undefined;
   // While playing, keep the latest analyzed frame on screen between 5 Hz samples instead of flashing "no result".
-  const held = !exact && session && playing && !seeking ? heldSample(session.samples, timeMs, PLAYBACK_HOLD_MS) : undefined;
+  // Paused between samples: show the closest analyzed frame (5 Hz → at most 0.1 s away) and say so.
+  const held = !exact && session && !seeking ? (playing ? heldSample(session.samples, timeMs, PLAYBACK_HOLD_MS) : nearestSample(session.samples, timeMs, PAUSED_NEAREST_MS)) : undefined;
   const sample = exact ?? held;
+  const heldGapS = held ? Math.abs(timeMs - (held.decode.timeBasis === 'presentation' ? held.sourceTimeMs : held.requestedTimeMs)) / 1000 : 0;
   const frontal = useMemo(() => session && info ? frontalTimeline(session.samples, info.width, info.height, baselineSource) : [], [session, info, baselineSource]);
   const frontalFrame = sample ? frontal.find(f => f.sampleIndex === sample.sampleIndex) : undefined;
   const pct = (s: 'left' | 'right') => { const value = session ? coverage(session.samples, s) : null; return value === null ? 'N/A' : `${(value * 100).toFixed(1)}%`; };
@@ -241,8 +243,9 @@ export function App() {
       {experiments && selection && info && !selecting && <svg className="roi-border" viewBox={`0 0 ${info.width} ${info.height}`} aria-label="受測者 ROI 範圍"><rect {...(pipeline==='roi-crop'?(sample?.roi??displayedRoi(session?.samples??[],timeMs)??roiAt(selection,timeMs,info.width,info.height).roi):(sample?.targetReferenceRoi??selection.roi))} fill="none" stroke="#ffda57" strokeWidth={Math.max(2,info.width/250)} /></svg>}
       {!info && !loading && <p className="stage-empty">選擇影片後，畫面會出現在這裡</p>}</div>
         {frontalView && session && !selecting && <FrontalLegend view={frontalFrame?.view} />}
+        {frontalView && session && !selecting && frontalFrame?.calibration==='whole-video' && <p className="muted small">這段影片裡沒有「站直不動 1 秒」的片段，基準線改用整段影片中站得最直的幾格來定。</p>}
         {session && <label className="scrub">逐格檢查<input aria-label="已分析取樣" type="range" min={0} max={session.samples.length-1} disabled={selecting} value={sampleIndex} onChange={e => jump(Number(e.target.value))} /><span className="muted">#{sampleIndex} / {session.samples.length-1}</span></label>}
-        <p className="muted small">來源影格時間：{(timeMs/1000).toFixed(3)} 秒。{held ? `播放中：顯示最近一次分析（取樣 #${held.sampleIndex}，${Math.max(0,(timeMs-(held.decode.timeBasis==='presentation'?held.sourceTimeMs:held.requestedTimeMs))/1000).toFixed(2)} 秒前；每秒分析 5 次）` : sample ? `對應取樣 #${sample.sampleIndex}（${sample.decode.timeBasis}）` : '這一格沒有分析結果，骨架與角度不顯示。暫停時只顯示真正分析過的影格，可用「逐格檢查」跳過去。'}</p>
+        <p className="muted small">來源影格時間：{(timeMs/1000).toFixed(3)} 秒。{held ? `顯示最近的分析影格（取樣 #${held.sampleIndex}，相差 ${heldGapS.toFixed(2)} 秒；影片每秒分析 5 次）` : sample ? `對應取樣 #${sample.sampleIndex}（${sample.decode.timeBasis}）` : '這附近沒有分析結果（可能在分析範圍外），骨架與角度不顯示。'}</p>
       </div><div className="readout">
         <div className="group"><h3 className="group-title">膝蓋</h3><div className="measurements">
         {sides.map(s => {
@@ -319,4 +322,6 @@ export function App() {
 }
 /** Playback only: one 5 Hz sample interval plus a little decoder jitter. */
 const PLAYBACK_HOLD_MS = 250;
+/** Paused: half a 5 Hz interval plus decoder jitter, so every paused frame maps to its closest sample. */
+const PAUSED_NEAREST_MS = 120;
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }

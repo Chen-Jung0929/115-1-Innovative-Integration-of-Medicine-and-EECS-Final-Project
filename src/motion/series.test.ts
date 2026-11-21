@@ -1,6 +1,6 @@
 import { makeSample } from '../test/fixtures';
 import { expect, it } from 'vitest';
-import { sampleTimes, matchingSample, coverage, heldSample } from './series';
+import { sampleTimes, matchingSample, coverage, heldSample, nearestSample } from './series';
 import type { Sample } from '../domain/analysis';
 const samples: Sample[] = [
   makeSample({sampleIndex:0,requestedTimeMs:0,sourceTimeMs:0,landmarks:[],left:{valid:true,rawAngleDeg:0,invalidReasons:[]},right:{valid:false,rawAngleDeg:null,invalidReasons:['missing-landmark']}}),
@@ -32,4 +32,11 @@ it('playback display holds the latest analyzed frame for a short time, never a f
   expect(heldSample(samples, 400, 250)?.sampleIndex).toBe(2);
   expect(heldSample(samples, 700, 250)).toBeUndefined();
   expect(heldSample([at(0, 500)], 100, 250)).toBeUndefined();
+});
+it('paused display picks the closest analyzed frame, only when it is close', () => {
+  const at = (i: number, t: number) => makeSample({ sampleIndex: i, sourceTimeMs: t, requestedTimeMs: t });
+  const samples = [at(0, 0), at(1, 200)];
+  expect(nearestSample(samples, 120, 120)?.sampleIndex).toBe(1);
+  expect(nearestSample(samples, 60, 120)?.sampleIndex).toBe(0);
+  expect(nearestSample(samples, 500, 120)).toBeUndefined();
 });
