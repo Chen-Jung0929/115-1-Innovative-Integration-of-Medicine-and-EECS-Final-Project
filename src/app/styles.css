@@ -214,4 +214,8 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .skeleton3d-stage { position: relative; }
 .skeleton3d canvas { display: block; width: 100%; max-width: 480px; aspect-ratio: 4 / 3; margin: 6px auto 0; touch-action: none; cursor: grab; }
 .skeleton3d canvas:active { cursor: grabbing; }
+.skeleton3d-gl { position: absolute; left: 50%; transform: translateX(-50%); pointer-events: none; }
+.skeleton3d-labels { position: absolute; left: 50%; top: 6px; transform: translateX(-50%); width: 100%; max-width: 480px; aspect-ratio: 4 / 3; pointer-events: none; }
+.skeleton3d-label { position: absolute; transform: translate(10px, -50%); font-size: .78rem; font-weight: 600; padding: 1px 7px; border-radius: 10px; background: rgba(255,255,255,.9); white-space: nowrap; }
+.skeleton3d-label.left { color: #0071e3; } .skeleton3d-label.right { color: #e8590c; transform: translate(calc(-100% - 10px), -50%); }
 .skeleton3d-empty { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: var(--muted); font-size: .9rem; }

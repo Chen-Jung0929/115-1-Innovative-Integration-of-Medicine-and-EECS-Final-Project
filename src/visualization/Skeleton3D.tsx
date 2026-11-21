@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type PointerEvent } from 'react';
 import type { Sample } from '../domain/analysis';
+import * as THREE from 'three';
 import { worldFlexion } from '../biomechanics/world';
+import { createBones, type Bones } from './bones';
 
 const W = 480, H = 360;
 const BONES: [number, number][] = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [23, 25], [25, 27], [24, 26], [26, 28], [27, 29], [29, 31], [27, 31], [28, 30], [30, 32], [28, 32]];
@@ -9,12 +11,20 @@ const VIEWS = [{ id: 'front', label: '正面', yaw: 0 }, { id: 'oblique', label:
 const colorOf = (a: number, b: number) => a % 2 === 1 && b % 2 === 1 ? LEFT : a % 2 === 0 && b % 2 === 0 && a > 10 ? RIGHT : MID;
 
 /**
- * Experimental 3D skeleton from MediaPipe world landmarks (ADR-069). Display only: drag to turn,
+ * Experimental 3D skeleton from MediaPipe world landmarks (ADR-069), drawn as OpenSim bone meshes (ADR-070) or lines. Display only: drag to turn,
  * or pick 正面／斜角／側面. Uses the same world points as the "3D 骨架" angles; depth is a model
  * estimate, so it can be wrong even when the 2D overlay looks right.
  */
+/** MediaPipe world (y down, smaller z = nearer the camera) → three.js (y up, +z toward the viewer). */
+const toThree = (w: [number, number, number] | undefined) => w ? new THREE.Vector3(w[0], -w[1], -w[2]) : null;
+
 export function Skeleton3D({ sample }: { sample: Sample | undefined }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const gl = useRef<HTMLCanvasElement>(null);
+  const labels = useRef<HTMLDivElement>(null);
+  const three = useRef<{ renderer: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.PerspectiveCamera; grid: THREE.GridHelper; bones: Bones | null } | null>(null);
+  const [mode, setMode] = useState<'bones' | 'lines'>('bones');
+  const [bonesReady, setBonesReady] = useState(false);
   const [yaw, setYaw] = useState(30), [pitch, setPitch] = useState(10);
   const drag = useRef<{ x: number; y: number; yaw: number; pitch: number } | null>(null);
   const usable = !!sample && sample.tracking.accepted && (!sample.review || sample.review.label === 'correct-target');
@@ -24,7 +34,7 @@ export function Skeleton3D({ sample }: { sample: Sample | undefined }) {
     const dpr = window.devicePixelRatio || 1;
     c.width = W * dpr; c.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
-    if (!usable || !hasWorld) return;
+    if (!usable || !hasWorld || (mode === 'bones' && bonesReady)) return;
     const y0 = yaw * Math.PI / 180, p0 = pitch * Math.PI / 180;
     const pts = sample!.landmarks.map(l => l.world);
     const feet = Math.max(...[27, 28, 29, 30, 31, 32].map(i => pts[i]?.[1] ?? -Infinity));
@@ -61,7 +71,52 @@ export function Skeleton3D({ sample }: { sample: Sample | undefined }) {
       ctx.fillStyle = 'rgba(255,255,255,.92)'; ctx.beginPath(); ctx.roundRect(x, y, tw, 20, 10); ctx.fill();
       ctx.textAlign = 'left'; ctx.fillStyle = side === 'left' ? LEFT : RIGHT; ctx.fillText(text, x + 6, y + 10);
     }
-  }, [sample, usable, hasWorld, yaw, pitch]);
+  }, [sample, usable, hasWorld, yaw, pitch, mode, bonesReady]);
+  // Bone meshes (WebGL). Falls back to the line drawing when WebGL or the mesh files are unavailable.
+  useEffect(() => {
+    const c = gl.current; if (!c) return;
+    let renderer: THREE.WebGLRenderer;
+    try { renderer = new THREE.WebGLRenderer({ canvas: c, antialias: true, alpha: true }); } catch { return; }
+    renderer.setPixelRatio(window.devicePixelRatio || 1); renderer.setSize(W, H, false);
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(30, W / H, 0.05, 50);
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 2.2));
+    const dl = new THREE.DirectionalLight(0xffffff, 1.6); dl.position.set(2, 4, 3); scene.add(dl);
+    const grid = new THREE.GridHelper(2, 8, 0x8e8e93, 0x8e8e93); scene.add(grid);
+    three.current = { renderer, scene, camera, grid, bones: null };
+    let alive = true;
+    createBones(scene, `${import.meta.env.BASE_URL}bones/`).then(b => { if (!alive) return; three.current!.bones = b; setBonesReady(true); }).catch(() => { if (alive) setMode('lines'); });
+    return () => { alive = false; renderer.dispose(); three.current = null; setBonesReady(false); };
+  }, []);
+  useEffect(() => {
+    const t = three.current, box = labels.current;
+    if (box) box.replaceChildren();
+    if (!t || !t.bones || mode !== 'bones') return;
+    const P = sample?.landmarks.map(l => toThree(l.world));
+    const ok = usable && hasWorld && P && [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32].every(i => P[i]);
+    t.bones.group.visible = !!ok; t.grid.visible = !!ok;
+    let target = new THREE.Vector3(0, -0.1, 0);
+    if (ok) {
+      const pts = P as THREE.Vector3[];
+      t.bones.update(pts);
+      const floor = Math.min(...[27, 28, 29, 30, 31, 32].map(i => pts[i]!.y));
+      t.grid.position.set(0, floor, 0);
+      target = new THREE.Vector3(0, (floor + pts[0]!.y) / 2, 0);
+    }
+    const y0 = yaw * Math.PI / 180, p0 = pitch * Math.PI / 180, d = 4.6;
+    t.camera.position.set(target.x + d * Math.sin(y0) * Math.cos(p0), target.y + d * Math.sin(p0), target.z + d * Math.cos(y0) * Math.cos(p0));
+    t.camera.lookAt(target);
+    t.renderer.render(t.scene, t.camera);
+    if (!ok || !box) return;
+    for (const [side, i] of [['left', 25], ['right', 26]] as const) {
+      const f = worldFlexion(sample!.landmarks, 'knee', side); if (f === null) continue;
+      const v = (P![i] as THREE.Vector3).clone().project(t.camera);
+      const el = document.createElement('span');
+      el.className = `skeleton3d-label ${side}`; el.textContent = `${side === 'left' ? '左' : '右'}膝 ${Math.round(f)}°`;
+      el.style.left = `${(v.x + 1) / 2 * 100}%`; el.style.top = `${(1 - v.y) / 2 * 100}%`;
+      box.append(el);
+    }
+  }, [sample, usable, hasWorld, yaw, pitch, mode, bonesReady]);
   const down = (e: PointerEvent<HTMLCanvasElement>) => { e.currentTarget.setPointerCapture(e.pointerId); drag.current = { x: e.clientX, y: e.clientY, yaw, pitch }; };
   const move = (e: PointerEvent<HTMLCanvasElement>) => {
     const d = drag.current; if (!d) return;
@@ -70,12 +125,15 @@ export function Skeleton3D({ sample }: { sample: Sample | undefined }) {
   };
   return <div className="skeleton3d">
     <div className="skeleton3d-head"><span>3D 骨架（試驗）</span>
+      <div className="segmented small-seg" role="group" aria-label="3D 骨架樣式"><button aria-pressed={mode === 'bones'} disabled={!bonesReady} onClick={() => setMode('bones')}>骨頭</button><button aria-pressed={mode === 'lines'} onClick={() => setMode('lines')}>線條</button></div>
       <div className="segmented small-seg" role="group" aria-label="3D 骨架視角">{VIEWS.map(v => <button key={v.id} aria-pressed={Math.round(yaw) === v.yaw && Math.round(pitch) === 0} onClick={() => { setYaw(v.yaw); setPitch(0); }}>{v.label}</button>)}</div>
     </div>
     <div className="skeleton3d-stage">
+      <canvas ref={gl} className="skeleton3d-gl" hidden={mode !== 'bones' || !bonesReady} aria-hidden="true" />
       <canvas ref={ref} aria-label="3D 骨架，可拖曳旋轉" onPointerDown={down} onPointerMove={move} onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }} />
+      <div ref={labels} className="skeleton3d-labels" hidden={mode !== 'bones'} />
       {!usable ? <p className="skeleton3d-empty">這一格沒有可用的骨架</p> : !hasWorld ? <p className="skeleton3d-empty">這次分析沒有 3D 點，請重新分析</p> : null}
     </div>
-    <p className="muted small">拖曳可旋轉。藍色 = 個案左側、橘色 = 右側。深度是模型估計的，僅供參考。</p>
+    <p className="muted small">拖曳可旋轉。藍色 = 個案左側、橘色 = 右側。骨頭模型取自 OpenSim（只用來顯示，長度依個案縮放）；深度是模型估計的，僅供參考。</p>
   </div>;
 }

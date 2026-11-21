@@ -20,6 +20,10 @@ MediaPipe 除了 2D 點，也會輸出一組 **3D 骨架點（world landmarks，
 
 影片下方新增「3D 骨架（試驗）」視窗（`src/visualization/Skeleton3D.tsx`，ADR-069）：藍色 = 個案左側、橘色 = 右側，腳下有 1 m 地面格線；可拖曳旋轉，或按「正面／斜角／側面」。膝蓋旁標示 3D 膝彎曲。只用 canvas 畫，沒有新增套件；舊分析沒有 3D 點時會提示重新分析。
 
+## 骨頭模型（同日，使用者要求）
+
+3D 骨架視窗預設改成真實骨頭外形（OpenSim 骨頭模型，取自 opencap-viewer，Apache-2.0，放在 `public/bones/`），左側淡藍、右側淡橘，依 3D 點擺位與縮放；右上可切「骨頭／線條」（ADR-070）。新增套件 `three@0.187.0`，第一次拉下這個分支要先跑 `npm install`。這只是外觀，不是 OpenSim 運動學計算。
+
 ## 初步比對（不是正式驗證）
 
 參考答案：OpenCap 官方測試資料（`stanfordnmbl/opencap-test-data`）
