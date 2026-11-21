@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Landmark } from '../domain/analysis';
-import { addCameraSums, createCausalLifter, emptySums, flexion3D, frameScale, liftClip, projectToImage, solveCamera, usable, type Vec3 } from './lift3d';
+import { MAX_CORRECTION_DEG, addCameraSums, createCausalLifter, emptySums, flexion3D, frameScale, liftClip, projectToImage, solveCamera, usable, type Vec3 } from './lift3d';
 
 // Synthetic subject facing the camera, in a gravity frame (metres, y down, floor y = 0, −z = toward camera).
 const W = 720, H = 1280, PX = 300, PITCH = 10 * Math.PI / 180;
@@ -19,11 +19,13 @@ function body(flex: number): Vec3[] {
   return P;
 }
 /** Camera pitched down by PITCH, 3 m away: orthographic image + world landmarks (hip-centred, gravity frame). */
-function observe(P: Vec3[], kneeBias = 0): Landmark[] {
+function observe(P: Vec3[], kneeBias = 0, worldFollowsCamera = false): Landmark[] {
   const c = Math.cos(PITCH), s = Math.sin(PITCH), hip = [0, 1, 2].map(k => (P[23]![k]! + P[24]![k]!) / 2);
   return P.map((p, i) => {
     const cam = [p[0], c * p[1] - s * (p[2] + 3), s * p[1] + c * (p[2] + 3)];
-    const world: Vec3 = [p[0] - hip[0]!, p[1] - hip[1]!, p[2] - hip[2]! - (i === 25 || i === 26 ? kneeBias : 0)];
+    const w: Vec3 = [p[0] - hip[0]!, p[1] - hip[1]!, p[2] - hip[2]! - (i === 25 || i === 26 ? kneeBias : 0)];
+    // Real MediaPipe world points are roughly camera-aligned: they turn with a pitched phone.
+    const world: Vec3 = worldFollowsCamera ? [w[0], c * w[1] - s * w[2], s * w[1] + c * w[2]] : w;
     return { x: (cam[0]! * PX + W / 2) / W, y: (cam[1]! * PX + H * 0.6) / H, visibility: 1, world };
   });
 }
@@ -54,7 +56,9 @@ describe('hybrid 3D lift', () => {
     const raw = clip.map(c => flexion3D(c.frame.landmarks.map(p => p.world), 'knee', 'left')!);
     const lifted = poses.map(p => flexion3D(p!, 'knee', 'left')!);
     expect(raw[0]).toBeGreaterThan(10); // the 5 cm bias reads as a bent knee
-    expect(Math.abs(lifted[0]!)).toBeLessThan(2);
+    expect(Math.abs(lifted[0]!)).toBeLessThan(5); // corrected, but at most MAX_CORRECTION_DEG
+    expect(raw[0]! - lifted[0]!).toBeLessThanOrEqual(MAX_CORRECTION_DEG + 0.5);
+    expect(['applied', 'capped']).toContain(context!.legs.left.status);
     // At the bottom the calibration has faded out, so the 5 cm bias is left (by design, ADR-072) …
     expect(Math.abs(lifted[20]! - clip[20]!.flex)).toBeLessThan(10);
     // … and without a bias the lift is exact there.
@@ -96,8 +100,8 @@ describe('hybrid 3D lift', () => {
     const clip = squat();
     const out = clip.map(c => lifter.step(c.frame.landmarks, c.frame.timeMs));
     expect(out.every(Boolean)).toBe(true);
-    expect(flexion3D(out[0]!, 'knee', 'right')!).toBeLessThan(3); // first frame defines 'standing' itself
-    expect(Math.abs(flexion3D(out[9]!, 'knee', 'right')!)).toBeLessThan(3);
+    expect(flexion3D(out[9]!, 'knee', 'right')!).toBeLessThan(5);
+    expect(['applied', 'capped']).toContain(lifter.context!.legs.right.status);
     expect(Math.abs(flexion3D(out[40]!, 'knee', 'right')! - clip[40]!.flex)).toBeLessThan(10);
     expect(lifter.step(clip[5]!.frame.landmarks, 0)).toBeNull(); // time must increase
   });
@@ -117,5 +121,60 @@ describe('hybrid 3D lift', () => {
     const p = body(0); expect(flexion3D(p, 'hip', 'left')).toBeCloseTo(0, 5);
     expect(flexion3D([], 'knee', 'left')).toBeNull();
     expect(flexion3D(undefined, 'knee', 'left')).toBeNull();
+  });
+
+  it('safety: a 20° flexion contracture hidden in depth still reads ≥ 15°', () => {
+    // Standing with 20° of knee flexion that is invisible in the frontal image, plus the usual 5 cm bias.
+    const clip = Array.from({ length: 40 }, (_, i) => {
+      const f = i < 10 ? 20 : 20 + 35 * (1 - Math.cos(2 * Math.PI * (i - 10) / 20));
+      return { flex: f, frame: { timeMs: i * 100, landmarks: observe(body(f), 0.05) } };
+    });
+    const { poses, context } = liftClip(clip.map(c => c.frame), W, H, { smoothSeconds: 0 });
+    for (const side of ['left', 'right'] as const) {
+      expect(flexion3D(poses[5]!, 'knee', side)!).toBeGreaterThanOrEqual(15);
+      expect(context!.legs[side].correctionDeg).toBeLessThanOrEqual(MAX_CORRECTION_DEG + 1e-6);
+    }
+  });
+
+  it('safety: a clip that never stands (knee > 45°) is not calibrated and not worse than raw', () => {
+    const clip = Array.from({ length: 30 }, (_, i) => {
+      const f = 45 + 22.5 * (1 - Math.cos(2 * Math.PI * i / 15));
+      return { flex: f, frame: { timeMs: i * 100, landmarks: observe(body(f), 0.05) } };
+    });
+    const { poses, context } = liftClip(clip.map(c => c.frame), W, H, { smoothSeconds: 0 });
+    expect(context!.legs.left.status).toBe('not-standing');
+    expect(context!.legs.right.status).toBe('not-standing');
+    const err = (get: (i: number) => number) => clip.reduce((s, c, i) => s + Math.abs(get(i) - c.flex), 0) / clip.length;
+    const rawErr = err(i => flexion3D(clip[i]!.frame.landmarks.map(p => p.world), 'knee', 'left')!);
+    expect(err(i => flexion3D(poses[i]!, 'knee', 'left')!)).toBeLessThanOrEqual(rawErr + 0.5);
+  });
+
+  it('safety: a knee bent in a side-view image is never "calibrated straight"', () => {
+    // Same 30° contracture seen from the side (yaw 90°): the bend is in the image, so no correction.
+    const side = (P: Vec3[]) => P.map(([x, y, z]) => [z, y, -x] as Vec3);
+    const clip = Array.from({ length: 30 }, (_, i) => ({ timeMs: i * 100, landmarks: observe(side(body(i < 10 ? 30 : 30 + 30 * (1 - Math.cos(2 * Math.PI * (i - 10) / 20)))), 0.05) }));
+    const { context } = liftClip(clip, W, H, { smoothSeconds: 0 });
+    for (const s of ['left', 'right'] as const) expect(['bent-in-image', 'not-standing']).toContain(context!.legs[s].status);
+  });
+
+  it('a known camera pitch keeps the skeleton upright when the world points turn with the phone', () => {
+    const clip = squat(30, 0).map(c => ({ timeMs: c.frame.timeMs, landmarks: observe(body(c.flex), 0, true) }));
+    const tilt = (p: Vec3[]) => { const v = [0, 1, 2].map(j => (p[11]![j]! + p[12]![j]!) / 2 - (p[27]![j]! + p[28]![j]!) / 2); return Math.acos(-v[1]! / Math.hypot(...v)) * 180 / Math.PI; };
+    expect(tilt(liftClip(clip, W, H, { smoothSeconds: 0 }).poses[0]!)).toBeGreaterThan(8); // pitch not observable
+    expect(tilt(liftClip(clip, W, H, { smoothSeconds: 0, cameraPitchDeg: 10 }).poses[0]!)).toBeLessThan(1);
+  });
+
+  it('never returns non-finite poses: collapsed or NaN inputs are skipped', () => {
+    const clip = squat(12).map(c => c.frame);
+    clip[3] = { timeMs: 300, landmarks: clip[3]!.landmarks.map(p => ({ ...p, world: [0, 0, 0] as Vec3 })) };
+    clip[4] = { timeMs: 400, landmarks: clip[4]!.landmarks.map((p, i) => i === 25 ? { ...p, x: NaN } : p) };
+    clip[5] = { timeMs: 500, landmarks: clip[5]!.landmarks.map(p => ({ ...p, x: 0.5, y: 0.5 })) };
+    const { poses } = liftClip(clip, W, H);
+    expect([poses[3], poses[4], poses[5]]).toEqual([null, null, null]);
+    expect(poses.filter(Boolean).every(p => p!.every(q => q.every(Number.isFinite)))).toBe(true);
+    const allBad = liftClip(clip.map(f => ({ ...f, landmarks: f.landmarks.map(p => ({ ...p, world: [0, 0, 0] as Vec3 })) })), W, H);
+    expect(allBad.poses.every(p => p === null)).toBe(true);
+    const live = createCausalLifter(W, H);
+    expect(live.step(clip[3]!.landmarks, 300)).toBeNull();
   });
 });

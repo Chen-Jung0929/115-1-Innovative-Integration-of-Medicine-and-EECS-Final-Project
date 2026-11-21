@@ -21,7 +21,7 @@ const toThree = (w: Vec3 | undefined) => w ? new THREE.Vector3(w[0], -w[1], -w[2
 /** Camera aim: a fixed point above the floor, so a squat is seen as the body going down. */
 const AIM_Y = 0.75;
 
-export function Skeleton3D({ sample, points }: { sample: Sample | undefined; points: Vec3[] | undefined }) {
+export function Skeleton3D({ sample, points, note }: { sample: Sample | undefined; points: Vec3[] | undefined; note?: string | null }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const gl = useRef<HTMLCanvasElement>(null);
   const labels = useRef<HTMLDivElement>(null);
@@ -129,6 +129,7 @@ export function Skeleton3D({ sample, points }: { sample: Sample | undefined; poi
       <div ref={labels} className="skeleton3d-labels" hidden={mode !== 'bones'} />
       {!usable || (hasWorld && !points) ? <p className="skeleton3d-empty">這一格沒有可用的骨架</p> : !hasWorld ? <p className="skeleton3d-empty">這次分析沒有 3D 點，請重新分析</p> : null}
     </div>
-    <p className="muted small">拖曳可旋轉。藍色 = 個案左側、橘色 = 右側。骨頭模型取自 OpenSim（只用來顯示，長度依個案縮放）。骨架的左右上下位置跟著影片，前後深度是模型估計的，並已轉正（腳踩在地板格線上），僅供參考。</p>
+    {note && <p className="muted small">{note}</p>}
+    <p className="muted small">拖曳可旋轉。藍色 = 個案左側、橘色 = 右側。骨頭模型取自 OpenSim（只用來顯示，長度依個案縮放）。骨架的左右上下位置跟著影片，前後深度是模型估計的，腳踩在地板格線上；手機若上下傾斜，整副骨架會跟著前後傾。僅供參考。</p>
   </div>;
 }

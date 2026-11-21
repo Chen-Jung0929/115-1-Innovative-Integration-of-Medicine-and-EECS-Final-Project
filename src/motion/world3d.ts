@@ -1,5 +1,5 @@
 import type { Sample } from '../domain/analysis';
-import { liftClip, flexion3D, type Vec3 } from '../biomechanics/lift3d';
+import { liftClip, flexion3D, type LiftContext, type Vec3 } from '../biomechanics/lift3d';
 
 /** Hybrid 3D poses for a whole analysed clip, by sampleIndex (ADR-071). Display + experimental angles only. */
 export type SessionPoses = ReadonlyMap<number, Vec3[]>;
@@ -7,11 +7,23 @@ const sampleTime = (s: Sample) => s.decode.timeBasis === 'presentation' ? s.sour
 /** Only frames that passed subject QC (and were not reviewed as the wrong person) feed the lift. */
 const trusted = (s: Sample) => s.tracking.accepted && (!s.review || s.review.label === 'correct-target');
 
-export function liftSession(samples: readonly Sample[], width: number, height: number): SessionPoses {
-  const { poses } = liftClip(samples.map(s => ({ timeMs: sampleTime(s), landmarks: trusted(s) ? s.landmarks : null })), width, height);
+export interface SessionLift { poses: SessionPoses; context: LiftContext | null }
+export function liftSession(samples: readonly Sample[], width: number, height: number): SessionLift {
+  const { poses, context } = liftClip(samples.map(s => ({ timeMs: sampleTime(s), landmarks: trusted(s) ? s.landmarks : null })), width, height);
   const out = new Map<number, Vec3[]>();
   samples.forEach((s, i) => { const p = poses[i]; if (p) out.set(s.sampleIndex, p); });
-  return out;
+  return { poses: out, context };
+}
+
+/** Plain-language straight-leg calibration status for the 3D view (ADR-075). */
+export function calibrationNote(context: LiftContext | null | undefined): string | null {
+  if (!context) return null;
+  const say = (side: 'left' | 'right') => {
+    const l = context.legs[side], name = side === 'left' ? '左膝' : '右膝';
+    if (l.status === 'applied' || l.status === 'capped') return `${name}已做站直校正（${l.correctionDeg.toFixed(0)}°${l.status === 'capped' ? '，已達上限' : ''}）`;
+    return `${name}未校正（${l.status === 'bent-in-image' ? '站姿時影片上膝蓋看起來是彎的' : l.status === 'not-standing' ? '影片中找不到確定站直的時候' : '未啟用'}）`;
+  };
+  return `${say('left')}；${say('right')}。`;
 }
 
 /** 3D flexion for one sample, or null when it has no lifted pose. */

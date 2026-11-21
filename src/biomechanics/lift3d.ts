@@ -32,13 +32,25 @@ export interface LiftContext {
   rotation: number[]; pxPerM: number;
   /** Per side: in-plane hip–ankle length (m) when standing, and the standing knee depth offset (m). */
   legs: Record<AnatomicalSide, LegCalibration>;
-  /** Rotation camera → gravity frame (row-major 3×3) and the floor height (m, camera-y down) after it. */
-  gravity: number[]; floorY: number;
+  /** Rotation camera → gravity frame (row-major 3×3), where "up" came from, and the floor height (m, y down) after it. */
+  gravity: number[]; upSource: 'floor' | 'world' | 'image' | 'average'; floorY: number;
   /** x/z of the origin (median mid-ankle) in the gravity frame. */
   originX: number; originZ: number;
 }
+/**
+ * Straight-leg calibration outcome per side (ADR-075): 'applied' / 'capped' (offset limited to
+ * MAX_CORRECTION_DEG) mean the knee depth was corrected; 'not-standing' (the leg never looked fully
+ * extended), 'bent-in-image' (the 2D knee is visibly bent while "standing") and 'off' mean it was not.
+ */
+export type CalibrationStatus = 'applied' | 'capped' | 'not-standing' | 'bent-in-image' | 'off';
 /** Per side, from the clip's most extended (standing) frames; lengths in m, 0 = unknown. */
-export interface LegCalibration { standingExtension: number; kneeDepthOffset: number }
+export interface LegCalibration { standingExtension: number; kneeDepthOffset: number; status: CalibrationStatus; correctionDeg: number }
+/** Largest standing knee-flexion change the calibration may make (自訂, safety cap). */
+export const MAX_CORRECTION_DEG = 10;
+/** "Standing" needs the image hip–ankle length ≥ this share of thigh + shank (pitch-corrected). */
+const MIN_STANDING_EXTENSION = 0.95;
+/** …and a 2D knee bend ≤ this. A bend seen in the image is never a depth artefact, but MediaPipe's 2D knee already reads ~20° in a standing side view (DEV), hence 25°. */
+const MAX_IMAGE_BEND_DEG = 25;
 export interface LiftOptions {
   /** Take x/y from the 2D keypoints (true) or keep the world landmarks' x/y (ablation). */
   imageXY?: boolean;
@@ -50,12 +62,17 @@ export interface LiftOptions {
   smoothSeconds?: number;
   /** Gravity/floor alignment (false = camera frame, ablation). */
   gravity?: boolean;
-  /** Which "up" cue to trust: the world model's up axis, the image vertical, or their average. */
-  upCue?: 'world' | 'image' | 'average';
+  /** Which "up" cue to trust: the floor plane through the feet (default), the world model's up axis, the image vertical, or world/image average (ablation). */
+  upCue?: 'floor' | 'world' | 'image' | 'average';
   /** Keep the stance foot fixed in depth (root depth trajectory, ADR-073). */
   footLock?: boolean;
+  /**
+   * Camera pitch in degrees (+ = looking down), when known from outside (e.g. the phone's motion sensor).
+   * The world landmarks follow the camera, so without this a tilted phone tilts the whole skeleton (ADR-076).
+   */
+  cameraPitchDeg?: number;
 }
-export const LIFT_DEFAULTS: Required<LiftOptions> = { imageXY: true, kneeCalibration: true, fadeFrom: 0.75, smoothSeconds: 0.1, gravity: true, upCue: 'world', footLock: true };
+export const LIFT_DEFAULTS: Required<LiftOptions> = { imageXY: true, kneeCalibration: true, fadeFrom: 0.75, smoothSeconds: 0.1, gravity: true, upCue: 'world', footLock: true, cameraPitchDeg: 0 };
 
 /** Joints used for the camera fit, extension and floor (shoulders, hips, knees, ankles, heels, toes). */
 const BODY = [11, 12, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32];
@@ -75,7 +92,7 @@ const median = (v: number[]) => { if (!v.length) return NaN; const s = [...v].so
 const percentile = (v: number[], p: number) => { const s = [...v].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.max(0, Math.round(p / 100 * (s.length - 1))))]!; };
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
 const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1];
-const NO_LEG: LegCalibration = { standingExtension: 0, kneeDepthOffset: 0 };
+const NO_LEG: LegCalibration = { standingExtension: 0, kneeDepthOffset: 0, status: 'off', correctionDeg: 0 };
 
 /** 180° − interior angle (0 = straight) from any 33-point 3D skeleton, or null when degenerate. */
 export function flexion3D(points: readonly (Vec3 | null | undefined)[] | undefined, joint: keyof typeof ANGLE_JOINTS, side: AnatomicalSide): number | null {
@@ -89,7 +106,10 @@ export function flexion3D(points: readonly (Vec3 | null | undefined)[] | undefin
 
 /** A frame is usable when all 33 points have finite 2D and world coordinates. */
 export function usable(landmarks: readonly Landmark[] | null | undefined): landmarks is readonly Landmark[] {
-  return !!landmarks && landmarks.length >= 33 && landmarks.every(p => Number.isFinite(p.x) && Number.isFinite(p.y) && !!p.world && p.world.every(Number.isFinite));
+  if (!landmarks || landmarks.length < 33 || !landmarks.every(p => p && Number.isFinite(p.x) && Number.isFinite(p.y) && !!p.world && p.world.every(Number.isFinite))) return false;
+  // A collapsed (zero-size) body in either space cannot be lifted.
+  const spread = (f: (p: Landmark) => number) => { const v = BODY.map(i => f(landmarks[i]!)); return Math.max(...v) - Math.min(...v); };
+  return spread(p => p.y) > 1e-3 && spread(p => p.world![1]) > 1e-3;
 }
 
 // ---------- camera fit: world → image, orthographic ----------
@@ -178,14 +198,56 @@ function rotationToUp(from: Vec3): number[] {
   const k = (1 - c) / s2, [x, y, z] = v;
   return [1 - k * (y * y + z * z), -z + k * x * y, y + k * x * z, z + k * x * y, 1 - k * (x * x + z * z), -x + k * y * z, -y + k * x * z, x + k * y * z, 1 - k * (x * x + y * y)];
 }
+/** The world model's own up axis seen from the camera (trained on upright people; roughly camera-aligned, so it misses camera pitch). */
+const worldUp = (rotation: number[]) => mul(rotation, [0, -1, 0]);
+/** Height above the floor direction `up` (unit, camera frame). */
+const heightAlong = (p: Vec3, up: Vec3) => dot(p, up);
+const HEEL_TOE: Record<AnatomicalSide, number[]> = { left: [29, 31], right: [30, 32] };
+/** Least-squares sums for the floor plane y = a·x + b·z + c (camera frame) through foot-contact points. */
+export interface FloorSums { m: number[]; r: number[]; xs: number[]; zs: number[] }
+export const emptyFloor = (): FloorSums => ({ m: Array(9).fill(0), r: [0, 0, 0], xs: [], zs: [] });
+/** Adds the heels and toes of the feet that touch the ground in this frame (within 3 cm of the lowest). */
+export function addFloorPoints(f: FloorSums, P: Vec3[], up: Vec3): void {
+  const low = (side: AnatomicalSide) => Math.min(...HEEL_TOE[side].map(i => heightAlong(P[i]!, up)));
+  const lowest = Math.min(low('left'), low('right'));
+  for (const side of SIDES) {
+    if (low(side) > lowest + 0.03) continue; // swing foot
+    for (const i of HEEL_TOE[side]) {
+      const [x, y, z] = P[i]!, v = [x, z, 1];
+      for (let r = 0; r < 3; r++) { for (let c = 0; c < 3; c++) f.m[r * 3 + c]! += v[r]! * v[c]!; f.r[r]! += v[r]! * y; }
+      f.xs.push(x); f.zs.push(z);
+    }
+  }
+}
 /**
- * Gravity estimate (自訂): the world model's own up axis (it is trained on upright people), seen from the
- * camera through the fitted rotation. 'image' (phone held level) and 'average' are kept for the ablation.
+ * Floor-plane up (自訂, ADR-076): image y of the heels and toes against their depth gives the camera
+ * pitch (a flat foot pointing at the camera appears with its toe lower in the image when the camera looks
+ * down), the left/right feet give the roll. Null when the contact points do not span ≥ 8 cm both ways
+ * or the plane is > 35° from the world model's up (implausible).
  */
-function gravityFrom(rotation: number[], cue: Required<LiftOptions>['upCue']): number[] {
-  const mpUp = mul(rotation, [0, -1, 0]);
-  if (cue === 'image') return IDENTITY;
-  return rotationToUp(cue === 'world' ? mpUp : [mpUp[0], mpUp[1] - 1, mpUp[2]]);
+export function floorUp(f: FloorSums, fallback: Vec3): Vec3 | null {
+  if (f.xs.length < 8) return null;
+  const span = (v: number[]) => percentile(v, 90) - percentile(v, 10);
+  if (span(f.xs) < 0.08 || span(f.zs) < 0.08) return null;
+  const abc = solve3(f.m, f.r);
+  if (!abc || !abc.every(Number.isFinite)) return null;
+  const n = [abc[0]!, -1, abc[1]!], len = norm(n), up = n.map(v => v / len) as Vec3;
+  return dot(up, fallback) / (norm(fallback) || 1) >= Math.cos(35 * Math.PI / 180) ? up : null;
+}
+/** Up vector for a cue, plus the floor estimate from camera-frame poses when the cue is 'floor'. */
+/** Tilt an up vector seen by a level camera into the view of a camera pitched down by `deg`. */
+const pitched = (up: Vec3, deg: number): Vec3 => { const r = deg * Math.PI / 180, c = Math.cos(r), s = Math.sin(r); return [up[0], c * up[1] - s * up[2], s * up[1] + c * up[2]]; };
+function chooseUp(cue: Required<LiftOptions>['upCue'], rotation: number[], camera: Vec3[][], pitchDeg = 0): { up: Vec3; source: LiftContext['upSource'] } {
+  const w = pitched(worldUp(rotation), pitchDeg);
+  if (cue === 'image') return { up: pitched([0, -1, 0], pitchDeg), source: 'image' };
+  if (cue === 'average') return { up: [w[0], w[1] - 1, w[2]], source: 'average' };
+  if (cue === 'world') return { up: w, source: 'world' };
+  let up: Vec3 = w, found: Vec3 | null = null;
+  for (let pass = 0; pass < 2; pass++) { // second pass re-selects contact feet with the better up
+    const f = emptyFloor(); for (const P of camera) addFloorPoints(f, P, up);
+    found = floorUp(f, w); if (!found) break; up = found;
+  }
+  return found ? { up: found, source: 'floor' } : { up: w, source: 'world' };
 }
 
 const toGravity = (P: Vec3[], ctx: LiftContext): Vec3[] => P.map(p => { const g = mul(ctx.gravity, p); return [g[0] - ctx.originX, g[1] - ctx.floorY, g[2] - ctx.originZ]; });
@@ -241,12 +303,52 @@ function gaussianSmooth(track: Track, sigmaS: number): number[][] {
 const flat = (lm: readonly Landmark[]) => lm.slice(0, 33).flatMap(p => [p.x, p.y, ...p.world!]);
 const unflat = (lm: readonly Landmark[], v: number[]): Landmark[] => lm.slice(0, 33).map((p, i) => ({ ...p, x: v[i * 5]!, y: v[i * 5 + 1]!, world: [v[i * 5 + 2]!, v[i * 5 + 3]!, v[i * 5 + 4]!] }));
 
-// ---------- whole clip (uploaded video) ----------
-function legStats(P: Vec3[][], side: AnatomicalSide): LegCalibration {
+// ---------- straight-leg calibration with safety checks (ADR-072, ADR-075) ----------
+/** 2D knee bend (°) in the image: depth-free, so a bend here is real (or varus/valgus), never a depth artefact. */
+function imageBend(P: Vec3[], side: AnatomicalSide): number {
+  const [h, k, a] = LEG[side].map(i => P[i]!) as [Vec3, Vec3, Vec3];
+  return flexion3D([...Array(33)].map((_, i) => i === LEG[side][0] ? [h[0], h[1], 0] : i === LEG[side][1] ? [k[0], k[1], 0] : i === LEG[side][2] ? [a[0], a[1], 0] : null), 'knee', side) ?? 0;
+}
+/** Thigh + shank length (m) from the world landmarks (robust median over the clip). */
+const worldLeg = (lms: readonly Landmark[][], side: AnatomicalSide) => median(lms.map(lm => {
+  const [h, k, a] = LEG[side].map(i => lm[i]!.world!) as [Vec3, Vec3, Vec3];
+  return norm(sub(h, k)) + norm(sub(k, a));
+}));
+/** Flexion change (°) that removing `offset` from the knee depth makes on pose P. */
+function correctionOf(P: Vec3[], side: AnatomicalSide, offset: number): number {
+  const k = LEG[side][1], Q = P.map(p => [...p] as Vec3);
+  Q[k]![2] -= offset;
+  return (flexion3D(P, 'knee', side) ?? 0) - (flexion3D(Q, 'knee', side) ?? 0);
+}
+/** Scale the offset down so the standing correction stays ≤ MAX_CORRECTION_DEG (bisection). */
+function capOffset(P: Vec3[], side: AnatomicalSide, offset: number): { offset: number; deg: number; capped: boolean } {
+  const full = correctionOf(P, side, offset);
+  if (full <= MAX_CORRECTION_DEG) return { offset, deg: full, capped: false };
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 30; i++) { const mid = (lo + hi) / 2; if (correctionOf(P, side, offset * mid) > MAX_CORRECTION_DEG) hi = mid; else lo = mid; }
+  return { offset: offset * lo, deg: correctionOf(P, side, offset * lo), capped: true };
+}
+/**
+ * Calibrate one leg on its most extended 10% of frames, only when two depth-free checks agree that it was
+ * straight: (1) image hip–ankle length ≥ 95% of the world thigh + shank (divided by the cosine of the camera
+ * pitch, since a vertical leg looks shorter from a tilted camera); (2) the 2D knee bend ≤ 15°. Then the
+ * correction is capped at MAX_CORRECTION_DEG, so a real contracture hidden in depth keeps most of its angle.
+ */
+function legStats(P: Vec3[][], lms: readonly Landmark[][], side: AnatomicalSide, up: Vec3): LegCalibration {
   const [h, , a] = LEG[side];
   const ext = P.map(p => inPlane(p[h]!, p[a]!));
-  const top = percentile(ext, 90), standing = P.filter((_, i) => ext[i]! >= top);
-  return { standingExtension: median(standing.map(p => inPlane(p[h]!, p[a]!))), kneeDepthOffset: median(standing.map(p => kneeChordDepth(p, side))) };
+  const top = percentile(ext, 90), standingIdx = P.map((_, i) => i).filter(i => ext[i]! >= top);
+  const standing = standingIdx.map(i => P[i]!);
+  const standingExtension = median(standing.map(p => inPlane(p[h]!, p[a]!)));
+  const cosPitch = Math.max(0.5, Math.hypot(up[0], up[1]) / (norm(up) || 1));
+  const extension = standingExtension / (worldLeg(standingIdx.map(i => lms[i]! as Landmark[]), side) * cosPitch);
+  const base = { ...NO_LEG, standingExtension };
+  if (!(extension >= MIN_STANDING_EXTENSION)) return { ...base, status: 'not-standing' };
+  if (median(standing.map(p => imageBend(p, side))) > MAX_IMAGE_BEND_DEG) return { ...base, status: 'bent-in-image' };
+  const offsets = standing.map(p => kneeChordDepth(p, side)), offset = median(offsets);
+  const rep = standing[offsets.indexOf([...offsets].sort((x, y) => Math.abs(x - offset) - Math.abs(y - offset))[0]!)]!;
+  const c = capOffset(rep, side, offset);
+  return { standingExtension, kneeDepthOffset: c.offset, status: c.capped ? 'capped' : 'applied', correctionDeg: Math.max(0, c.deg) };
 }
 function finishContext(ctx: LiftContext, camera: Vec3[][], gravityOn: boolean): LiftContext {
   if (!gravityOn || !camera.length) return ctx;
@@ -291,15 +393,20 @@ export function liftClip(frames: readonly LiftFrame[], width: number, height: nu
     cam = solveCamera(sums) ?? cam;
     scales = smoothTrack(smooth.map((lm, k) => ({ t: frames[idx[k]!]!.timeMs, v: frameScale(lm, width, height, cam.rotation) })), SCALE_SMOOTH_S);
   }
-  let ctx: LiftContext = { width, height, ...cam, pxPerM: median(scales), legs: { left: NO_LEG, right: NO_LEG }, gravity: gravityFrom(cam.rotation, o.upCue), floorY: 0, originX: 0, originZ: 0 };
   const camera = smooth.map((lm, k) => cameraPoints(lm, width, height, cam.rotation, scales[k]!, o.imageXY));
-  if (o.kneeCalibration) ctx = { ...ctx, legs: { left: legStats(camera, 'left'), right: legStats(camera, 'right') } };
+  const { up, source } = chooseUp(o.upCue, cam.rotation, camera, o.cameraPitchDeg);
+  let ctx: LiftContext = { width, height, ...cam, pxPerM: median(scales), legs: { left: NO_LEG, right: NO_LEG }, gravity: rotationToUp(up), upSource: source, floorY: 0, originX: 0, originZ: 0 };
+  if (o.kneeCalibration) ctx = { ...ctx, legs: { left: legStats(camera, smooth, 'left', up), right: legStats(camera, smooth, 'right', up) } };
   camera.forEach(P => { if (o.kneeCalibration) applyKnee(P, ctx, o.fadeFrom); });
   if (o.footLock) { const lock = footLock(); camera.forEach(P => lock(P, ctx.gravity)); }
   ctx = finishContext(ctx, camera, o.gravity);
   const poses: (Vec3[] | null)[] = frames.map(() => null);
   const frameScales: (number | null)[] = frames.map(() => null);
-  idx.forEach((i, k) => { poses[i] = o.gravity ? toGravity(camera[k]!, ctx) : camera[k]!; frameScales[i] = scales[k]!; });
+  idx.forEach((i, k) => {
+    const pose = o.gravity ? toGravity(camera[k]!, ctx) : camera[k]!;
+    // Never hand a non-finite pose to the display or the angles: hide that frame instead.
+    if (pose.every(p => p.every(Number.isFinite))) { poses[i] = pose; frameScales[i] = scales[k]!; }
+  });
   return { poses, context: ctx, scales: frameScales };
 }
 
@@ -318,16 +425,21 @@ function oneEuro(minCutoff = 5, beta = 1, dCutoff = 1) {
 }
 /**
  * Causal per-frame lifter for live camera: the same steps, with every clip statistic replaced by a
- * running estimate (camera sums accumulate; standing extension = slowly decaying maximum; knee offset =
- * running mean over near-standing frames; floor = running median of the last 50 frames; origin = first
- * frame's mid-ankle). Before a standing frame has been seen the knee is not corrected.
+ * running estimate (camera sums accumulate; floor plane sums accumulate; standing extension = slowly
+ * decaying maximum; knee offset = running mean over frames that pass both straight-leg checks, capped
+ * per frame; floor = running median of the last 50 frames; origin = first frame's mid-ankle). Before a
+ * verified standing frame has been seen the knee is not corrected ('not-standing').
  */
 export function createCausalLifter(width: number, height: number, options: LiftOptions = {}) {
   const o = { ...LIFT_DEFAULTS, ...options };
-  const filter = oneEuro(), sums = emptySums(), lock = footLock(), floors: number[] = [];
-  const legs = { left: { ext: 0, off: 0, n: 0 }, right: { ext: 0, off: 0, n: 0 } };
+  const filter = oneEuro(), sums = emptySums(), floor = emptyFloor(), lock = footLock(), floors: number[] = [];
+  const newLeg = () => ({ ext: 0, raw: 0, off: 0, deg: 0, capped: false, n: 0, len: 0, nl: 0 });
+  const legs = { left: newLeg(), right: newLeg() };
   let last = -Infinity, origin: [number, number] | null = null, scale: number | null = null;
+  let context: LiftContext | null = null;
   return {
+    /** Context of the last lifted frame (calibration status per side, gravity source). */
+    get context() { return context; },
     step(landmarks: readonly Landmark[] | null | undefined, timeMs: number): Vec3[] | null {
       if (!usable(landmarks) || !(timeMs > last)) return null;
       const dtS = Number.isFinite(last) ? (timeMs - last) / 1000 : 0; last = timeMs;
@@ -338,21 +450,36 @@ export function createCausalLifter(width: number, height: number, options: LiftO
       if (Number.isFinite(s)) scale = scale === null ? s : scale + (s - scale) * (1 - Math.exp(-dtS / SCALE_SMOOTH_S));
       const pxPerM = scale ?? height / 2;
       const P = cameraPoints(lm, width, height, cam.rotation, pxPerM, o.imageXY);
+      // Up: floor plane once enough contact points spread out, otherwise the world model's up.
+      const w = pitched(worldUp(cam.rotation), o.cameraPitchDeg);
+      let up: Vec3 = o.upCue === 'image' ? pitched([0, -1, 0], o.cameraPitchDeg) : w, source: LiftContext['upSource'] = o.upCue === 'image' ? 'image' : 'world';
+      if (o.upCue === 'floor') { addFloorPoints(floor, P, context?.upSource === 'floor' ? transposeUp(context.gravity) : w); const f = floorUp(floor, w); if (f) { up = f; source = 'floor'; } }
+      const cosPitch = Math.max(0.5, Math.hypot(up[0], up[1]) / (norm(up) || 1));
+      const legCal = {} as Record<AnatomicalSide, LegCalibration>;
       for (const side of SIDES) {
-        const leg = legs[side], [h, , a] = LEG[side], ext = inPlane(P[h]!, P[a]!);
+        const leg = legs[side], [h, k, a] = LEG[side], ext = inPlane(P[h]!, P[a]!);
+        const wl = norm(sub(lm[h]!.world! as Vec3, lm[k]!.world! as Vec3)) + norm(sub(lm[k]!.world! as Vec3, lm[a]!.world! as Vec3));
+        leg.nl++; leg.len += (wl - leg.len) / Math.min(leg.nl, 50);
         leg.ext = Math.max(ext, leg.ext * Math.exp(-dtS / 60)); // a glitch-long maximum fades over ~1 min
-        if (ext >= 0.97 * leg.ext) { leg.n++; leg.off += (kneeChordDepth(P, side) - leg.off) / Math.min(leg.n, 20); }
+        const straight = ext >= 0.97 * leg.ext && ext / (leg.len * cosPitch) >= MIN_STANDING_EXTENSION && imageBend(P, side) <= MAX_IMAGE_BEND_DEG;
+        if (straight) { // running mean of the raw offset, capped against this verified standing frame
+          leg.n++; leg.raw += (kneeChordDepth(P, side) - leg.raw) / Math.min(leg.n, 20);
+          const c = capOffset(P, side, leg.raw); leg.off = c.offset; leg.deg = Math.max(0, c.deg); leg.capped = c.capped;
+        }
+        legCal[side] = leg.n ? { standingExtension: leg.ext, kneeDepthOffset: leg.off, status: leg.capped ? 'capped' : 'applied', correctionDeg: leg.deg } : { ...NO_LEG, standingExtension: leg.ext, status: 'not-standing' };
       }
-      const gravity = gravityFrom(cam.rotation, o.upCue);
-      const ctx: LiftContext = { width, height, ...cam, pxPerM, legs: { left: { standingExtension: legs.left.ext, kneeDepthOffset: legs.left.off }, right: { standingExtension: legs.right.ext, kneeDepthOffset: legs.right.off } }, gravity, floorY: 0, originX: 0, originZ: 0 };
-      if (o.kneeCalibration) applyKnee(P, ctx, o.fadeFrom);
+      const gravity = rotationToUp(up);
+      context = { width, height, ...cam, pxPerM, legs: legCal, gravity, upSource: source, floorY: 0, originX: 0, originZ: 0 };
+      if (o.kneeCalibration) applyKnee(P, context, o.fadeFrom);
       if (o.footLock) lock(P, gravity);
-      if (!o.gravity) return P;
+      if (!o.gravity) return P.every(p => p.every(Number.isFinite)) ? P : null;
       const G = P.map(p => mul(gravity, p));
       floors.push(Math.max(...FEET.map(i => G[i]![1]))); if (floors.length > 50) floors.shift();
       origin ??= [(G[27]![0] + G[28]![0]) / 2, (G[27]![2] + G[28]![2]) / 2];
-      const floorY = median(floors);
-      return G.map(g => [g[0] - origin![0], g[1] - floorY, g[2] - origin![1]]);
+      const floorY = median(floors), out = G.map(g => [g[0] - origin![0], g[1] - floorY, g[2] - origin![1]] as Vec3);
+      return out.every(p => p.every(Number.isFinite)) ? out : null;
     },
   };
 }
+/** The camera-frame up vector a gravity rotation was built from (its inverse applied to (0, −1, 0)). */
+const transposeUp = (g: number[]): Vec3 => mul(transpose(g), [0, -1, 0]);

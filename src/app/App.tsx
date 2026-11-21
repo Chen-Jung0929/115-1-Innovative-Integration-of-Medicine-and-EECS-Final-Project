@@ -22,7 +22,7 @@ import { applyReview } from '../validation/targetMetrics';
 import { AngleChart, CHART_METRICS, type ChartMetric } from '../visualization/AngleChart';
 import { hipFlexionProxy } from '../biomechanics/posture';
 import { Metric } from './Metric';
-import { liftSession, poseAt, sessionFlexion } from '../motion/world3d';
+import { calibrationNote, liftSession, poseAt, sessionFlexion } from '../motion/world3d';
 import { Skeleton3D } from '../visualization/Skeleton3D';
 import { plainReason, qcStatus, showAngle, showFlexion } from './plain';
 import { frontalTimeline, type BaselineSource } from '../motion/frontalTimeline';
@@ -184,7 +184,8 @@ export function App() {
   const sample = exact ?? held;
   // Drawing only: skeleton and check lines glide between samples; every number still comes from `sample`.
   const drawn = held && session ? smoothedSample(session.samples, timeMs, held, SMOOTH_MAX_GAP_MS) : sample;
-  const poses3d = useMemo(() => session ? liftSession(session.samples, session.metadata.sourceWidthPx, session.metadata.sourceHeightPx) : null, [session]);
+  const lift3d = useMemo(() => session ? liftSession(session.samples, session.metadata.sourceWidthPx, session.metadata.sourceHeightPx) : null, [session]);
+  const poses3d = lift3d?.poses ?? null;
   const pose3d = poses3d && session && sample ? (held ? poseAt(session.samples, poses3d, timeMs, held, SMOOTH_MAX_GAP_MS) : poses3d.get(sample.sampleIndex)) : undefined;
   const heldGapS = held ? Math.abs(timeMs - (held.decode.timeBasis === 'presentation' ? held.sourceTimeMs : held.requestedTimeMs)) / 1000 : 0;
   const frontal = useMemo(() => session && info ? frontalTimeline(session.samples, info.width, info.height, baselineSource, obliqueRef) : [], [session, info, baselineSource, obliqueRef]);
@@ -252,7 +253,7 @@ export function App() {
       {!info && !loading && <p className="stage-empty">選擇影片後，畫面會出現在這裡</p>}</div>
         {frontalView && session && !selecting && <FrontalLegend view={frontalFrame?.view} />}
         {frontalView && session && !selecting && frontalFrame?.calibration==='whole-video' && <p className="muted small">這段影片裡沒有「站直不動 1 秒」的片段，基準線改用整段影片中站得最直的幾格來定。</p>}
-        {session && !selecting && <Skeleton3D sample={drawn} points={pose3d} />}
+        {session && !selecting && <Skeleton3D sample={drawn} points={pose3d} note={calibrationNote(lift3d?.context)} />}
         <div className="speed" role="group" aria-label="播放速度"><span className="muted small">播放速度</span><div className="segmented small-seg">{SPEEDS.map(r=><button key={r} aria-pressed={speed===r} onClick={()=>setSpeed(r)}>{r===1?'正常':`${r}×`}</button>)}</div></div>
         {session && <label className="scrub">逐格檢查<input aria-label="已分析取樣" type="range" min={0} max={session.samples.length-1} disabled={selecting} value={sampleIndex} onChange={e => jump(Number(e.target.value))} /><span className="muted">#{sampleIndex} / {session.samples.length-1}</span></label>}
         <p className="muted small">來源影格時間：{(timeMs/1000).toFixed(3)} 秒。{held ? `顯示最近的分析影格（取樣 #${held.sampleIndex}，相差 ${heldGapS.toFixed(2)} 秒；影片每秒分析 5 次）` : sample ? `對應取樣 #${sample.sampleIndex}（${sample.decode.timeBasis}）` : '這附近沒有分析結果（可能在分析範圍外），骨架與角度不顯示。'}</p>
@@ -270,7 +271,7 @@ export function App() {
           const angle = sample?.posture?.final.hip[s];
           const w = angle?.valid ? sessionFlexion(poses3d, sample, 'hip', s) : null;
           return <Metric key={s} name={`${sideName(s)}髖彎曲`} value={showFlexion(angle, hipFlexionProxy)} alt={w === null ? undefined : `3D 骨架 ${w.toFixed(0)}°`} note={angle?.valid ? '站直約 0°，身體越往前折數字越大' : plainReason(angle, !!sample)}>
-            <p>髖彎曲 = 180° − 髖角（自訂，站直 0°）。髖角 = 肩–髖–膝在髖的夾角（影像平面，0–180°），內角：{showAngle(angle)}。暫定髖屈曲 proxy：{angle?.valid ? `${hipFlexionProxy(angle)!.toFixed(1)}°` : 'N/A'}（= 180° − 內角）。</p><p>{qcStatus(angle, !!sample)}</p><p>3D 骨架（試驗）：{w === null ? 'N/A' : `${w.toFixed(1)}°`}（同一個肩–髖–膝角度改用 3D 骨架點計算，僅供比較，自訂）。</p></Metric>;
+            <p>髖彎曲 = 180° − 髖角（自訂，站直 0°）。髖角 = 肩–髖–膝在髖的夾角（影像平面，0–180°），內角：{showAngle(angle)}。暫定髖屈曲 proxy：{angle?.valid ? `${hipFlexionProxy(angle)!.toFixed(1)}°` : 'N/A'}（= 180° − 內角）。</p><p>{qcStatus(angle, !!sample)}</p><p>3D 骨架（試驗）：{w === null ? 'N/A' : `${w.toFixed(1)}°`}（同一個肩–髖–膝角度改用 3D 骨架點計算，自訂）。3D 髖角只是近似值：MediaPipe 的髖點不是真正的髖關節中心，與 OpenCap 比對時不同受試者的偏差方向甚至相反（−14° 到 +25°），請勿當作臨床髖屈曲角。</p></Metric>;
         })}
         <Metric name="上身（軀幹）前傾" value={showAngle(sample?.posture?.final.trunkLean)} note={sample?.posture?.final.trunkLean.valid ? '0° = 上身直立' : plainReason(sample?.posture?.final.trunkLean, !!sample)}>
           <p>兩髖中點→兩肩中點連線與畫面垂直線的夾角（0° = 直立；手機需擺正）。</p><p>{qcStatus(sample?.posture?.final.trunkLean, !!sample)}</p></Metric>
