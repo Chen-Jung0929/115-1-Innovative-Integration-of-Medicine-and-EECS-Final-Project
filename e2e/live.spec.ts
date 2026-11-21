@@ -20,6 +20,10 @@ test('live camera starts hands-free, ends a segment on a second person, restarts
   await expect(page.getByText(/站好不動|保持不動/)).toBeVisible({ timeout: 15000 });
   await expect(page.getByText('量測中', { exact: true })).toBeVisible({ timeout: 15000 });
   await expect(page.locator('.measurements .angle').first()).toHaveText(/°$/);
+  // The skeleton canvas must lie exactly on the camera picture (no letterboxing), or it drifts off the person.
+  const boxes = await page.locator('.video-stage:visible').evaluate(stage => [stage.querySelector('video')!, stage.querySelector('canvas.overlay')!].map(e => { const r = e.getBoundingClientRect(); return [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)]; }));
+  expect(boxes[1]).toEqual(boxes[0]);
+  expect(await page.locator('.video-stage:visible video').evaluate((v: HTMLVideoElement) => { const r = v.getBoundingClientRect(); return Math.abs(r.width / r.height - v.videoWidth / v.videoHeight) < 0.01; })).toBe(true);
   await page.evaluate(() => { (window as unknown as { __crowd: boolean }).__crowd = true; });
   await expect(page.getByText(/這一段已結束並保存/)).toBeVisible();
   await expect(page.getByText('畫面中不只一人，請只留下受測者，才會開始量測。')).toBeVisible();
