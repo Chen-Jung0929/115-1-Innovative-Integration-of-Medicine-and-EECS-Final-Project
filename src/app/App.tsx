@@ -8,7 +8,7 @@ import type { Session } from '../domain/analysis';
 import { MODEL_URL, PROJECT_MODEL_URL } from '../pose/mediapipe';
 import { checkFile, loadVideo, seekFrame, observePresentedFrame } from '../input/video';
 import { analyze } from '../motion/analyze';
-import { coverage, matchingSample, displayedRoi, heldSample, nearestSample } from '../motion/series';
+import { coverage, matchingSample, displayedRoi, nearestSample } from '../motion/series';
 import { flexionProxy } from '../biomechanics/knee';
 import { downloadFile, toCsv } from '../export/csv';
 import { Overlay } from '../visualization/Overlay';
@@ -67,7 +67,6 @@ export function App() {
   const [frontalView,setFrontalView]=useState(true);
   const [baselineSource,setBaselineSource]=useState<BaselineSource>('standing-trunk');
   const [mode, setMode] = useState<'video' | 'camera'>('video');
-  const [playing, setPlaying] = useState(false);
 
   useEffect(() => {
     const v = video.current!;
@@ -175,9 +174,8 @@ export function App() {
     }catch(e){setError(message(e));}
   }
   const exact = session && !seeking ? (matchingSample(session.samples, timeMs) ?? (video.current?.paused ? session.samples.find(s=>s.decode.timeBasis==='seek-position-estimate' && Math.abs(s.requestedTimeMs-video.current!.currentTime*1000)<.001):undefined)) : undefined;
-  // While playing, keep the latest analyzed frame on screen between 5 Hz samples instead of flashing "no result".
-  // Paused between samples: show the closest analyzed frame (5 Hz → at most 0.1 s away) and say so.
-  const held = !exact && session && !seeking ? (playing ? heldSample(session.samples, timeMs, PLAYBACK_HOLD_MS) : nearestSample(session.samples, timeMs, PAUSED_NEAREST_MS)) : undefined;
+  // Between 5 Hz samples (playing or paused): show the closest analyzed frame (at most ~0.1 s away) and say so.
+  const held = !exact && session && !seeking ? nearestSample(session.samples, timeMs, NEAREST_MS) : undefined;
   const sample = exact ?? held;
   const heldGapS = held ? Math.abs(timeMs - (held.decode.timeBasis === 'presentation' ? held.sourceTimeMs : held.requestedTimeMs)) / 1000 : 0;
   const frontal = useMemo(() => session && info ? frontalTimeline(session.samples, info.width, info.height, baselineSource) : [], [session, info, baselineSource]);
@@ -230,7 +228,7 @@ export function App() {
         </div>
       </div>
       {sample?.tracking.state==='MANUAL_REVIEW_REQUIRED'&&<aside className="banner warn">人物一致性無法確認，量測已暫停。請確認單人、完整入鏡後重新分析；必要時可在實驗區人工校正。局部膝部缺點不會單獨造成這個鎖定。</aside>}
-      <div className="workspace"><div className="stage-col"><div className="video-stage"><video ref={video} controls={!selecting} playsInline onPlay={()=>{if(selecting)video.current?.pause();else setPlaying(true);}} onPause={()=>setPlaying(false)} onEnded={()=>setPlaying(false)} onSeeking={() => setSeeking(true)} onSeeked={() => {
+      <div className="workspace"><div className="stage-col"><div className="video-stage"><video ref={video} controls={!selecting} playsInline onPlay={()=>{if(selecting)video.current?.pause();}} onSeeking={() => setSeeking(true)} onSeeked={() => {
         const v = video.current;
         if (!v) return;
         // Paused/off-screen videos may throttle rVFC. The same completed seek target
@@ -320,8 +318,6 @@ export function App() {
     <footer className="disclaimer">本系統為學術概念驗證，不提供醫療診斷或治療建議。2D 影像平面幾何角不是經驗證的臨床角度；側面視角較適合觀察，遮蔽與透視會影響結果。</footer>
   </div>;
 }
-/** Playback only: one 5 Hz sample interval plus a little decoder jitter. */
-const PLAYBACK_HOLD_MS = 250;
-/** Paused: half a 5 Hz interval plus decoder jitter, so every paused frame maps to its closest sample. */
-const PAUSED_NEAREST_MS = 120;
+/** Half a 5 Hz interval plus decoder jitter: every frame maps to its closest analyzed sample, so the skeleton lags at most ~0.1 s. */
+const NEAREST_MS = 120;
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }

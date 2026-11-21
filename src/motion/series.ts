@@ -11,21 +11,7 @@ export function coverage(samples: readonly Sample[], side: AnatomicalSide): numb
 export function matchingSample(samples: readonly Sample[], timeMs: number): Sample | undefined {
   return samples.find(s => s.decode.timeBasis === 'presentation' && Math.abs(s.sourceTimeMs - timeMs) <= 1); // 1 ms timestamp tolerance
 }
-/**
- * Display only, while the video is playing: keep showing the most recent analyzed frame
- * (never a future one, never interpolated) for at most holdMs, so the screen does not
- * flash "no result" between 5 Hz samples. Paused inspection still uses matchingSample.
- */
-export function heldSample(samples: readonly Sample[], timeMs: number, holdMs: number): Sample | undefined {
-  for (let i = samples.length - 1; i >= 0; i--) {
-    const s = samples[i]!;
-    const t = s.decode.timeBasis === 'presentation' ? s.sourceTimeMs : s.requestedTimeMs;
-    if (t > timeMs + 1) continue;
-    return timeMs - t <= holdMs ? s : undefined;
-  }
-  return undefined;
-}
-/** Display only, while paused between samples: the closest analyzed frame within maxMs (either side). */
+/** Display only, between 5 Hz samples (playing or paused): the closest analyzed frame within maxMs (either side). */
 export function nearestSample(samples: readonly Sample[], timeMs: number, maxMs: number): Sample | undefined {
   let best: Sample | undefined, bestD = Infinity;
   for (const s of samples) {
