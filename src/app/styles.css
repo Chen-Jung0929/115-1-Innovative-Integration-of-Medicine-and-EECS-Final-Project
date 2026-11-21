@@ -117,6 +117,8 @@ aside, .banner { display: block; border-radius: var(--radius-sm); padding: 12px 
 .stage-empty { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: #a1a1a6; line-height: 1.4; font-size: .95rem; padding: 48px 16px; }
 .video-stage:has(.stage-empty) { width: 100%; aspect-ratio: 16 / 9; }
 .video-stage:has(.stage-empty) video { visibility: hidden; }
+.speed { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0 0; }
+.small-seg button { min-height: 30px; padding: 4px 14px; font-size: .85rem; }
 .scrub { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; margin: 12px 0 0; font-size: .9rem; }
 .scrub input { margin: 0; }
 

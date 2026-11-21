@@ -58,6 +58,8 @@ export function App() {
   const [timeMs, setTimeMs] = useState(0);
   const [seeking, setSeeking] = useState(false);
   const [side, setSide] = useState<'left' | 'right' | 'both'>('both');
+  const [speed, setSpeed] = useState<number>(DEFAULT_SPEED);
+  useEffect(() => { const v = video.current; if (v) { v.defaultPlaybackRate = speed; v.playbackRate = speed; } }, [speed]);
   const [selection,setSelection]=useState<SubjectSelection|null>(null);
   const [selecting,setSelecting]=useState(false);
   const [draft,setDraft]=useState<Roi>({x:0,y:0,width:640,height:360});
@@ -228,7 +230,7 @@ export function App() {
         </div>
       </div>
       {sample?.tracking.state==='MANUAL_REVIEW_REQUIRED'&&<aside className="banner warn">人物一致性無法確認，量測已暫停。請確認單人、完整入鏡後重新分析；必要時可在實驗區人工校正。局部膝部缺點不會單獨造成這個鎖定。</aside>}
-      <div className="workspace"><div className="stage-col"><div className="video-stage"><video ref={video} controls={!selecting} playsInline onPlay={()=>{if(selecting)video.current?.pause();}} onSeeking={() => setSeeking(true)} onSeeked={() => {
+      <div className="workspace"><div className="stage-col"><div className="video-stage"><video ref={video} controls={!selecting} playsInline onPlay={()=>{if(selecting)video.current?.pause();}} onLoadedMetadata={e=>{e.currentTarget.defaultPlaybackRate=speed;e.currentTarget.playbackRate=speed;}} onSeeking={() => setSeeking(true)} onSeeked={() => {
         const v = video.current;
         if (!v) return;
         // Paused/off-screen videos may throttle rVFC. The same completed seek target
@@ -242,6 +244,7 @@ export function App() {
       {!info && !loading && <p className="stage-empty">選擇影片後，畫面會出現在這裡</p>}</div>
         {frontalView && session && !selecting && <FrontalLegend view={frontalFrame?.view} />}
         {frontalView && session && !selecting && frontalFrame?.calibration==='whole-video' && <p className="muted small">這段影片裡沒有「站直不動 1 秒」的片段，基準線改用整段影片中站得最直的幾格來定。</p>}
+        <div className="speed" role="group" aria-label="播放速度"><span className="muted small">播放速度</span><div className="segmented small-seg">{SPEEDS.map(r=><button key={r} aria-pressed={speed===r} onClick={()=>setSpeed(r)}>{r===1?'正常':`${r}×`}</button>)}</div></div>
         {session && <label className="scrub">逐格檢查<input aria-label="已分析取樣" type="range" min={0} max={session.samples.length-1} disabled={selecting} value={sampleIndex} onChange={e => jump(Number(e.target.value))} /><span className="muted">#{sampleIndex} / {session.samples.length-1}</span></label>}
         <p className="muted small">來源影格時間：{(timeMs/1000).toFixed(3)} 秒。{held ? `顯示最近的分析影格（取樣 #${held.sampleIndex}，相差 ${heldGapS.toFixed(2)} 秒；影片每秒分析 5 次）` : sample ? `對應取樣 #${sample.sampleIndex}（${sample.decode.timeBasis}）` : '這附近沒有分析結果（可能在分析範圍外），骨架與角度不顯示。'}</p>
       </div><div className="readout">
@@ -320,4 +323,7 @@ export function App() {
 }
 /** Half a 5 Hz interval plus decoder jitter: every frame maps to its closest analyzed sample, so the skeleton lags at most ~0.1 s. */
 const NEAREST_MS = 120;
+/** Slow motion by default: easier for PTs to follow, and the 5 Hz skeleton keeps up with the body better. */
+const SPEEDS = [0.25, 0.5, 1] as const;
+const DEFAULT_SPEED = 0.5;
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
