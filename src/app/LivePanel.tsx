@@ -12,6 +12,8 @@ import { downloadFile, toCsv } from '../export/csv';
 import { Overlay } from '../visualization/Overlay';
 import { AngleChart } from '../visualization/AngleChart';
 import pkg from '../../package.json';
+import { Metric } from './Metric';
+import { showAngle, showFlexion } from './plain';
 
 type Side = 'left' | 'right' | 'both';
 type Analyzer = ReturnType<typeof createLiveAnalyzer>;
@@ -206,48 +208,54 @@ export function LivePanel({ model, allowDownload, side, onSide, disabled }: { mo
   const result = results[shown] ?? null;
 
   return <>
-    <section aria-labelledby="live-title"><h2 id="live-title">1. 即時鏡頭</h2>
-      <p>開啟鏡頭後，畫面會即時畫出骨架與膝角度（每秒約 {LIVE_SAMPLING_HZ} 次）。影像只在這台裝置上處理，不會上傳或錄影。</p>
+    <section className="card" aria-labelledby="live-title">
+      <div className="card-head"><h2 id="live-title">即時鏡頭</h2>
+        <div className="actions">
+          {!live && <button className="primary" disabled={disabled || state === 'starting'} onClick={() => void start()}>{state === 'starting' ? '開啟中…' : '開啟鏡頭'}</button>}
+          {live && measuring && <button className="secondary" onClick={restart}>結束這一段</button>}
+          {live && <button className="secondary" onClick={() => stop()}>停止</button>}
+        </div>
+      </div>
       <div className="live-options">
-        <label>鏡頭方向<select value={facing} disabled={state !== 'off'} onChange={e => { const f = e.target.value as Facing; setFacing(f); setMirrored(f === 'user'); }}><option value="user">前鏡頭（筆電、自拍）</option><option value="environment">後鏡頭（手機架在旁邊）</option></select></label>
-        <label><input type="checkbox" checked={mirrored} disabled={state !== 'off'} onChange={e => setMirrored(e.target.checked)} />畫面左右鏡像（像照鏡子；只影響顯示，左右膝仍以身體為準）</label>
+        <label className="compact">鏡頭方向<select value={facing} disabled={state !== 'off'} onChange={e => { const f = e.target.value as Facing; setFacing(f); setMirrored(f === 'user'); }}><option value="user">前鏡頭（筆電、自拍）</option><option value="environment">後鏡頭（手機架在旁邊）</option></select></label>
+        <label className="switch"><input type="checkbox" role="switch" checked={mirrored} disabled={state !== 'off'} onChange={e => setMirrored(e.target.checked)} /><span>畫面像照鏡子</span></label>
+        <label className="compact">顯示側別<select value={side} onChange={e => onSide(e.target.value as Side)}><option value="both">左右都看</option><option value="left">只看左邊</option><option value="right">只看右邊</option></select></label>
       </div>
-      <p>建議：鏡頭固定不動、從側面拍、頭到腳完整入鏡、畫面中只有一人。開啟後不用再碰裝置：走到畫面中站好不動約 {(READY_POLICY.holdMs / 1000).toFixed(1)} 秒就會自動開始；有人闖入或你離開畫面時，這一段會自動結束保存，回來站好又會開始新的一段。模型沿用「上傳影片」頁的模型設定。</p>
-      <div className="actions">
-        {!live && <button disabled={disabled || state === 'starting'} onClick={() => void start()}>{state === 'starting' ? '開啟中…' : '開啟鏡頭'}</button>}
-        {live && <button onClick={() => stop()}>停止</button>}
-        {live && measuring && <button onClick={restart}>結束這一段</button>}
-      </div>
-      {error && <p role="alert" className="error">{error}</p>}{notice && <p role="status">{notice}</p>}
+      {error && <p role="alert" className="error">{error}</p>}{notice && <p role="status" className="notice">{notice}</p>}
+      <details className="fold"><summary>怎麼拍最準？</summary>
+        <p>開啟鏡頭後，畫面會即時畫出骨架與膝角度（每秒約 {LIVE_SAMPLING_HZ} 次）。影像只在這台裝置上處理，不會上傳或錄影。</p>
+        <p>建議：鏡頭固定不動、從側面拍、頭到腳完整入鏡、畫面中只有一人。開啟後不用再碰裝置：走到畫面中、站穩約 {(READY_POLICY.holdMs / 1000).toFixed(1)} 秒就會自動開始；有人闖入或你離開畫面時，這一段會自動結束保存，回來站好又會開始新的一段。模型沿用「上傳影片」頁的模型設定。</p>
+        <p>「畫面像照鏡子」只影響顯示，左右膝仍以個案身體為準。</p>
+      </details>
     </section>
-    <section aria-labelledby="live-view-title"><h2 id="live-view-title">2. 即時畫面與角度</h2>
-      <label>顯示側別<select value={side} onChange={e => onSide(e.target.value as Side)}><option value="both">左右膝 Both</option><option value="left">左膝 Left Knee</option><option value="right">右膝 Right Knee</option></select></label>
+    <section className="card" aria-labelledby="live-view-title"><h2 id="live-view-title">即時畫面與角度</h2>
       {live && <p role="status" className={measuring ? 'live-status' : 'live-status wait'}>{measuring ? liveStatus(sample) : waitStatus(ready)}</p>}
-      {live && measuring && livePerf && <p className="live-perf">{perfText(livePerf)}</p>}
-      <div className="workspace"><div>
+      <div className="workspace"><div className="stage-col">
         <div className={mirrored ? 'video-stage mirrored' : 'video-stage'} hidden={state === 'off'}>
           <video ref={video} playsInline muted aria-label="即時鏡頭畫面" />
           <Overlay sample={sample} width={size.width} height={size.height} side={side} />
         </div>
         {state === 'off' && <p className="live-placeholder">鏡頭尚未開啟。</p>}
-      </div><div className="measurements">
+        {live && measuring && livePerf && <p className="live-perf">{perfText(livePerf)}</p>}
+      </div><div className="readout"><div className="group"><h3 className="group-title">膝蓋</h3><div className="measurements">
         {(['left', 'right'] as const).filter(s => side === 'both' || side === s).map(s => {
           const angle = sample?.[s];
-          return <article key={s}><h3>{s === 'left' ? '左膝 Left Knee' : '右膝 Right Knee'}</h3><p className="angle">{angle?.valid ? `${angle.rawAngleDeg.toFixed(1)}°` : 'N/A'}</p><p>暫定屈曲 proxy：{angle?.valid ? `${flexionProxy(angle)!.toFixed(1)}°` : 'N/A'}</p><p>本段有效比例：{pct(s)}</p></article>;
+          return <Metric key={s} name={`${s === 'left' ? '左' : '右'}膝彎曲`} value={showFlexion(angle, flexionProxy)} note={angle?.valid ? '站直約 0°，蹲越低數字越大' : '尚未量到'}>
+            <p>膝彎曲 = 180° − 膝角（自訂，站直 0°）。膝角 = 髖–膝–踝在膝蓋的夾角（影像平面，0–180°），內角：{showAngle(angle)}。暫定屈曲 proxy：{angle?.valid ? `${flexionProxy(angle)!.toFixed(1)}°` : 'N/A'}</p><p>本段有效比例：{pct(s)}</p></Metric>;
         })}
-      </div></div>
-      {live && recent.length > 1 && <><p>最近 15 秒膝角度曲線（看不清楚的時間點會斷開，不補線）。</p><AngleChart samples={recent} side={side} timeMs={recent.at(-1)!.sourceTimeMs} /></>}
+      </div></div></div></div>
+      {live && recent.length > 1 && <><p className="muted small">最近 15 秒膝彎曲曲線（看不清楚的時間點會斷開，不補線）。</p><AngleChart samples={recent} side={side} timeMs={recent.at(-1)!.sourceTimeMs} /></>}
     </section>
-    <section><h2>3. 已保存的量測段與匯出</h2>
-      {results.length > 1 && <label>選擇量測段<select value={shown} onChange={e => setShown(Number(e.target.value))}>{results.map((r, i) => <option key={r.metadata.sessionId} value={i}>{i === 0 ? '最新一段' : `前 ${i} 段`} · {(r.durationMs / 1000).toFixed(1)} 秒 · {r.samples.length} 個取樣</option>)}</select></label>}
-      {result ? <><p>這一段共 {result.samples.length} 個取樣、{(result.durationMs / 1000).toFixed(1)} 秒。時間軸為鏡頭影格時間，每段從 0 秒起算；無效取樣保留為斷點。</p>
+    <section className="card" aria-labelledby="live-saved-title"><div className="card-head"><h2 id="live-saved-title">已保存的量測段與匯出</h2>
+      {results.length > 1 && <label className="compact">選擇量測段<select value={shown} onChange={e => setShown(Number(e.target.value))}>{results.map((r, i) => <option key={r.metadata.sessionId} value={i}>{i === 0 ? '最新一段' : `前 ${i} 段`} · {(r.durationMs / 1000).toFixed(1)} 秒 · {r.samples.length} 個取樣</option>)}</select></label>}</div>
+      {result ? <><p>這一段共 {result.samples.length} 個取樣、{(result.durationMs / 1000).toFixed(1)} 秒。<span className="muted">時間軸為鏡頭影格時間，每段從 0 秒起算；無效取樣保留為斷點。</span></p>
         {result.livePerformance && <p className="live-perf">效能：{perfText(result.livePerformance)}（詳細數字在研究 JSON 的 livePerformance）</p>}
         <AngleChart samples={result.samples} side={side} timeMs={result.samples.at(-1)?.sourceTimeMs ?? 0} />
         <div className="actions">
-          <button onClick={() => downloadFile(`knee-live-${result.metadata.sessionId}.csv`, toCsv(result), 'text/csv;charset=utf-8')}>下載 CSV</button>
-          <button onClick={() => downloadFile(`research-live-${result.metadata.sessionId}.json`, JSON.stringify(result, null, 2), 'application/json')}>下載研究 JSON（含 landmarks）</button>
-        </div><p>輸出含人體特徵點，請保存於受限空間，不要提交到 Public GitHub。</p></>
-        : <p>每一段結束後（按停止、有人闖入或離開畫面），這裡會顯示該段曲線與匯出按鈕，最多保留最近 {MAX_KEPT_SEGMENTS} 段。關閉網頁前請先下載。</p>}
+          <button className="secondary" onClick={() => downloadFile(`knee-live-${result.metadata.sessionId}.csv`, toCsv(result), 'text/csv;charset=utf-8')}>下載 CSV</button>
+          <button className="secondary" onClick={() => downloadFile(`research-live-${result.metadata.sessionId}.json`, JSON.stringify(result, null, 2), 'application/json')}>下載研究 JSON（含 landmarks）</button>
+        </div><p className="muted small">輸出含人體特徵點，請保存於受限空間，不要提交到 Public GitHub。</p></>
+        : <p className="muted">每一段結束後（按停止、有人闖入或離開畫面），這裡會顯示該段曲線與匯出按鈕，最多保留最近 {MAX_KEPT_SEGMENTS} 段。關閉網頁前請先下載。</p>}
     </section>
   </>;
 }
