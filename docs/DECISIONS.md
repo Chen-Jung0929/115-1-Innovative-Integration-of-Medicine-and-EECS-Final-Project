@@ -69,6 +69,17 @@
 - ADR-040：初始化尚無可信torso時等待而非永久鎖定，逐側確認完成才放行；既有ambiguity／torso jump／長期遺失人工鎖定不自動解除。
 - ADR-041：本版完成工程回歸仍將真實受控Squat標待驗收；先完成這項驗收，再另案規劃camera，不同時擴大範圍。
 
+## V1 即時鏡頭初版 — 2026-11-17
+
+- ADR-042：依使用者要求（V1 路線）提前開始即時鏡頭，與真實受控 Squat 驗收並行；調整 ADR-041 的先後順序，不代表 Dataset Demo 已完成人體驗收。
+- ADR-043：鏡頭只是新的輸入來源（src/input/camera.ts）；人物一致性、關節 QC、膝角與 gate 由 motion/measure.ts 與上傳影片共用，政策與門檻不變。
+- ADR-044：即時目標取樣 10 Hz（離線 5 Hz）；時戳用 requestVideoFrameCallback 的 mediaTime，重複或倒退時戳直接略過，不送模型。
+- ADR-045：即時模式的人工鎖定（多人、遺失過久等）不自動解除；使用者按「重新開始量測」才以新的 analyzer 開新段，前一段原樣保存可匯出。
+- ADR-047：使用者回饋自己拍時手機放很遠、走回去按鈕不實際。改為免觸控分段：開鏡頭後先等待，同一人全身入鏡且靜止 1.5 秒（live-ready-hold-v1：gap≤300ms、中心移動≤0.25 torso、尺度比≤1.15、至少一側膝踝完整）才建立新 analyzer；量測中出現人工鎖定即結束並保存該段，等待下一次 ready。鎖定段本身仍不解除，取代 ADR-045 的「只能按鈕重新開始」。
+- ADR-048：依 PROJECT_SPEC V1「記錄掉幀、有效率、延遲」與 VALIDATION_PROTOCOL Performance，每段記錄 live-performance-v1：裝置 userAgent、delegate、解析度、warm-up、輸入／處理 FPS、掉幀（rVFC presentedFrames 跳號；取樣率刻意略過的影格不算）、推論時間與端到端延遲 p50/p95（captureTime 起算，無則以 presentationTime 並標估計）。存於 Session.livePerformance（選用欄位，只有 camera session 有；CSV 不變、schema 版本未升）。每段 sourceTimeMs 以該段第一個影格的鏡頭媒體時間歸零，偏移存 sourceClockOffsetMs；模型仍收原始單調時鐘。
+- ADR-046：推論永遠使用未鏡像影格（inferenceMirrored=false），顯示鏡像另存 displayMirrored；分頁隱藏即關閉鏡頭並結束該段；畫面尺寸改變即結束該段。
+
+
 ## 深蹲姿勢指標 — 2026-11-17
 
 - ADR-042：新增髖角（hip-image-interior-v1）、上身（軀幹）前傾（trunk-lean-image-vertical-v1）、膝蓋對腳尖線（knee-toe-plumb-offset-hip-width-image-v1，依講義 p.11 膝蓋應在腳尖／第二趾鉛垂線上或微外側）三項 2D 影像平面指標，皆為暫定定義、無門檻，待 PT 確認；不宣稱臨床角度。

@@ -172,6 +172,21 @@ npm ci --cache /workspace/.cache/npm
 需要查看原始失敗原因或逐樣本標註時，展開「研究診斷與人工檢查」。人工 Wrong／Mixed／Uncertain 會使最終角度無效，原自動決策另存。
 輸出含人體特徵與來源檔名，請存於受限空間，不要提交 Public GitHub。
 
+## 一般組員操作：即時鏡頭（V1 初版）
+
+1. 用 `npm run dev` 開啟網頁，按上方「即時鏡頭」。模型沿用「上傳影片」頁的模型設定。
+2. 選鏡頭方向：筆電或自拍選「前鏡頭」；手機架在旁邊拍選「後鏡頭」。「畫面左右鏡像」只影響顯示，左右膝仍以身體為準。
+3. 按「開啟鏡頭」，瀏覽器詢問權限時選允許。之後不用再碰裝置：走到畫面中、頭到腳入鏡、**站好不動約 1.5 秒就自動開始量測**。
+4. 量測中會即時畫出骨架與左右膝角度，下方是最近 15 秒曲線（每秒約 10 次）。狀態列用白話提示：還沒拍到全身、看不清膝蓋等。
+5. 畫面出現第二人、或人離開畫面太久時，**這一段會自動結束並保存**（該段不會被自動「解鎖」）；只剩一人、回到畫面站好不動，又會自動開始新的一段。
+6. 每一段的完整曲線與「下載 CSV／研究 JSON」在下方，可選擇最近 10 段；CSV 欄位與影片分析相同，`inputKind` 為 `camera`。也可按「結束這一段」或「停止」手動結束。
+7. 切換到其他分頁或 App 時，鏡頭會自動關閉並結束該段。
+8. 畫面會顯示實測效能（每秒處理次數、鏡頭 fps、延遲中位數與 p95、模型推論時間、掉幀）；研究 JSON 的 `livePerformance` 保存完整數字。每段時間從 0 秒起算。
+
+影像只在本機瀏覽器處理，不上傳、不錄影。瀏覽器只允許在 `localhost` 或 https 網址使用鏡頭；
+手機用區網 IP（`http://192.168…`）開啟會被擋，需改用 https 部署網址。即時鏡頭與上傳影片共用同一套
+人物一致性、關節 QC 與膝角計算；每秒約 10 次是目標值，實際次數視裝置效能而定。
+
 ### 實驗性功能（非主要流程）
 
 展開「實驗性功能（ROI／多人／A/B/C 比較）」後，仍可使用原 ROI 編輯、Fixed／Manual Keyframes／Adaptive、
@@ -251,7 +266,7 @@ Mendeley 的 Good/Bad Form 標籤不是角度或身份真值；目前已知實�
 
 - [長期規格](docs/PROJECT_SPEC.md)、[架構](docs/ARCHITECTURE.md)、[資料集](docs/DATASET.md)。
 - [隱私倫理](docs/PRIVACY_AND_ETHICS.md)、[決策](docs/DECISIONS.md)、[Agent 規範](AGENTS.md)。
-- [初始化紀錄](docs/updates/iteration-01.md)、[Dataset Demo 紀錄](docs/updates/iteration-01-dataset-demo.md)。
+- [初始化紀錄](docs/updates/iteration-01.md)、[Dataset Demo 紀錄](docs/updates/iteration-01-dataset-demo.md)、[即時鏡頭初版](docs/updates/iteration-14-live-camera.md)。
 
 ## 開發路線（以功能完成決定版本）
 

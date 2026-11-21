@@ -54,3 +54,14 @@ label.inline { display:flex; align-items:center; gap:8px; }
 .frontal-note { font-size:.92rem; color:#376a65; }
 .frontal-legend { position:absolute; left:12px; bottom:56px; margin:0; padding:8px 12px; list-style:none; background:rgba(16,27,30,.72); color:#fff; border-radius:10px; font-size:clamp(.7rem,1.6vw,.85rem); line-height:1.6; pointer-events:none; }
 .frontal-legend .swatch { display:inline-block; width:22px; height:0; border-top-width:3px; margin-right:8px; vertical-align:middle; }
+.mode-switch { display:flex; gap:8px; margin:16px 0; }
+.mode-switch button { background:#fff; color:#0c665b; border:1px solid #0c665b; }
+.mode-switch button[aria-pressed=true] { background:#0c665b; color:#fff; }
+.video-stage.mirrored video, .video-stage.mirrored .overlay { transform:scaleX(-1); }
+.live-options { display:flex; gap:24px; flex-wrap:wrap; align-items:flex-end; }
+.live-status { font-weight:700; padding:10px 14px; border-radius:8px; background:#e6f3f0; }
+.live-status.warn { background:#fff2ee; color:#a22218; }
+.live-placeholder { background:#101b1e; color:#c9d6d3; padding:64px 16px; text-align:center; border-radius:8px; }
+[hidden] { display:none !important; }
+.live-status.wait { background:#fff8e8; color:#6b4f12; }
+.live-perf { color:#4a5870; font-size:.9rem; margin:4px 0 12px; }

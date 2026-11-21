@@ -20,7 +20,7 @@ export function AngleChart({ samples, side, timeMs, metric = 'knee' }: { samples
   const name = metric === 'hip' ? '髖' : '膝';
   return <div className="chart" role="img" aria-label={spec.aria}>
     <ResponsiveContainer width="100%" height={300}><LineChart data={data} margin={{ top: 15, right: 25, bottom: 25, left: 10 }}>
-      <CartesianGrid strokeDasharray="3 3" /><XAxis type="number" dataKey="seconds" domain={['dataMin','dataMax']} label={{ value: '來源時間（秒）', position: 'bottom' }} />
+      <CartesianGrid strokeDasharray="3 3" /><XAxis type="number" dataKey="seconds" domain={['dataMin','dataMax']} tickFormatter={(v:number)=>v.toFixed(1)} label={{ value: '來源時間（秒）', position: 'bottom' }} />
       <YAxis domain={spec.domain} label={{ value: spec.axis, angle: -90, position: 'insideLeft' }} /><Tooltip /><Legend verticalAlign="top" />
       {spec.bilateral && side !== 'right' && <Line dataKey="left" name={`左${name}`} stroke="#007d68" dot={{ r: 2 }} connectNulls={false} isAnimationActive={false} />}
       {spec.bilateral && side !== 'left' && <Line dataKey="right" name={`右${name}`} stroke="#b34b1b" dot={{ r: 2 }} connectNulls={false} isAnimationActive={false} />}
