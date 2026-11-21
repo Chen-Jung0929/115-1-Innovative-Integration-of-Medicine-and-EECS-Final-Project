@@ -58,6 +58,8 @@ export interface FrontalFrame {
   cues: Cue[];
   /** How the baseline in use was found: a live one-second standing lock, or the whole-video fallback. */
   calibration: 'standing-lock' | 'whole-video' | null;
+  /** View decided once for the whole clip (fixed camera), or null when the clip is mixed. */
+  clipView: ViewKind | null;
 }
 export interface Neutral { head: number; shift: number; shoulderTilt: number; pelvisTilt: number; trunkSide: number }
 type Tilt = keyof Neutral;
@@ -129,7 +131,7 @@ export function frontalTimeline(samples: readonly Sample[], width: number, heigh
     }
     const instant = !usable ? [] : view === 'frontal' ? instantCues(metrics, knee) : view === 'side' && lateral ? lateralCues(lateral, knee[lateral.side]) : [];
     const cues = tracker.update(s.sourceTimeMs, instant);
-    return { sampleIndex: s.sampleIndex, tracked: usable, baseline, metrics, neutral: useOffline ? offline.neutral : neutral, view, lateral, cues, calibration };
+    return { sampleIndex: s.sampleIndex, tracked: usable, baseline, metrics, neutral: useOffline ? offline.neutral : neutral, view, lateral, cues, calibration, clipView };
   });
 }
 
@@ -159,14 +161,19 @@ function offlineCalibration(samples: readonly Sample[], width: number, height: n
 
 /** The camera view most usable samples agree on, or null when no view reaches the required share. */
 function wholeVideoView(samples: readonly Sample[], width: number, height: number): ViewKind | null {
-  const counts = new Map<ViewKind, number>();
-  let total = 0;
-  for (const s of samples) {
-    if ((s.review !== undefined && s.review.label !== 'correct-target') || !s.tracking.accepted) continue;
+  // Judge the view while the person is upright: in a deep squat the trunk leans forward, looks shorter
+  // in the image and makes a diagonal camera look frontal. Fall back to all samples if too few are upright.
+  const usable = samples.flatMap(s => {
+    if ((s.review !== undefined && s.review.label !== 'correct-target') || !s.tracking.accepted) return [];
     const v = classifyView(s.landmarks, width, height);
-    if (v === null) continue;
-    counts.set(v, (counts.get(v) ?? 0) + 1); total++;
-  }
+    const l = flexionProxy(s.left), r = flexionProxy(s.right);
+    return v === null ? [] : [{ v, upright: l !== null && r !== null && Math.max(l, r) <= OFFLINE_CALIBRATION.relaxedMaxKneeFlexionDeg }];
+  });
+  const upright = usable.filter(u => u.upright);
+  const pool = upright.length >= OFFLINE_CALIBRATION.minSamples ? upright : usable;
+  const counts = new Map<ViewKind, number>();
+  const total = pool.length;
+  for (const { v } of pool) counts.set(v, (counts.get(v) ?? 0) + 1);
   for (const [v, n] of counts) if (total > 0 && n / total >= WHOLE_VIDEO_VIEW_MIN_SHARE) return v;
   return null;
 }

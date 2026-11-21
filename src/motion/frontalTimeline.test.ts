@@ -106,4 +106,12 @@ describe('side view in the timeline', () => {
     const fixedCam = frontalTimeline([0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => at(i, [3, 4, 5].includes(i) ? oblique() : pose())), 100, 100);
     expect(fixedCam.every(f => f.view === 'frontal')).toBe(true);
   });
+  it('the clip view is judged while upright, so a deep squat does not make a diagonal camera look frontal', () => {
+    const oblique = () => { const p = pose(); p[11] = v(.45, .2); p[12] = v(.55, .2); return p; };
+    const bent = { valid: true as const, rawAngleDeg: 100, invalidReasons: [] as [] };
+    // 4 upright oblique samples, 6 squatting samples that happen to look frontal.
+    const t = frontalTimeline([0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => i < 4 ? at(i, oblique()) : at(i, pose(), { left: bent, right: bent })), 100, 100);
+    expect(t[0]!.clipView).toBe('oblique');
+    expect(t.every(f => f.view === 'oblique')).toBe(true);
+  });
 });
