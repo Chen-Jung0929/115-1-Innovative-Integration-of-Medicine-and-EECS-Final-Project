@@ -1,6 +1,6 @@
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine } from 'recharts';
 import type { Sample } from '../domain/analysis';
-import { worldFlexion } from '../biomechanics/world';
+import { sessionFlexion, type SessionPoses } from '../motion/world3d';
 export type ChartMetric = 'knee' | 'knee3d' | 'hip' | 'hip3d' | 'trunkLean' | 'kneeToe';
 /** Flexion axis: at least 0–90°, grows in 30° steps so shallow squats are not squashed. */
 const FLEX_MAX = (dataMax: number): number => Math.max(90, Math.ceil(dataMax / 30) * 30);
@@ -14,18 +14,18 @@ export const CHART_METRICS: Record<ChartMetric, { label: string; aria: string; a
 };
 /** Flexion shown to people (自訂, standing ≈ 0°); stored data stays the inner angle. */
 const flex = (inner: number | null): number | null => inner === null ? null : 180 - inner;
-function values(s: Sample, metric: ChartMetric): { left: number | null; right: number | null; value: number | null } {
+function values(s: Sample, metric: ChartMetric, poses: SessionPoses | null | undefined): { left: number | null; right: number | null; value: number | null } {
   const p = s.posture?.final;
   if (metric === 'knee') return { left: flex(s.left.rawAngleDeg), right: flex(s.right.rawAngleDeg), value: null };
-  if (metric === 'knee3d') return { left: s.left.valid ? worldFlexion(s.landmarks, 'knee', 'left') : null, right: s.right.valid ? worldFlexion(s.landmarks, 'knee', 'right') : null, value: null };
-  if (metric === 'hip3d') return { left: p?.hip.left.valid ? worldFlexion(s.landmarks, 'hip', 'left') : null, right: p?.hip.right.valid ? worldFlexion(s.landmarks, 'hip', 'right') : null, value: null };
+  if (metric === 'knee3d') return { left: s.left.valid ? sessionFlexion(poses, s, 'knee', 'left') : null, right: s.right.valid ? sessionFlexion(poses, s, 'knee', 'right') : null, value: null };
+  if (metric === 'hip3d') return { left: p?.hip.left.valid ? sessionFlexion(poses, s, 'hip', 'left') : null, right: p?.hip.right.valid ? sessionFlexion(poses, s, 'hip', 'right') : null, value: null };
   if (metric === 'hip') return { left: flex(p?.hip.left.rawAngleDeg ?? null), right: flex(p?.hip.right.rawAngleDeg ?? null), value: null };
   if (metric === 'trunkLean') return { left: null, right: null, value: p?.trunkLean.rawAngleDeg ?? null };
   return { left: p?.kneeToe.left.value ?? null, right: p?.kneeToe.right.value ?? null, value: null };
 }
-export function AngleChart({ samples, side, timeMs, metric = 'knee' }: { samples: Sample[]; side: 'left' | 'right' | 'both'; timeMs: number; metric?: ChartMetric }) {
+export function AngleChart({ samples, side, timeMs, metric = 'knee', poses }: { samples: Sample[]; side: 'left' | 'right' | 'both'; timeMs: number; metric?: ChartMetric; poses?: SessionPoses | null }) {
   const spec = CHART_METRICS[metric];
-  const data = samples.map(s => ({ seconds: s.sourceTimeMs / 1000, ...values(s, metric) }));
+  const data = samples.map(s => ({ seconds: s.sourceTimeMs / 1000, ...values(s, metric, poses) }));
   const name = metric === 'hip' ? '髖' : '膝';
   return <div className="chart" role="img" aria-label={spec.aria}>
     <ResponsiveContainer width="100%" height={300}><LineChart data={data} margin={{ top: 15, right: 25, bottom: 25, left: 10 }}>

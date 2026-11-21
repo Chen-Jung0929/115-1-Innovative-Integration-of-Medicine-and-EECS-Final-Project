@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent } from 'react';
 import type { Sample } from '../domain/analysis';
 import * as THREE from 'three';
-import { worldFlexion } from '../biomechanics/world';
+import { flexion3D, type Vec3 } from '../biomechanics/lift3d';
 import { createBones, type Bones } from './bones';
 
 const W = 480, H = 360;
@@ -11,14 +11,17 @@ const VIEWS = [{ id: 'front', label: '正面', yaw: 0 }, { id: 'oblique', label:
 const colorOf = (a: number, b: number) => a % 2 === 1 && b % 2 === 1 ? LEFT : a % 2 === 0 && b % 2 === 0 && a > 10 ? RIGHT : MID;
 
 /**
- * Experimental 3D skeleton from MediaPipe world landmarks (ADR-069), drawn as OpenSim bone meshes (ADR-070) or lines. Display only: drag to turn,
- * or pick 正面／斜角／側面. Uses the same world points as the "3D 骨架" angles; depth is a model
- * estimate, so it can be wrong even when the 2D overlay looks right.
+ * Experimental 3D skeleton (ADR-069), drawn as OpenSim bone meshes (ADR-070) or lines. Display only: drag
+ * to turn, or pick 正面／斜角／側面. Draws the hybrid lifted pose (ADR-071: image x/y + world depth,
+ * gravity-upright, feet on the floor at y = 0), the same points as the "3D 骨架" angles; depth is still
+ * a model estimate, so it can be wrong even when the 2D overlay looks right.
  */
-/** MediaPipe world (y down, smaller z = nearer the camera) → three.js (y up, +z toward the viewer). */
-const toThree = (w: [number, number, number] | undefined) => w ? new THREE.Vector3(w[0], -w[1], -w[2]) : null;
+/** Lifted pose (y down, smaller z = nearer the camera) → three.js (y up, +z toward the viewer). */
+const toThree = (w: Vec3 | undefined) => w ? new THREE.Vector3(w[0], -w[1], -w[2]) : null;
+/** Camera aim: a fixed point above the floor, so a squat is seen as the body going down. */
+const AIM_Y = 0.75;
 
-export function Skeleton3D({ sample }: { sample: Sample | undefined }) {
+export function Skeleton3D({ sample, points }: { sample: Sample | undefined; points: Vec3[] | undefined }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const gl = useRef<HTMLCanvasElement>(null);
   const labels = useRef<HTMLDivElement>(null);
@@ -29,18 +32,16 @@ export function Skeleton3D({ sample }: { sample: Sample | undefined }) {
   const drag = useRef<{ x: number; y: number; yaw: number; pitch: number } | null>(null);
   const usable = !!sample && sample.tracking.accepted && (!sample.review || sample.review.label === 'correct-target');
   const hasWorld = !!sample && sample.landmarks.some(p => p.world);
+  const ready = usable && hasWorld && !!points;
   useEffect(() => {
     const c = ref.current, ctx = c?.getContext('2d'); if (!c || !ctx) return;
     const dpr = window.devicePixelRatio || 1;
     c.width = W * dpr; c.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
-    if (!usable || !hasWorld || (mode === 'bones' && bonesReady)) return;
+    if (!ready || (mode === 'bones' && bonesReady)) return;
     const y0 = yaw * Math.PI / 180, p0 = pitch * Math.PI / 180;
-    const pts = sample!.landmarks.map(l => l.world);
-    const feet = Math.max(...[27, 28, 29, 30, 31, 32].map(i => pts[i]?.[1] ?? -Infinity));
-    const floorY = Number.isFinite(feet) ? feet : 0.9;
-    const heads = pts[0]?.[1] ?? floorY - 1.6;
-    const scale = H * 0.82 / Math.max(1.2, floorY - heads + 0.15), cx = W / 2, cy = H / 2 - (floorY + heads) / 2 * scale;
+    const pts = points!, floorY = 0;
+    const scale = H * 0.82 / 1.75, cx = W / 2, cy = H / 2 + AIM_Y * scale;
     const proj = (x: number, y: number, z: number) => {
       const rx = x * Math.cos(y0) + z * Math.sin(y0), rz = -x * Math.sin(y0) + z * Math.cos(y0);
       const ry = y * Math.cos(p0) - rz * Math.sin(p0), dz = y * Math.sin(p0) + rz * Math.cos(p0);
@@ -64,14 +65,14 @@ export function Skeleton3D({ sample }: { sample: Sample | undefined }) {
     for (const i of [11, 12, 23, 24, 25, 26, 27, 28]) { const q = P[i]; if (q) { ctx.fillStyle = '#fff'; ctx.strokeStyle = '#1c1c1e'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(q.x, q.y, 4, 0, 2 * Math.PI); ctx.fill(); ctx.stroke(); } }
     ctx.font = '600 13px system-ui, sans-serif'; ctx.textBaseline = 'middle';
     for (const [side, i, dir] of [['left', 25, 1], ['right', 26, -1]] as const) {
-      const f = worldFlexion(sample!.landmarks, 'knee', side), q = P[i];
+      const f = flexion3D(pts, 'knee', side), q = P[i];
       if (f === null || !q) continue;
       const text = `${side === 'left' ? '左' : '右'}膝 ${Math.round(f)}°`;
       const tw = ctx.measureText(text).width + 12, x = dir > 0 ? q.x + 10 : q.x - 10 - tw, y = q.y + (side === 'left' ? 4 : -4) - 10;
       ctx.fillStyle = 'rgba(255,255,255,.92)'; ctx.beginPath(); ctx.roundRect(x, y, tw, 20, 10); ctx.fill();
       ctx.textAlign = 'left'; ctx.fillStyle = side === 'left' ? LEFT : RIGHT; ctx.fillText(text, x + 6, y + 10);
     }
-  }, [sample, usable, hasWorld, yaw, pitch, mode, bonesReady]);
+  }, [points, ready, yaw, pitch, mode, bonesReady]);
   // Bone meshes (WebGL). Falls back to the line drawing when WebGL or the mesh files are unavailable.
   useEffect(() => {
     const c = gl.current; if (!c) return;
@@ -92,31 +93,25 @@ export function Skeleton3D({ sample }: { sample: Sample | undefined }) {
     const t = three.current, box = labels.current;
     if (box) box.replaceChildren();
     if (!t || !t.bones || mode !== 'bones') return;
-    const P = sample?.landmarks.map(l => toThree(l.world));
-    const ok = usable && hasWorld && P && [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32].every(i => P[i]);
+    const P = points?.map(toThree);
+    const ok = ready && P && [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32].every(i => P[i]);
     t.bones.group.visible = !!ok; t.grid.visible = !!ok;
-    let target = new THREE.Vector3(0, -0.1, 0);
-    if (ok) {
-      const pts = P as THREE.Vector3[];
-      t.bones.update(pts);
-      const floor = Math.min(...[27, 28, 29, 30, 31, 32].map(i => pts[i]!.y));
-      t.grid.position.set(0, floor, 0);
-      target = new THREE.Vector3(0, (floor + pts[0]!.y) / 2, 0);
-    }
+    const target = new THREE.Vector3(0, AIM_Y, 0);
+    if (ok) t.bones.update(P as THREE.Vector3[]);
     const y0 = yaw * Math.PI / 180, p0 = pitch * Math.PI / 180, d = 4.6;
     t.camera.position.set(target.x + d * Math.sin(y0) * Math.cos(p0), target.y + d * Math.sin(p0), target.z + d * Math.cos(y0) * Math.cos(p0));
     t.camera.lookAt(target);
     t.renderer.render(t.scene, t.camera);
     if (!ok || !box) return;
     for (const [side, i] of [['left', 25], ['right', 26]] as const) {
-      const f = worldFlexion(sample!.landmarks, 'knee', side); if (f === null) continue;
+      const f = flexion3D(points, 'knee', side); if (f === null) continue;
       const v = (P![i] as THREE.Vector3).clone().project(t.camera);
       const el = document.createElement('span');
       el.className = `skeleton3d-label ${side}`; el.textContent = `${side === 'left' ? '左' : '右'}膝 ${Math.round(f)}°`;
       el.style.left = `${(v.x + 1) / 2 * 100}%`; el.style.top = `${(1 - v.y) / 2 * 100}%`;
       box.append(el);
     }
-  }, [sample, usable, hasWorld, yaw, pitch, mode, bonesReady]);
+  }, [points, ready, yaw, pitch, mode, bonesReady]);
   const down = (e: PointerEvent<HTMLCanvasElement>) => { e.currentTarget.setPointerCapture(e.pointerId); drag.current = { x: e.clientX, y: e.clientY, yaw, pitch }; };
   const move = (e: PointerEvent<HTMLCanvasElement>) => {
     const d = drag.current; if (!d) return;
@@ -132,8 +127,8 @@ export function Skeleton3D({ sample }: { sample: Sample | undefined }) {
       <canvas ref={gl} className="skeleton3d-gl" hidden={mode !== 'bones' || !bonesReady} aria-hidden="true" />
       <canvas ref={ref} aria-label="3D 骨架，可拖曳旋轉" onPointerDown={down} onPointerMove={move} onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }} />
       <div ref={labels} className="skeleton3d-labels" hidden={mode !== 'bones'} />
-      {!usable ? <p className="skeleton3d-empty">這一格沒有可用的骨架</p> : !hasWorld ? <p className="skeleton3d-empty">這次分析沒有 3D 點，請重新分析</p> : null}
+      {!usable || (hasWorld && !points) ? <p className="skeleton3d-empty">這一格沒有可用的骨架</p> : !hasWorld ? <p className="skeleton3d-empty">這次分析沒有 3D 點，請重新分析</p> : null}
     </div>
-    <p className="muted small">拖曳可旋轉。藍色 = 個案左側、橘色 = 右側。骨頭模型取自 OpenSim（只用來顯示，長度依個案縮放）；深度是模型估計的，僅供參考。</p>
+    <p className="muted small">拖曳可旋轉。藍色 = 個案左側、橘色 = 右側。骨頭模型取自 OpenSim（只用來顯示，長度依個案縮放）。骨架的左右上下位置跟著影片，前後深度是模型估計的，並已轉正（腳踩在地板格線上），僅供參考。</p>
   </div>;
 }
