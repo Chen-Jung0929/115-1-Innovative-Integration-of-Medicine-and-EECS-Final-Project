@@ -22,6 +22,7 @@ import { applyReview } from '../validation/targetMetrics';
 import { AngleChart, CHART_METRICS, type ChartMetric } from '../visualization/AngleChart';
 import { hipFlexionProxy } from '../biomechanics/posture';
 import { Metric } from './Metric';
+import { worldFlexion } from '../biomechanics/world';
 import { plainReason, qcStatus, showAngle, showFlexion } from './plain';
 import { frontalTimeline, type BaselineSource } from '../motion/frontalTimeline';
 import { FrontalOverlay, FrontalCuePanel, FrontalLegend } from '../visualization/FrontalOverlay';
@@ -255,15 +256,17 @@ export function App() {
         <div className="group"><h3 className="group-title">膝蓋</h3><div className="measurements">
         {sides.map(s => {
           const angle = knee(s);
-          return <Metric key={s} name={`${sideName(s)}膝彎曲`} value={showFlexion(angle, flexionProxy)} note={angle?.valid ? '站直約 0°，蹲越低數字越大' : plainReason(angle, !!sample)}>
-            <p>膝彎曲 = 180° − 膝角（自訂，採臨床習慣：站直 0°）。膝角 = 髖–膝–踝在膝蓋的夾角（影像平面，0–180°），內角：{showAngle(angle)}。</p><p>暫定屈曲 proxy：{angle?.valid ? `${flexionProxy(angle)!.toFixed(1)}°` : 'N/A'}（= 180° − 內角，不是已確認的臨床屈曲角）</p><p>Tracking Status：{qcStatus(angle, !!sample)}</p><p>有效取樣比例：{pct(s)}</p></Metric>;
+          const w = angle?.valid && sample ? worldFlexion(sample.landmarks, 'knee', s) : null;
+          return <Metric key={s} name={`${sideName(s)}膝彎曲`} value={showFlexion(angle, flexionProxy)} alt={w === null ? undefined : `3D 骨架 ${w.toFixed(0)}°`} note={angle?.valid ? '站直約 0°，蹲越低數字越大' : plainReason(angle, !!sample)}>
+            <p>膝彎曲 = 180° − 膝角（自訂，採臨床習慣：站直 0°）。膝角 = 髖–膝–踝在膝蓋的夾角（影像平面，0–180°），內角：{showAngle(angle)}。</p><p>暫定屈曲 proxy：{angle?.valid ? `${flexionProxy(angle)!.toFixed(1)}°` : 'N/A'}（= 180° − 內角，不是已確認的臨床屈曲角）</p><p>Tracking Status：{qcStatus(angle, !!sample)}</p><p>有效取樣比例：{pct(s)}</p><p>3D 骨架（試驗）：{w === null ? 'N/A（這次分析沒有 3D 點，請重新分析）' : `${w.toFixed(1)}°`}。用 MediaPipe 的 3D 骨架點算同一個角度，比較不受拍攝角度影響；站直時常顯示 10–25°，僅供比較（自訂）。</p></Metric>;
         })}
         </div></div>
         <div className="group"><h3 className="group-title">深蹲姿勢（暫定，待物理治療師確認）</h3><div className="posture-measurements">
         {sides.map(s => {
           const angle = sample?.posture?.final.hip[s];
-          return <Metric key={s} name={`${sideName(s)}髖彎曲`} value={showFlexion(angle, hipFlexionProxy)} note={angle?.valid ? '站直約 0°，身體越往前折數字越大' : plainReason(angle, !!sample)}>
-            <p>髖彎曲 = 180° − 髖角（自訂，站直 0°）。髖角 = 肩–髖–膝在髖的夾角（影像平面，0–180°），內角：{showAngle(angle)}。暫定髖屈曲 proxy：{angle?.valid ? `${hipFlexionProxy(angle)!.toFixed(1)}°` : 'N/A'}（= 180° − 內角）。</p><p>{qcStatus(angle, !!sample)}</p></Metric>;
+          const w = angle?.valid && sample ? worldFlexion(sample.landmarks, 'hip', s) : null;
+          return <Metric key={s} name={`${sideName(s)}髖彎曲`} value={showFlexion(angle, hipFlexionProxy)} alt={w === null ? undefined : `3D 骨架 ${w.toFixed(0)}°`} note={angle?.valid ? '站直約 0°，身體越往前折數字越大' : plainReason(angle, !!sample)}>
+            <p>髖彎曲 = 180° − 髖角（自訂，站直 0°）。髖角 = 肩–髖–膝在髖的夾角（影像平面，0–180°），內角：{showAngle(angle)}。暫定髖屈曲 proxy：{angle?.valid ? `${hipFlexionProxy(angle)!.toFixed(1)}°` : 'N/A'}（= 180° − 內角）。</p><p>{qcStatus(angle, !!sample)}</p><p>3D 骨架（試驗）：{w === null ? 'N/A' : `${w.toFixed(1)}°`}（同一個肩–髖–膝角度改用 3D 骨架點計算，僅供比較，自訂）。</p></Metric>;
         })}
         <Metric name="上身（軀幹）前傾" value={showAngle(sample?.posture?.final.trunkLean)} note={sample?.posture?.final.trunkLean.valid ? '0° = 上身直立' : plainReason(sample?.posture?.final.trunkLean, !!sample)}>
           <p>兩髖中點→兩肩中點連線與畫面垂直線的夾角（0° = 直立；手機需擺正）。</p><p>{qcStatus(sample?.posture?.final.trunkLean, !!sample)}</p></Metric>
@@ -284,7 +287,7 @@ export function App() {
       {sample.search.suggestedRoi && <button className="secondary" disabled={busy||seeking} onClick={()=>{beginSelection();setDraft(sample.search!.suggestedRoi!);setDraftMode('adaptive-roi');}}>檢查搜尋建議 ROI（仍需人工 Apply）</button>}</aside>}
     <section className="card" aria-labelledby="chart-title"><div className="card-head"><h2 id="chart-title">角度曲線與匯出</h2>
       {session && <label className="compact">曲線指標<select aria-label="曲線指標" value={chartMetric} onChange={e=>setChartMetric(e.target.value as ChartMetric)}>{(Object.keys(CHART_METRICS) as ChartMetric[]).map(k=><option key={k} value={k}>{CHART_METRICS[k].label}</option>)}</select></label>}</div>
-      {session ? <><AngleChart samples={session.samples} side={side} timeMs={timeMs} metric={chartMetric} />{chartMetric!=='knee'&&!session.samples.some(s=>s.posture)&&<p>此分析版本沒有姿勢指標，請重新分析。</p>}
+      {session ? <><AngleChart samples={session.samples} side={side} timeMs={timeMs} metric={chartMetric} />{chartMetric.endsWith('3d')&&!session.samples.some(s=>s.landmarks.some(p=>p.world))&&<p>這次分析沒有 3D 骨架點，請重新分析。</p>}{chartMetric!=='knee'&&chartMetric!=='knee3d'&&!session.samples.some(s=>s.posture)&&<p>此分析版本沒有姿勢指標，請重新分析。</p>}
         <p className="muted small">已分析 {session.samples.length} 個取樣；每秒 5 次目標取樣，不代表全部影格。可辨識的重複呈現時間已排除；無效取樣保留為曲線斷點。</p>
         <div className="actions">
         <button className="secondary" onClick={() => downloadFile(`knee-${session.metadata.sessionId}.csv`, toCsv(session), 'text/csv;charset=utf-8')}>下載 CSV</button>

@@ -1,11 +1,14 @@
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine } from 'recharts';
 import type { Sample } from '../domain/analysis';
-export type ChartMetric = 'knee' | 'hip' | 'trunkLean' | 'kneeToe';
+import { worldFlexion } from '../biomechanics/world';
+export type ChartMetric = 'knee' | 'knee3d' | 'hip' | 'hip3d' | 'trunkLean' | 'kneeToe';
 /** Flexion axis: at least 0–90°, grows in 30° steps so shallow squats are not squashed. */
 const FLEX_MAX = (dataMax: number): number => Math.max(90, Math.ceil(dataMax / 30) * 30);
 export const CHART_METRICS: Record<ChartMetric, { label: string; aria: string; axis: string; domain: [number | 'auto', number | 'auto' | ((dataMax: number) => number)]; bilateral: boolean }> = {
   knee: { label: '膝彎曲', aria: '左右膝影像平面彎曲角（180° − 內角）時間曲線；無效取樣為斷點', axis: '彎曲（°，站直 0）', domain: [0, FLEX_MAX], bilateral: true },
+  knee3d: { label: '膝彎曲（3D 骨架，試驗）', aria: '左右膝 3D 骨架彎曲角時間曲線（試驗）；無效取樣為斷點', axis: '彎曲（°，3D 骨架）', domain: [0, FLEX_MAX], bilateral: true },
   hip: { label: '髖彎曲', aria: '左右髖影像平面彎曲角（180° − 內角）時間曲線；無效取樣為斷點', axis: '彎曲（°，站直 0）', domain: [0, FLEX_MAX], bilateral: true },
+  hip3d: { label: '髖彎曲（3D 骨架，試驗）', aria: '左右髖 3D 骨架彎曲角時間曲線（試驗）；無效取樣為斷點', axis: '彎曲（°，3D 骨架）', domain: [0, FLEX_MAX], bilateral: true },
   trunkLean: { label: '上身（軀幹）前傾', aria: '上身（軀幹）前傾角時間曲線；無效取樣為斷點', axis: '與垂直線夾角（°）', domain: [0, 90], bilateral: false },
   kneeToe: { label: '膝蓋對腳尖線（膝蓋內夾）', aria: '左右膝相對腳尖鉛垂線位置時間曲線；無效取樣為斷點', axis: '骨盆寬（+ = 膝在內側）', domain: ['auto', 'auto'], bilateral: true },
 };
@@ -14,6 +17,8 @@ const flex = (inner: number | null): number | null => inner === null ? null : 18
 function values(s: Sample, metric: ChartMetric): { left: number | null; right: number | null; value: number | null } {
   const p = s.posture?.final;
   if (metric === 'knee') return { left: flex(s.left.rawAngleDeg), right: flex(s.right.rawAngleDeg), value: null };
+  if (metric === 'knee3d') return { left: s.left.valid ? worldFlexion(s.landmarks, 'knee', 'left') : null, right: s.right.valid ? worldFlexion(s.landmarks, 'knee', 'right') : null, value: null };
+  if (metric === 'hip3d') return { left: p?.hip.left.valid ? worldFlexion(s.landmarks, 'hip', 'left') : null, right: p?.hip.right.valid ? worldFlexion(s.landmarks, 'hip', 'right') : null, value: null };
   if (metric === 'hip') return { left: flex(p?.hip.left.rawAngleDeg ?? null), right: flex(p?.hip.right.rawAngleDeg ?? null), value: null };
   if (metric === 'trunkLean') return { left: null, right: null, value: p?.trunkLean.rawAngleDeg ?? null };
   return { left: p?.kneeToe.left.value ?? null, right: p?.kneeToe.right.value ?? null, value: null };

@@ -4,7 +4,11 @@ import type { FrameRead } from './video';
 import type { TrackingQuality, SubjectSelection, HumanReview, RoiProposal, Roi } from './tracking';
 import type { AngleValue, AnalysisMetadata, PostureSet } from './measurement';
 import type { LivePerformance } from './performance';
-export interface Landmark { x: number; y: number; visibility: number; presence?: number; z?: number }
+export interface Landmark {
+  x: number; y: number; visibility: number; presence?: number; z?: number;
+  /** Optional MediaPipe world landmark (metres, hip-centred 3D estimate). Experimental 3D angles only (ADR-068). */
+  world?: [number, number, number];
+}
 export interface SearchObservation {roi:Roi;candidates:Landmark[][];status:string;suggestedRoi:Roi|null;numPoses:number;error?:string}
 export interface Sample extends RoiProposal {
   subjectDecision?:CandidateSelection;

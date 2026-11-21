@@ -11,7 +11,13 @@ export async function createPoseEngine(bytes: Uint8Array, numPoses = 1): Promise
     baseOptions: { modelAssetBuffer: bytes, delegate: 'CPU' }, runningMode: 'VIDEO', numPoses,
     minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.5, minTrackingConfidence: 0.5,
   });
-  return { detect: (frame, timeMs) => pose.detectForVideo(frame, timeMs).landmarks.map(candidate => candidate.map(p => ({ x: p.x, y: p.y, z: p.z, visibility: p.visibility, ...(p.presence !== undefined ? { presence: p.presence } : {}) }))), close: () => pose.close() };
+  return { detect: (frame, timeMs) => {
+    const result = pose.detectForVideo(frame, timeMs);
+    return result.landmarks.map((candidate, ci) => candidate.map((p, i) => {
+      const w = result.worldLandmarks?.[ci]?.[i];
+      return { x: p.x, y: p.y, z: p.z, visibility: p.visibility, ...(p.presence !== undefined ? { presence: p.presence } : {}), ...(w ? { world: [w.x, w.y, w.z] as [number, number, number] } : {}) };
+    }));
+  }, close: () => pose.close() };
 }
 export async function modelBytes(file: File | null, signal: AbortSignal, allowOfficialDownload = false): Promise<{ bytes: Uint8Array; hash: string; id: string }> {
   let buffer: ArrayBuffer;
