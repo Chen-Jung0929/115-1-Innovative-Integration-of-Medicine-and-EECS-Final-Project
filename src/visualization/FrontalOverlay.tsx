@@ -4,7 +4,7 @@ import { FRONTAL_LANDMARKS as L, frontalFrame, headPoint } from '../biomechanics
 import { sourcePoint, type Point } from '../biomechanics/knee';
 import { LATERAL_INDICES } from '../biomechanics/lateral';
 import type { BodyPart } from '../motion/frontalCues';
-import type { FrontalFrame } from '../motion/frontalTimeline';
+import { OBLIQUE_MIN_SHOULDER_RATIO, type FrontalFrame } from '../motion/frontalTimeline';
 
 const BASE = '#ff5a36', LINE = '#ffd166', ALERT = '#ff2d55', TRUNK = '#5ab0ff', TOE = '#7cf0c0';
 
@@ -64,7 +64,7 @@ export function FrontalOverlay({ sample, frame, width, height }: { sample: Sampl
       if (T) dot(T, TOE);
       return;
     }
-    const f = frontalFrame(sample.landmarks, width, height);
+    const f = frame.approximate ? frontalFrame(sample.landmarks, width, height, OBLIQUE_MIN_SHOULDER_RATIO) : frontalFrame(sample.landmarks, width, height);
     // Every remaining line is a FRONTAL check: in an oblique view draw nothing (the prompt box asks for a frontal/side recording).
     if (frame.view !== 'frontal' || typeof f === 'string') return;
     // Vertical baseline, locked at the standing calibration.
@@ -112,9 +112,10 @@ export function FrontalCuePanel({ frame, hasSample }: { frame: FrontalFrame | un
   let body: ReactNode;
   if (!hasSample || !frame) body = <p className="cue-muted">此影格沒有分析結果</p>;
   else if (!frame.tracked) body = <p className="cue-muted">這一格沒有穩定追到個案（例如被別人擋住、畫面有其他人），暫不判斷</p>;
-  else if (frame.view === 'oblique') body = <p className="cue-muted">{frame.clipView === 'oblique' ? '這支影片是斜角拍攝：醫學組檢查線只適用正面或正側面，膝、髖角度仍可參考' : '身體轉得太斜，先不判斷（正面或正側面拍才準）'}</p>;
+  else if (frame.view === 'oblique') body = <p className="cue-muted">{frame.clipView === 'oblique' ? '這支影片是斜角拍攝：醫學組檢查線只適用正面或正側面，膝、髖角度仍可參考（可打開「斜角也顯示（僅供參考）」）' : '身體轉得太斜，先不判斷（正面或正側面拍才準）'}</p>;
   else if (frame.view === 'side') body = frame.cues.length ? <ul>{frame.cues.map(c => <li key={c.id}>⚠ {c.text}<span className="cue-page">講義 p.{c.page}</span></li>)}</ul> : <p className="cue-ok">✓ 側面：膝蓋與上身在範圍內</p>;
   else if (frame.view !== 'frontal') body = <p className="cue-muted">看不清楚軀幹點位，暫不判斷</p>;
+  else if (frame.approximate && frame.baseline.state === 'locked') body = <><p className="cue-muted">斜角拍攝，僅供參考（2D 投影會有誤差）</p>{frame.cues.length ? <ul>{frame.cues.map(c => <li key={c.id}>⚠ {c.text}<span className="cue-page">講義 p.{c.page}</span></li>)}</ul> : <p className="cue-ok">✓ 姿勢在基準線附近</p>}</>;
   else if (frame.baseline.state !== 'locked') body = <p className="cue-muted">還找不到站直的畫面：請個案先站直、不動約 1 秒，才能畫基準線</p>;
   else if (frame.cues.length === 0) body = <p className="cue-ok">✓ 姿勢在基準線附近</p>;
   else body = <ul>{frame.cues.map(c => <li key={c.id}>⚠ {c.text}<span className="cue-page">講義 p.{c.page}</span></li>)}</ul>;

@@ -1,11 +1,11 @@
 import type { Sample } from '../domain/analysis';
 import type { InvalidReason, ScalarValue } from '../domain/measurement';
-import { frontalFrame, heelMidpoint, measureFrontal, type FrontalMetrics } from '../biomechanics/frontal';
+import { FRONTAL_POLICY, frontalFrame, heelMidpoint, measureFrontal, type FrontalMetrics } from '../biomechanics/frontal';
 import { flexionProxy } from '../biomechanics/knee';
 import { gateReason } from '../tracking/gate';
 import { createBaselineAnchor, type BaselineState } from './baseline';
 import { createCueTracker, instantCues, lateralCues, type Cue } from './frontalCues';
-import { classifyView, measureLateral, type LateralMetrics, type ViewKind } from '../biomechanics/lateral';
+import { LATERAL_POLICY, classifyView, measureLateral, type LateralMetrics, type ViewKind } from '../biomechanics/lateral';
 
 /**
  * Where the baseline sits once locked.
@@ -35,6 +35,11 @@ export const VIEW_HOLD_MS = 600;
  * back to the 600 ms hold per sample.
  */
 export const WHOLE_VIDEO_VIEW_MIN_SHARE = 0.6;
+/**
+ * oblique-reference-v1: when the user opts in, oblique views (shoulder/torso ratio between the side
+ * and frontal limits) are measured with the frontal checks and labelled reference-only. Off by default.
+ */
+export const OBLIQUE_MIN_SHOULDER_RATIO = LATERAL_POLICY.sideMaxRatio;
 export const OFFLINE_CALIBRATION = { version: 'offline-standing-calibration-v1', relaxedMaxKneeFlexionDeg: 35, minSamples: 3 } as const;
 
 export interface FrontalFrame {
@@ -60,6 +65,11 @@ export interface FrontalFrame {
   calibration: 'standing-lock' | 'whole-video' | null;
   /** View decided once for the whole clip (fixed camera), or null when the clip is mixed. */
   clipView: ViewKind | null;
+  /**
+   * True when an oblique view is being checked as if it were frontal because the user turned on
+   * "oblique as reference" (oblique-reference-v1). Numbers are 2D projections: reference only.
+   */
+  approximate: boolean;
 }
 export interface Neutral { head: number; shift: number; shoulderTilt: number; pelvisTilt: number; trunkSide: number }
 type Tilt = keyof Neutral;
@@ -84,8 +94,9 @@ function gated(m: FrontalMetrics, s: Sample): FrontalMetrics {
  * saved session. Only samples whose subject passed QC (and was not rejected by human review) feed
  * the baseline or produce prompts.
  */
-export function frontalTimeline(samples: readonly Sample[], width: number, height: number, source: BaselineSource = 'standing-trunk'): FrontalFrame[] {
-  const offline = offlineCalibration(samples, width, height, source);
+export function frontalTimeline(samples: readonly Sample[], width: number, height: number, source: BaselineSource = 'standing-trunk', obliqueAsFrontal = false): FrontalFrame[] {
+  const ratio = obliqueAsFrontal ? OBLIQUE_MIN_SHOULDER_RATIO : FRONTAL_POLICY.minFrontalShoulderRatio;
+  const offline = offlineCalibration(samples, width, height, source, ratio);
   const anchor = createBaselineAnchor();
   const clipView = wholeVideoView(samples, width, height);
   let stableView: ViewKind | null = null;
@@ -97,7 +108,7 @@ export function frontalTimeline(samples: readonly Sample[], width: number, heigh
   return [...samples].sort((a, b) => a.sourceTimeMs - b.sourceTimeMs).map(s => {
     const rejected = s.review !== undefined && s.review.label !== 'correct-target';
     const usable = !rejected && s.tracking.accepted;
-    const frame = usable ? frontalFrame(s.landmarks, width, height) : null;
+    const frame = usable ? frontalFrame(s.landmarks, width, height, ratio) : null;
     const heel = usable ? heelMidpoint(s.landmarks, width, height) : null;
     const f = frame && typeof frame !== 'string' ? frame : null;
     const h = heel && typeof heel !== 'string' ? heel : null;
@@ -105,13 +116,13 @@ export function frontalTimeline(samples: readonly Sample[], width: number, heigh
     const standing = knee.left !== null && knee.right !== null && Math.max(knee.left, knee.right) <= STANDING_MAX_KNEE_FLEXION_DEG;
     const centerX = source === 'heel-midpoint' ? h?.x ?? null : f ? (f.shoulderMid.x + f.hipMid.x) / 2 : null;
     const live = anchor.update({ timeMs: s.sourceTimeMs, heel: h, hipWidthPx: f?.hipWidth ?? null, centerX, standing });
-    const liveRaw = gated(measureFrontal(s.landmarks, width, height, live.x), s);
+    const liveRaw = gated(measureFrontal(s.landmarks, width, height, live.x, ratio), s);
     if (usable && standing) standingBuf = [...standingBuf.filter(b => s.sourceTimeMs - b.timeMs <= 1000), { timeMs: s.sourceTimeMs, m: liveRaw }];
     if (live.state !== 'locked') { neutral = null; lockedAt = null; }
     else if (live.lockedAtMs !== lockedAt) { lockedAt = live.lockedAtMs; neutral = neutralFrom(standingBuf.map(b => b.m)); }
     const useOffline = live.state !== 'locked' && offline !== null;
     const baseline = useOffline ? offline.baseline : live;
-    const raw = useOffline ? gated(measureFrontal(s.landmarks, width, height, offline.baseline.x), s) : liveRaw;
+    const raw = useOffline ? gated(measureFrontal(s.landmarks, width, height, offline.baseline.x, ratio), s) : liveRaw;
     const metrics = relative(raw, useOffline ? offline.neutral : neutral);
     const calibration = baseline.state !== 'locked' ? null : useOffline ? 'whole-video' as const : 'standing-lock' as const;
     const rawView = usable ? classifyView(s.landmarks, width, height) : null;
@@ -122,7 +133,9 @@ export function frontalTimeline(samples: readonly Sample[], width: number, heigh
         if (s.sourceTimeMs - pendingView.since >= VIEW_HOLD_MS) { stableView = rawView; pendingView = null; }
       }
     }
-    const view = usable && rawView !== null ? clipView ?? stableView : null;
+    const detected = usable && rawView !== null ? clipView ?? stableView : null;
+    const approximate = obliqueAsFrontal && detected === 'oblique';
+    const view = approximate ? 'frontal' : detected;
     let lateral: LateralMetrics | null = null;
     if (view === 'side') {
       const m = measureLateral(s.landmarks, width, height);
@@ -131,7 +144,7 @@ export function frontalTimeline(samples: readonly Sample[], width: number, heigh
     }
     const instant = !usable ? [] : view === 'frontal' ? instantCues(metrics, knee) : view === 'side' && lateral ? lateralCues(lateral, knee[lateral.side]) : [];
     const cues = tracker.update(s.sourceTimeMs, instant);
-    return { sampleIndex: s.sampleIndex, tracked: usable, baseline, metrics, neutral: useOffline ? offline.neutral : neutral, view, lateral, cues, calibration, clipView };
+    return { sampleIndex: s.sampleIndex, tracked: usable, baseline, metrics, neutral: useOffline ? offline.neutral : neutral, view, lateral, cues, calibration, clipView, approximate };
   });
 }
 
@@ -140,11 +153,12 @@ export function frontalTimeline(samples: readonly Sample[], width: number, heigh
  * proxies ≤ 20°, or ≤ 35° when fewer than 3 exist), line at the median centre, neutral tilts = mean
  * of those samples measured against that line. Null when no such samples exist.
  */
-function offlineCalibration(samples: readonly Sample[], width: number, height: number, source: BaselineSource): { baseline: Extract<BaselineState, { state: 'locked' }>; neutral: Neutral | null } | null {
+function offlineCalibration(samples: readonly Sample[], width: number, height: number, source: BaselineSource, ratio: number = FRONTAL_POLICY.minFrontalShoulderRatio): { baseline: Extract<BaselineState, { state: 'locked' }>; neutral: Neutral | null } | null {
   const pool = samples.flatMap(s => {
     if ((s.review !== undefined && s.review.label !== 'correct-target') || !s.tracking.accepted) return [];
-    if (classifyView(s.landmarks, width, height) !== 'frontal') return [];
-    const f = frontalFrame(s.landmarks, width, height), h = heelMidpoint(s.landmarks, width, height);
+    const v = classifyView(s.landmarks, width, height);
+    if (v !== 'frontal' && !(ratio < FRONTAL_POLICY.minFrontalShoulderRatio && v === 'oblique')) return [];
+    const f = frontalFrame(s.landmarks, width, height, ratio), h = heelMidpoint(s.landmarks, width, height);
     const l = flexionProxy(s.left), r = flexionProxy(s.right);
     if (typeof f === 'string' || typeof h === 'string' || l === null || r === null) return [];
     const cx = source === 'heel-midpoint' ? h.x : (f.shoulderMid.x + f.hipMid.x) / 2;
@@ -155,7 +169,7 @@ function offlineCalibration(samples: readonly Sample[], width: number, height: n
   if (chosen.length < OFFLINE_CALIBRATION.minSamples) return null;
   const median = (v: number[]) => { const a = [...v].sort((x, y) => x - y); return a[Math.floor(a.length / 2)]!; };
   const x = median(chosen.map(c => c.cx)), heelY = median(chosen.map(c => c.heelY));
-  const neutral = neutralFrom(chosen.map(c => gated(measureFrontal(c.s.landmarks, width, height, x), c.s)));
+  const neutral = neutralFrom(chosen.map(c => gated(measureFrontal(c.s.landmarks, width, height, x, ratio), c.s)));
   return { baseline: { state: 'locked', x, heelY, lockedAtMs: chosen[0]!.s.sourceTimeMs }, neutral };
 }
 

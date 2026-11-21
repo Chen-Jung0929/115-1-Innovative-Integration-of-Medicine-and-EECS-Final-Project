@@ -55,6 +55,18 @@ describe('frontal timeline over analysed samples', () => {
     expect(t[5]!.metrics.kneeToe.left.invalidReasons).toEqual(['unsupported-view']);
     expect(t[5]!.cues).toEqual([]);
   });
+
+  it('opt-in: an oblique clip is checked like a frontal one and marked reference-only', () => {
+    const oblique = () => { const p = pose(); p[11] = v(.45, .2); p[12] = v(.55, .2); return p; };
+    const off = frontalTimeline([0, 1, 2, 3, 4, 5].map(i => at(i, oblique())), 100, 100);
+    expect(off[5]!.approximate).toBe(false);
+    const on = frontalTimeline([0, 1, 2, 3, 4, 5].map(i => at(i, oblique())), 100, 100, 'standing-trunk', true);
+    expect(on[5]!.view).toBe('frontal');
+    expect(on[5]!.approximate).toBe(true);
+    expect(on[5]!.baseline.state).toBe('locked');
+    expect(on[5]!.metrics.trunkSide.valid).toBe(true);
+    expect(on[5]!.metrics.kneeToe.left.valid).toBe(true);
+  });
   it('tilts are relative to the standing calibration (natural shoulder tilt / rolled camera is not a fault)', () => {
     const tilted = (extra: number) => { const p = pose(); p[11] = v(.4, .2 + .2 * Math.tan((6 + extra) * Math.PI / 180)); return p; };
     const t = frontalTimeline([0, 1, 2, 3, 4, 5, 6].map(i => at(i, tilted(0))).concat([7, 8, 9].map(i => at(i, tilted(7)))), 100, 100);

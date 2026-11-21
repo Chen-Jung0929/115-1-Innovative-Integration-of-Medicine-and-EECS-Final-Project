@@ -68,6 +68,7 @@ export function App() {
   const [chartMetric,setChartMetric]=useState<ChartMetric>('knee');
   const [frontalView,setFrontalView]=useState(true);
   const [baselineSource,setBaselineSource]=useState<BaselineSource>('standing-trunk');
+  const [obliqueRef,setObliqueRef]=useState(false);
   const [mode, setMode] = useState<'video' | 'camera'>('video');
 
   useEffect(() => {
@@ -182,7 +183,7 @@ export function App() {
   // Drawing only: skeleton and check lines glide between samples; every number still comes from `sample`.
   const drawn = held && session ? smoothedSample(session.samples, timeMs, held, SMOOTH_MAX_GAP_MS) : sample;
   const heldGapS = held ? Math.abs(timeMs - (held.decode.timeBasis === 'presentation' ? held.sourceTimeMs : held.requestedTimeMs)) / 1000 : 0;
-  const frontal = useMemo(() => session && info ? frontalTimeline(session.samples, info.width, info.height, baselineSource) : [], [session, info, baselineSource]);
+  const frontal = useMemo(() => session && info ? frontalTimeline(session.samples, info.width, info.height, baselineSource, obliqueRef) : [], [session, info, baselineSource, obliqueRef]);
   const frontalFrame = sample ? frontal.find(f => f.sampleIndex === sample.sampleIndex) : undefined;
   const pct = (s: 'left' | 'right') => { const value = session ? coverage(session.samples, s) : null; return value === null ? 'N/A' : `${(value * 100).toFixed(1)}%`; };
 
@@ -228,6 +229,7 @@ export function App() {
         <div className="toolbar">
           <label className="switch"><input type="checkbox" role="switch" checked={frontalView} onChange={e=>setFrontalView(e.target.checked)} /><span>醫學組檢查線</span></label>
           {frontalView && <label className="compact">基準線位置<select aria-label="基準線位置" value={baselineSource} onChange={e=>setBaselineSource(e.target.value as BaselineSource)}><option value="standing-trunk">站直時的軀幹中線（預設）</option><option value="heel-midpoint">兩腳跟中點（講義 p.5）</option></select></label>}
+          {frontalView && <label className="switch"><input type="checkbox" role="switch" checked={obliqueRef} onChange={e=>setObliqueRef(e.target.checked)} /><span>斜角也顯示（僅供參考）</span></label>}
           <label className="compact">顯示側別<select value={side} onChange={e => setSide(e.target.value as typeof side)}><option value="both">左右都看</option><option value="left">只看左邊</option><option value="right">只看右邊</option></select></label>
         </div>
       </div>
@@ -274,7 +276,7 @@ export function App() {
       </div></div>
       <details className="fold"><summary>畫面上的線和數字代表什麼？</summary>
         <p>膝彎曲（大數字與曲線）= 180° − 膝角，站直約 0°，蹲越低越大（自訂，採臨床習慣；講義沒有規定角度數值）。膝角定義：髖–膝–踝於膝點的影像平面內角（0–180°）。暫定屈曲 proxy = 180° − 內角；不是已確認的臨床屈曲角。左右為人體解剖側，影片不鏡像。</p>
-        {frontalView && <p className="frontal-note">正面檢查說明：紅色直線是基準線。個案先站直、不動約 1 秒，系統以這段時間的軀幹中線（兩肩中點與兩髖中點）定出位置並固定；之後身體怎麼動線都不動，腳跟明顯移動才重新定位。也可切換成講義 p.5 的「兩腳跟中點」。拍攝角度太斜時不判斷。黃線為目前的兩肩線、骨盆線（以髖關節代替 ASIS），白色虛線是「站直時」的肩線／骨盆線，兩條線張開代表變歪了；藍色虛線為軀幹，綠色虛線為過腳尖的鉛垂線；偏離時變紅並出現提示。綠色骨架在此模式下會淡化。左右指個案本身的左右。提示門檻為暫定值（頭 {CUE_POLICY.headHipWidths} 個骨盆寬、肩 {CUE_POLICY.shoulderDeg}°、軀幹 {CUE_POLICY.trunkDeg}°、骨盆 {CUE_POLICY.pelvisDeg}°、膝 {CUE_POLICY.kneeToeHipWidths} 個骨盆寬），待醫學組確認；只適用正面拍攝，皆為 2D 影像平面幾何。</p>}
+        {frontalView && <p className="frontal-note">正面檢查說明：紅色直線是基準線。個案先站直、不動約 1 秒，系統以這段時間的軀幹中線（兩肩中點與兩髖中點）定出位置並固定；之後身體怎麼動線都不動，腳跟明顯移動才重新定位。也可切換成講義 p.5 的「兩腳跟中點」。拍攝角度太斜時預設不判斷；打開「斜角也顯示（僅供參考）」後斜角影片也會畫線與提示，但 2D 投影誤差大、僅供參考。黃線為目前的兩肩線、骨盆線（以髖關節代替 ASIS），白色虛線是「站直時」的肩線／骨盆線，兩條線張開代表變歪了；藍色虛線為軀幹，綠色虛線為過腳尖的鉛垂線；偏離時變紅並出現提示。綠色骨架在此模式下會淡化。左右指個案本身的左右。提示門檻為暫定值（頭 {CUE_POLICY.headHipWidths} 個骨盆寬、肩 {CUE_POLICY.shoulderDeg}°、軀幹 {CUE_POLICY.trunkDeg}°、骨盆 {CUE_POLICY.pelvisDeg}°、膝 {CUE_POLICY.kneeToeHipWidths} 個骨盆寬），待醫學組確認；只適用正面拍攝，皆為 2D 影像平面幾何。</p>}
         <p>姿勢指標定義：髖角 = 肩–髖–膝於髖點的影像平面內角（0–180°），暫定髖屈曲 proxy = 180° − 內角。上身（軀幹）前傾 = 兩髖中點→兩肩中點連線與畫面垂直線的夾角（0° = 直立；手機需擺正）。膝蓋對腳尖線（依講義 p.11）= 膝蓋離「過腳尖的鉛垂線」多遠，以骨盆寬為單位；+ = 膝在內側（膝蓋內夾），講義標準為在線上或微外側，且左右對稱；只適用正面拍攝。三者都是 2D 影像平面幾何，不是經驗證的臨床角度；點位不可靠時顯示 N/A，不補值。</p>
       </details>
     </section>
