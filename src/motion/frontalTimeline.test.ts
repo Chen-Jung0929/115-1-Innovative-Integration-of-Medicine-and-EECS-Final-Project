@@ -94,4 +94,12 @@ describe('side view in the timeline', () => {
     expect(t.every(f => f.calibration === 'whole-video' && f.baseline.x !== null)).toBe(true);
     expect(t[0]!.metrics.trunkSide.valid).toBe(true);
   });
+  it('a single oblique-looking frame does not flip the view; a sustained turn does', () => {
+    const oblique = () => { const p = pose(); p[11] = v(.45, .2); p[12] = v(.55, .2); return p; };
+    const blip = frontalTimeline([0, 1, 2, 3, 4, 5, 6, 7].map(i => at(i, i === 6 ? oblique() : pose())), 100, 100);
+    expect(blip[6]!.view).toBe('frontal');
+    const turn = frontalTimeline([0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => at(i, i >= 5 ? oblique() : pose())), 100, 100);
+    expect(turn[6]!.view).toBe('frontal'); // still within the 600 ms hold
+    expect(turn[8]!.view).toBe('oblique');
+  });
 });

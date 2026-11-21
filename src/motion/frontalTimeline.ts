@@ -23,6 +23,12 @@ export const STANDING_MAX_KNEE_FLEXION_DEG = 20;
  * upright samples anywhere in the video instead of showing "stand still" forever.
  * Provisional engineering values (offline-standing-calibration-v1).
  */
+/**
+ * Camera-view smoothing (view-hold-v1): a new view (frontal / side / oblique) is adopted only after it
+ * persists this long, so a momentary shoulder-width dip (hands crossing, a small turn, landmark jitter)
+ * does not flash "too oblique" for a single frame. Provisional.
+ */
+export const VIEW_HOLD_MS = 600;
 export const OFFLINE_CALIBRATION = { version: 'offline-standing-calibration-v1', relaxedMaxKneeFlexionDeg: 35, minSamples: 3 } as const;
 
 export interface FrontalFrame {
@@ -73,6 +79,8 @@ function gated(m: FrontalMetrics, s: Sample): FrontalMetrics {
 export function frontalTimeline(samples: readonly Sample[], width: number, height: number, source: BaselineSource = 'standing-trunk'): FrontalFrame[] {
   const offline = offlineCalibration(samples, width, height, source);
   const anchor = createBaselineAnchor();
+  let stableView: ViewKind | null = null;
+  let pendingView: { view: ViewKind; since: number } | null = null;
   const tracker = createCueTracker();
   let standingBuf: { timeMs: number; m: FrontalMetrics }[] = [];
   let neutral: Neutral | null = null;
@@ -97,7 +105,15 @@ export function frontalTimeline(samples: readonly Sample[], width: number, heigh
     const raw = useOffline ? gated(measureFrontal(s.landmarks, width, height, offline.baseline.x), s) : liveRaw;
     const metrics = relative(raw, useOffline ? offline.neutral : neutral);
     const calibration = baseline.state !== 'locked' ? null : useOffline ? 'whole-video' as const : 'standing-lock' as const;
-    const view = usable ? classifyView(s.landmarks, width, height) : null;
+    const rawView = usable ? classifyView(s.landmarks, width, height) : null;
+    if (rawView !== null) {
+      if (stableView === null || rawView === stableView) { stableView = rawView; pendingView = null; }
+      else {
+        if (pendingView?.view !== rawView) pendingView = { view: rawView, since: s.sourceTimeMs };
+        if (s.sourceTimeMs - pendingView.since >= VIEW_HOLD_MS) { stableView = rawView; pendingView = null; }
+      }
+    }
+    const view = usable && rawView !== null ? stableView : null;
     let lateral: LateralMetrics | null = null;
     if (view === 'side') {
       const m = measureLateral(s.landmarks, width, height);

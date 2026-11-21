@@ -112,7 +112,7 @@ export function FrontalCuePanel({ frame, hasSample }: { frame: FrontalFrame | un
   let body: ReactNode;
   if (!hasSample || !frame) body = <p className="cue-muted">此影格沒有分析結果</p>;
   else if (!frame.tracked) body = <p className="cue-muted">這一格沒有穩定追到個案（例如被別人擋住、畫面有其他人），暫不判斷</p>;
-  else if (frame.view === 'oblique') body = <p className="cue-muted">請正面或正側面拍攝（目前角度太斜，不判斷）</p>;
+  else if (frame.view === 'oblique') body = <p className="cue-muted">身體轉得太斜，先不判斷（正面或正側面拍才準）</p>;
   else if (frame.view === 'side') body = frame.cues.length ? <ul>{frame.cues.map(c => <li key={c.id}>⚠ {c.text}<span className="cue-page">講義 p.{c.page}</span></li>)}</ul> : <p className="cue-ok">✓ 側面：膝蓋與上身在範圍內</p>;
   else if (frame.view !== 'frontal') body = <p className="cue-muted">看不清楚軀幹點位，暫不判斷</p>;
   else if (frame.baseline.state !== 'locked') body = <p className="cue-muted">還找不到站直的畫面：請個案先站直、不動約 1 秒，才能畫基準線</p>;
