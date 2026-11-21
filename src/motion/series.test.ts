@@ -1,6 +1,6 @@
 import { makeSample } from '../test/fixtures';
 import { expect, it } from 'vitest';
-import { sampleTimes, matchingSample, coverage, nearestSample } from './series';
+import { sampleTimes, matchingSample, coverage, nearestSample, smoothedSample } from './series';
 import type { Sample } from '../domain/analysis';
 const samples: Sample[] = [
   makeSample({sampleIndex:0,requestedTimeMs:0,sourceTimeMs:0,landmarks:[],left:{valid:true,rawAngleDeg:0,invalidReasons:[]},right:{valid:false,rawAngleDeg:null,invalidReasons:['missing-landmark']}}),
@@ -30,4 +30,15 @@ it('paused display picks the closest analyzed frame, only when it is close', () 
   expect(nearestSample(samples, 120, 120)?.sampleIndex).toBe(1);
   expect(nearestSample(samples, 60, 120)?.sampleIndex).toBe(0);
   expect(nearestSample(samples, 500, 120)).toBeUndefined();
+});
+it('skeleton drawing moves smoothly between two tracked samples, values stay from the base sample', () => {
+  const lm = (x: number) => Array.from({ length: 33 }, () => ({ x, y: .5, visibility: 1 }));
+  const a = makeSample({ sampleIndex: 0, sourceTimeMs: 0, requestedTimeMs: 0, landmarks: lm(.2) });
+  const b = makeSample({ sampleIndex: 1, sourceTimeMs: 200, requestedTimeMs: 200, landmarks: lm(.4) });
+  const s = smoothedSample([a, b], 50, a, 250)!;
+  expect(s.landmarks[0]!.x).toBeCloseTo(.25, 6);
+  expect(s.sampleIndex).toBe(0); expect(s.left).toEqual(a.left); expect(a.landmarks[0]!.x).toBe(.2);
+  const lost = { ...b, tracking: { ...b.tracking, accepted: false } };
+  expect(smoothedSample([a, lost], 50, a, 250)).toBe(a);
+  expect(smoothedSample([a, b], 50, a, 100)).toBe(a);
 });

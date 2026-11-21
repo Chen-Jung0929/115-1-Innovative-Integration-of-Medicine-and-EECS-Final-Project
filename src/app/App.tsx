@@ -8,7 +8,7 @@ import type { Session } from '../domain/analysis';
 import { MODEL_URL, PROJECT_MODEL_URL } from '../pose/mediapipe';
 import { checkFile, loadVideo, seekFrame, observePresentedFrame } from '../input/video';
 import { analyze } from '../motion/analyze';
-import { coverage, matchingSample, displayedRoi, nearestSample } from '../motion/series';
+import { coverage, matchingSample, displayedRoi, nearestSample, smoothedSample } from '../motion/series';
 import { flexionProxy } from '../biomechanics/knee';
 import { downloadFile, toCsv } from '../export/csv';
 import { Overlay } from '../visualization/Overlay';
@@ -179,6 +179,8 @@ export function App() {
   // Between 5 Hz samples (playing or paused): show the closest analyzed frame (at most ~0.1 s away) and say so.
   const held = !exact && session && !seeking ? nearestSample(session.samples, timeMs, NEAREST_MS) : undefined;
   const sample = exact ?? held;
+  // Drawing only: skeleton and check lines glide between samples; every number still comes from `sample`.
+  const drawn = held && session ? smoothedSample(session.samples, timeMs, held, SMOOTH_MAX_GAP_MS) : sample;
   const heldGapS = held ? Math.abs(timeMs - (held.decode.timeBasis === 'presentation' ? held.sourceTimeMs : held.requestedTimeMs)) / 1000 : 0;
   const frontal = useMemo(() => session && info ? frontalTimeline(session.samples, info.width, info.height, baselineSource) : [], [session, info, baselineSource]);
   const frontalFrame = sample ? frontal.find(f => f.sampleIndex === sample.sampleIndex) : undefined;
@@ -237,8 +239,8 @@ export function App() {
         // maps to the decoded frame recorded by the analysis decoder.
         const known = session?.samples.find(s => Math.abs(s.requestedTimeMs - v.currentTime * 1000) <= 1);
         setTimeMs(known?.sourceTimeMs ?? v.currentTime * 1000); setSeeking(false);
-      }} onError={() => { if (info) { setError('影片播放解碼失敗，請改用 H.264 MP4。'); setSession(null); } }} /><Overlay sample={sample} width={info?.width ?? 640} height={info?.height ?? 360} side={side} diagnostic={diagnostic} muted={frontalView && !!session && !selecting} />
-      {frontalView && session && !selecting && <><FrontalOverlay sample={sample} frame={frontalFrame} width={info?.width ?? 640} height={info?.height ?? 360} /><FrontalCuePanel frame={frontalFrame} hasSample={!!sample} /></>}
+      }} onError={() => { if (info) { setError('影片播放解碼失敗，請改用 H.264 MP4。'); setSession(null); } }} /><Overlay sample={drawn} width={info?.width ?? 640} height={info?.height ?? 360} side={side} diagnostic={diagnostic} muted={frontalView && !!session && !selecting} />
+      {frontalView && session && !selecting && <><FrontalOverlay sample={drawn} frame={frontalFrame} width={info?.width ?? 640} height={info?.height ?? 360} /><FrontalCuePanel frame={frontalFrame} hasSample={!!sample} /></>}
       {selecting && info && !seeking && <RoiSelector width={info.width} height={info.height} roi={draft} onChange={setDraft} drawNew={drawNew} onDrawEnd={()=>setDrawNew(false)} />}
       {experiments && selection && info && !selecting && <svg className="roi-border" viewBox={`0 0 ${info.width} ${info.height}`} aria-label="受測者 ROI 範圍"><rect {...(pipeline==='roi-crop'?(sample?.roi??displayedRoi(session?.samples??[],timeMs)??roiAt(selection,timeMs,info.width,info.height).roi):(sample?.targetReferenceRoi??selection.roi))} fill="none" stroke="#ffda57" strokeWidth={Math.max(2,info.width/250)} /></svg>}
       {!info && !loading && <p className="stage-empty">選擇影片後，畫面會出現在這裡</p>}</div>
@@ -323,6 +325,8 @@ export function App() {
 }
 /** Half a 5 Hz interval plus decoder jitter: every frame maps to its closest analyzed sample, so the skeleton lags at most ~0.1 s. */
 const NEAREST_MS = 120;
+/** Skeleton smoothing only bridges neighbouring 5 Hz samples (one interval plus jitter), never a gap. */
+const SMOOTH_MAX_GAP_MS = 250;
 /** Slow motion by default: easier for PTs to follow, and the 5 Hz skeleton keeps up with the body better. */
 const SPEEDS = [0.25, 0.5, 1] as const;
 const DEFAULT_SPEED = 0.5;
