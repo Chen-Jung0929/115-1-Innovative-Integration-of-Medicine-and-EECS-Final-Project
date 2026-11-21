@@ -21,7 +21,7 @@ export function calibrationNote(context: LiftContext | null | undefined): string
   const say = (side: 'left' | 'right') => {
     const l = context.legs[side], name = side === 'left' ? '左膝' : '右膝';
     if (l.status === 'applied' || l.status === 'capped') return `${name}已做站直校正（${l.correctionDeg.toFixed(0)}°${l.status === 'capped' ? '，已達上限' : ''}）`;
-    return `${name}未校正（${l.status === 'bent-in-image' ? '站姿時影片上膝蓋看起來是彎的' : l.status === 'not-standing' ? '影片中找不到確定站直的時候' : '未啟用'}）`;
+    return `${name}未校正（${l.status === 'bent-in-image' ? '站姿時影片上膝蓋看起來是彎的' : l.status === 'not-standing' ? '沒有偵測到可確認的站直畫面，鏡頭俯仰也可能讓系統判斷不出來' : '未啟用'}）`;
   };
   return `${say('left')}；${say('right')}。`;
 }

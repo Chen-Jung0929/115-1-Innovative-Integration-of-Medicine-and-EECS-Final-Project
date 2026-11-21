@@ -28,7 +28,7 @@ describe('session 3D poses', () => {
 
   it('says in plain words whether the straight-leg calibration was used', () => {
     const ctx = { legs: { left: { status: 'capped', correctionDeg: 10, standingExtension: 1, kneeDepthOffset: -0.04 }, right: { status: 'not-standing', correctionDeg: 0, standingExtension: 1, kneeDepthOffset: 0 } } } as unknown as LiftContext;
-    expect(calibrationNote(ctx)).toBe('左膝已做站直校正（10°，已達上限）；右膝未校正（影片中找不到確定站直的時候）。');
+    expect(calibrationNote(ctx)).toBe('左膝已做站直校正（10°，已達上限）；右膝未校正（沒有偵測到可確認的站直畫面，鏡頭俯仰也可能讓系統判斷不出來）。');
     expect(calibrationNote(null)).toBeNull();
   });
 });
