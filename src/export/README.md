@@ -1,5 +1,5 @@
 # export
 
-Planned responsibility: Serialize versioned CSV/JSON with explicit validity and session metadata.
+csv.ts：逐側 CSV、null／invalid reason、公式字串防護及本機下載。
 
-No runtime implementation in initialization. See docs/ARCHITECTURE.md.
+研究與實測限制見 docs/ARCHITECTURE.md 及 docs/updates/iteration-01-dataset-demo.md。

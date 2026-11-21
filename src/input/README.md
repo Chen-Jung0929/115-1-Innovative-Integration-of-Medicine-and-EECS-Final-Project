@@ -1,5 +1,5 @@
 # input
 
-Planned responsibility: Decode MP4 or camera frames with source timestamps and dimensions.
+video.ts：MP4 檔案與長度檢查、decode、seeked + rVFC 影格擷取與資源釋放。
 
-No runtime implementation in initialization. See docs/ARCHITECTURE.md.
+研究與實測限制見 docs/ARCHITECTURE.md 及 docs/updates/iteration-01-dataset-demo.md。

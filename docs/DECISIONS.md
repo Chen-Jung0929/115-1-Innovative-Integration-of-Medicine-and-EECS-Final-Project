@@ -17,3 +17,54 @@
 待決定：臨床角度／ROM 規約、信心門檻、可接受誤差、驗證樣本設計、模型資產版本、
 支援瀏覽器／裝置、camera 效能目標、獨立參考與倫理流程。
 變更決策時新增紀錄並註明取代的 ADR，不悄悄改寫研究假設。
+
+## Task 2 — 2026-11-16
+
+- ADR-010：以 5 Hz 目標時間網格離線 seek，保存 requested 與 presented source time，去除重複／逆序影格。不是全影格分析。
+- ADR-011：每次分析建立獨立 VIDEO 模型實例；播放只讀結果。不在未分析影格顯示近鄰姿態。
+- ADR-012：明確選取的本機 .task 優先，否則先讀專案 public/models；官方下載須 opt-in。
+  WASM 從 lockfile 中同版本 npm 套件複製、本機提供；不使用未知鏡像。模型不入 Git。
+- ADR-013：原始 2D 內角與 180°−內角 proxy 使用不同 definition ID；無效角度為 null，CSV 空欄並記原因。
+- ADR-014：V0 候選實作與真實模型／資料集驗收分開呈現；沒有正式人體推論證據就不標記 V0 完成。
+
+## Subject selection follow-up — 2026-11-17
+
+- ADR-015：正式課程名稱統一為「醫學電資創意整合專題」，更新目前文件與網頁，保留 Git 歷史。
+- ADR-016：先採 single-pose 固定手動 ROI＋保守連續性篩檢；不增加 numPoses，保留候選／TargetTracker 介面。
+- ADR-017：人物遺失／疑慮後在同 session 鎖定無效，避免自動接人；犧牲 coverage 的門檻為未驗證工程值。
+- ADR-018：raw／automatic／人工覆核後結果分離，人工判錯使最終角度無效，自動決策保留以分析漏放。
+- ADR-019：人為 ID 只來自標註，不來自模型候選 index。人工指標分母與未知狀態須明示，未標註不假定正確。
+
+## Decoder / editable and adaptive ROI — 2026-11-17
+
+- ADR-020：no-op seek 與 callback 延遲分開處理；可繪製 frame 的時間估計必須有 provenance，不延長 timeout 掩蓋事件問題。
+- ADR-021：ROI 草稿與 session 分離，Apply 才 stale；保留舊session，重新分析指向 parent。
+- ADR-022：手動 keyframes 線性插值 source pixels，角度不插值；人工重新確認點重建模型與追蹤器。
+- ADR-023：Adaptive 僅用前一 accepted pose、有界平滑，4-state安全恢復取代永久 latch（取代 ADR-017 的無條件永久鎖定部分）。
+- ADR-024：獨立最多2-pose全畫面搜尋作人工建議／歧義證據，搜尋候選不自動轉成有效目標；未宣稱真人多姿態效度。
+- ADR-025：保守全片重分析，不在舊 session 局部拼接或覆寫；schema6保存逐樣本ROI、decode、state及校正來源。
+
+## Full-frame architecture comparison — 2026-11-17
+
+- ADR-026：暫停擴充ROI；保留B，新增A全圖單人與C全圖多候選，以真實比較再決定架構。
+- ADR-027：input crop 與 target reference 分離；A/C輸入完整source frame，候選index不是person ID。
+- ADR-028：新完整流程分離Detection／Initial Selection／Temporal Identity／Landmark QC／Angles；B保留舊行為作對照。
+- ADR-029：同源batch共用模型bytes與File hash，獨立依序A/B Adaptive/C，保留單法失敗；不把未知真實影格對齊假裝為零偏移。
+- ADR-030：人工標籤逐法獨立，提供common/all分母與runtime；三法pipeline比較不視為cropping因果實驗。
+
+## QC diagnosis and recovery — 2026-11-17
+
+- ADR-031：分離 subject identity、joint observation 與 joint temporal QC；局部腿段跳變／退化不再單獨造成永久 identity failure（修正 ADR-023／028 中仍耦合的部分）。
+- ADR-032：torso 的原始門檻、歧義／跳換／長期遺失人工鎖定保留；局部異常時可靠 torso 仍可更新人物歷史，不以膝踝幾何推定身分。
+- ADR-033：左右膝獨立確認與 baseline，預設兩次連續穩定觀測、gap≤300ms、段長相對上一筆及窗口首筆≤1.25；等待時不補值、不 retroactive 接受。三次規則只供 replay 比較，尚未人體校準。
+- ADR-034：保存凍結 v0.5.0 實作供 offline replay；不覆寫原 session，保存來源 hash／parent，逐筆列新增放行及人工適用性，coverage 不是 accuracy。
+- ADR-035：Replay 固定原候選、實際 ROI、timestamps 與搜尋歧義／失敗紀錄；B 不重建 crop feedback，不能冒充新版本完整重分析。
+- ADR-036：schema8 明確記錄各側 observation／temporal／recovery state；派生 session 的舊 detection run 保存於 qcReplay.detectionRun，與新推論耗時區別。
+
+## v0.6 單人核心收斂 — 2026-11-17
+
+- ADR-037：依使用者決定以 Full Frame + Single Pose 為主要操作及核心預設；取代 ADR-026 的「以A/B/C比較決定架構」作為主要開發目標，並非accuracy勝出結論。
+- ADR-038：ROI／Multi-Pose／比較保留於實驗區，診斷／標註收合；停止擴充，既有測試保留。
+- ADR-039：自動全圖參考標controlled-single-default、不作manual keyframe，schema9保留raw／QC／source與模型metadata；不要求一般使用者框選。
+- ADR-040：初始化尚無可信torso時等待而非永久鎖定，逐側確認完成才放行；既有ambiguity／torso jump／長期遺失人工鎖定不自動解除。
+- ADR-041：本版完成工程回歸仍將真實受控Squat標待驗收；先完成這項驗收，再另案規劃camera，不同時擴大範圍。
