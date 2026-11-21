@@ -3,6 +3,7 @@ import type { CandidateSelection } from '../selection/subject';
 import type { FrameRead } from './video';
 import type { TrackingQuality, SubjectSelection, HumanReview, RoiProposal, Roi } from './tracking';
 import type { AngleValue, AnalysisMetadata } from './measurement';
+import type { LivePerformance } from './performance';
 export interface Landmark { x: number; y: number; visibility: number; presence?: number; z?: number }
 export interface SearchObservation {roi:Roi;candidates:Landmark[][];status:string;suggestedRoi:Roi|null;numPoses:number;error?:string}
 export interface Sample extends RoiProposal {
@@ -24,6 +25,7 @@ export interface Sample extends RoiProposal {
   right: AngleValue;
 }
 export interface Session {
+  livePerformance?: LivePerformance;
   qcReplay?:{strategy:string;originalSessionId:string;usesSavedObservations:true;detectionRun?:NonNullable<Session['run']>};
   run?:{pipeline:PipelineConfig;inputSpace:'full-frame'|'roi-crop';sourceSha256:string|null;comparisonId:string|null;analysisDurationMs:number;modelPreparationMs:number;requestedSamples:number};
   metadata: AnalysisMetadata;

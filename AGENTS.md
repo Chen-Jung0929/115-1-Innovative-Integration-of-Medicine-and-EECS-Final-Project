@@ -3,7 +3,7 @@
 ## Mission and scope
 Build the NTU 115-1 Real-Time Joint Motion Analysis System as an academic PoC.
 Read README.md, docs/PROJECT_SPEC.md, docs/DECISIONS.md and the latest iteration update before work.
-The current authorized task is Dataset Demo V0. Keep clinical definitions provisional and do not start camera or clinical analysis features.
+The current authorized tasks are Dataset Demo V0 and the V1 live camera input (see docs/updates/iteration-14-live-camera.md). Keep clinical definitions provisional and do not start clinical analysis features.
 Use the existing checkout. Do not create worktrees unless explicitly requested.
 
 ## Engineering rules
@@ -73,3 +73,9 @@ Use the existing checkout. Do not create worktrees unless explicitly requested.
 ## v0.6.1 bounded exception
 - Only full-frame-single with controlled-single-default may treat a torso discontinuity as a bounded tentative recovery. Preserve hard ambiguity, explicit manual, timeout and out-of-anchor locks.
 - Do not broaden ROI or multi-person tracking. Reports from saved candidates are QC replay, not new MediaPipe or identity/angle accuracy evidence.
+
+## V1 live camera scope
+- Camera is an input adapter only (src/input/camera.ts). Reuse motion/measure.ts and tracking/identity.ts; do not fork QC or angle logic for camera.
+- A live manual-review lock ends that segment as-is (never unlocked). A new segment (new analyzer) may start hands-free only after the ready gate (READY_POLICY in motion/live.ts) sees one still, full-body pose. Never mirror inference frames.
+- Camera e2e tests use Chromium's synthetic fake device; never commit recorded camera frames, faces or live exports.
+

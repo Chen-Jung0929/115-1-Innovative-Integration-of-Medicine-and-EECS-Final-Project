@@ -20,6 +20,7 @@ import { RoiSelector } from '../visualization/RoiSelector';
 import { ReviewPanel } from '../validation/ReviewPanel';
 import { applyReview } from '../validation/targetMetrics';
 import { AngleChart } from '../visualization/AngleChart';
+import { LivePanel } from './LivePanel';
 
 export function App() {
   const [pipeline,setPipeline]=useState<PipelineId>(DEFAULT_PIPELINE.id);
@@ -56,6 +57,7 @@ export function App() {
   const [draft,setDraft]=useState<Roi>({x:0,y:0,width:640,height:360});
   const [diagnostic,setDiagnostic]=useState(false);
   const [sampleIndex, setSampleIndex] = useState(0);
+  const [mode, setMode] = useState<'video' | 'camera'>('video');
 
   useEffect(() => {
     const v = video.current!;
@@ -166,8 +168,14 @@ export function App() {
   const pct = (s: 'left' | 'right') => { const value = session ? coverage(session.samples, s) : null; return value === null ? 'N/A' : `${(value * 100).toFixed(1)}%`; };
 
   return <main>
-    <header><p className="eyebrow">臺大 115-1 醫學電資創意整合專題 · Dataset Demo v0.6.1</p><h1>關節動作分析研究工作台</h1><p>上傳單人 MP4 → 開始分析 → 查看膝角度與曲線 → 匯出 CSV</p></header>
+    <header><p className="eyebrow">臺大 115-1 醫學電資創意整合專題 · Dataset Demo v0.6.1</p><h1>關節動作分析研究工作台</h1><p>上傳單人 MP4 或開啟即時鏡頭 → 查看膝角度與曲線 → 匯出 CSV</p></header>
     <aside>本系統為學術概念驗證，不提供醫療診斷或治療建議。2D 影像平面幾何角不是經驗證的臨床角度；側面視角較適合觀察，遮蔽與透視會影響結果。</aside>
+    <div className="mode-switch" role="group" aria-label="輸入來源">
+      <button aria-pressed={mode==='video'} onClick={()=>setMode('video')}>上傳影片</button>
+      <button aria-pressed={mode==='camera'} disabled={busy||loading||selecting} onClick={()=>{video.current?.pause();setMode('camera');}}>即時鏡頭</button>
+    </div>
+    {mode==='camera' && <LivePanel model={model} allowDownload={allowDownload} side={side} onSide={setSide} disabled={busy||loading} />}
+    <div hidden={mode!=='video'}>
     <section className="setup" aria-labelledby="input-title"><h2 id="input-title">1. 選擇影片與模型</h2>
       <label>MP4 影片（最多 500 MB、10 分鐘）<input type="file" accept=".mp4,video/mp4" disabled={busy || loading} onChange={e => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; void choose(f); }} /></label>
       <details><summary>模型設定與資料隱私</summary><p>影片不會上傳。預設先讀取專案本機模型；手動選取的 .task 檔優先。WASM 與已安裝 npm 版本一致，從本站載入，不使用外部 CDN。沒有模型時可改選本機檔案，其他介面仍可操作。</p>
@@ -248,7 +256,7 @@ export function App() {
       {sample && <p role="status">人工判斷：{sample.review?.label??'尚未標註'} · 追蹤狀態：{sample.tracking.state} · 人物一致性：{sample.tracking.identity}（未經人工確認） · 點位信心：{sample.tracking.landmarkConfidence} · 幾何：{sample.tracking.plausibility} · 連續性：{sample.tracking.continuity} · 原因：{sample.tracking.reasons.join(', ')||'未觸發篩檢警示；仍可能選錯或混合人物'}</p>}
     {session && <ReviewPanel session={session} sample={sample} onReview={(index,review)=>{if(!storedSession)return;const next={...storedSession,samples:storedSession.samples.map(s=>s.sampleIndex===index?applyReview(s,review):s)};setSession(next);setComparison(previous=>previous?{...previous,entries:previous.entries.map(e=>e.session?.metadata.sessionId===next.metadata.sessionId?{...e,session:next}:e)}:null);}} />}
     </details>
-
+    </div>
   </main>;
 }
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }

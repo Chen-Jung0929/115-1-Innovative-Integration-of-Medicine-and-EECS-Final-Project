@@ -40,3 +40,15 @@ table {border-collapse:collapse;width:100%;} th,td {padding:12px;border-bottom:1
 .experimental, .research { background: #fff; border: 1px solid #d4e1de; border-radius: 10px; padding: 14px 20px; margin: 20px 0; }
 .experimental > summary, .research > summary { font-weight: 600; color: #376a65; }
 .research p { overflow-wrap: anywhere; }
+
+.mode-switch { display:flex; gap:8px; margin:16px 0; }
+.mode-switch button { background:#fff; color:#0c665b; border:1px solid #0c665b; }
+.mode-switch button[aria-pressed=true] { background:#0c665b; color:#fff; }
+.video-stage.mirrored video, .video-stage.mirrored .overlay { transform:scaleX(-1); }
+.live-options { display:flex; gap:24px; flex-wrap:wrap; align-items:flex-end; }
+.live-status { font-weight:700; padding:10px 14px; border-radius:8px; background:#e6f3f0; }
+.live-status.warn { background:#fff2ee; color:#a22218; }
+.live-placeholder { background:#101b1e; color:#c9d6d3; padding:64px 16px; text-align:center; border-radius:8px; }
+[hidden] { display:none !important; }
+.live-status.wait { background:#fff8e8; color:#6b4f12; }
+.live-perf { color:#4a5870; font-size:.9rem; margin:4px 0 12px; }
