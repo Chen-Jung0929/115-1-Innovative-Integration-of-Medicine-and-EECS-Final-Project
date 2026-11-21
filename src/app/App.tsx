@@ -23,6 +23,7 @@ import { AngleChart, CHART_METRICS, type ChartMetric } from '../visualization/An
 import { hipFlexionProxy } from '../biomechanics/posture';
 import { Metric } from './Metric';
 import { worldFlexion } from '../biomechanics/world';
+import { Skeleton3D } from '../visualization/Skeleton3D';
 import { plainReason, qcStatus, showAngle, showFlexion } from './plain';
 import { frontalTimeline, type BaselineSource } from '../motion/frontalTimeline';
 import { FrontalOverlay, FrontalCuePanel, FrontalLegend } from '../visualization/FrontalOverlay';
@@ -249,6 +250,7 @@ export function App() {
       {!info && !loading && <p className="stage-empty">選擇影片後，畫面會出現在這裡</p>}</div>
         {frontalView && session && !selecting && <FrontalLegend view={frontalFrame?.view} />}
         {frontalView && session && !selecting && frontalFrame?.calibration==='whole-video' && <p className="muted small">這段影片裡沒有「站直不動 1 秒」的片段，基準線改用整段影片中站得最直的幾格來定。</p>}
+        {session && !selecting && <Skeleton3D sample={drawn} />}
         <div className="speed" role="group" aria-label="播放速度"><span className="muted small">播放速度</span><div className="segmented small-seg">{SPEEDS.map(r=><button key={r} aria-pressed={speed===r} onClick={()=>setSpeed(r)}>{r===1?'正常':`${r}×`}</button>)}</div></div>
         {session && <label className="scrub">逐格檢查<input aria-label="已分析取樣" type="range" min={0} max={session.samples.length-1} disabled={selecting} value={sampleIndex} onChange={e => jump(Number(e.target.value))} /><span className="muted">#{sampleIndex} / {session.samples.length-1}</span></label>}
         <p className="muted small">來源影格時間：{(timeMs/1000).toFixed(3)} 秒。{held ? `顯示最近的分析影格（取樣 #${held.sampleIndex}，相差 ${heldGapS.toFixed(2)} 秒；影片每秒分析 5 次）` : sample ? `對應取樣 #${sample.sampleIndex}（${sample.decode.timeBasis}）` : '這附近沒有分析結果（可能在分析範圍外），骨架與角度不顯示。'}</p>

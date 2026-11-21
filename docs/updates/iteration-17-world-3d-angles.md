@@ -16,6 +16,10 @@ MediaPipe 除了 2D 點，也會輸出一組 **3D 骨架點（world landmarks，
 - 曲線：「曲線指標」多兩個選項「膝彎曲（3D 骨架，試驗）」「髖彎曲（3D 骨架，試驗）」。
 - CSV、門檻、提示規則都沒有改；3D 點會跟著 landmarks 存在研究用 JSON 裡。
 
+## 3D 骨架視窗（同日，使用者要求）
+
+影片下方新增「3D 骨架（試驗）」視窗（`src/visualization/Skeleton3D.tsx`，ADR-069）：藍色 = 個案左側、橘色 = 右側，腳下有 1 m 地面格線；可拖曳旋轉，或按「正面／斜角／側面」。膝蓋旁標示 3D 膝彎曲。只用 canvas 畫，沒有新增套件；舊分析沒有 3D 點時會提示重新分析。
+
 ## 初步比對（不是正式驗證）
 
 參考答案：OpenCap 官方測試資料（`stanfordnmbl/opencap-test-data`）

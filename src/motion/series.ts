@@ -35,7 +35,8 @@ export function smoothedSample(samples: readonly Sample[], timeMs: number, base:
   if (prev.landmarks.length === 0 || prev.landmarks.length !== next.landmarks.length) return base;
   const k = (timeMs - t(prev)) / (t(next) - t(prev));
   if (!(k > 0 && k < 1)) return base;
-  const landmarks = prev.landmarks.map((a, i) => { const b = next!.landmarks[i]!; return { ...a, x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k, visibility: Math.min(a.visibility, b.visibility) }; });
+  const landmarks = prev.landmarks.map((a, i) => { const b = next!.landmarks[i]!; const lerped = { ...a, x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k, visibility: Math.min(a.visibility, b.visibility) };
+    return a.world && b.world ? { ...lerped, world: a.world.map((v, j) => v + (b.world![j]! - v) * k) as [number, number, number] } : lerped; });
   return { ...base, landmarks };
 }
 /** Display only: hold the last actually used crop between analyzed frames, never interpolate angles. */
