@@ -19,7 +19,7 @@ export const CUE_POLICY = {
   kneeMinFlexionDeg: 30,
   /** A condition must hold this long before its prompt appears (≈ 2 samples at 10 Hz). */
   holdMs: 200,
-  maxShown: 2,
+  maxShown: 3,
   /** Side view (handout p.12). Knee ahead of the toe line, in shank lengths. */
   kneeForwardShank: 0.6,
   /** Side view trunk forward lean vs vertical, degrees. */

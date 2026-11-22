@@ -63,7 +63,7 @@ interface CauseText { problem: string; video: string; live: string }
 export const TRACKING_TEXT: Record<TrackingCause, CauseText> = {
   'rejected': { problem: '已標記為不是個案', video: '這一格不判斷', live: '這一格不判斷' },
   'others': { problem: '畫面有其他人', video: '只留個案一人入鏡', live: '只留個案一人入鏡' },
-  'teleport': { problem: '可能換了人', video: '請用同一人、不剪接的影片', live: '請只留個案一人入鏡' },
+  'teleport': { problem: '畫面跳動或換了人', video: '手機固定、同一人重拍', live: '手機固定，只留個案' },
   'no-person': { problem: '偵測不到人', video: '請讓頭到腳都入鏡（含頭頂）', live: '請讓頭到腳都入鏡（含頭頂）' },
   'too-close': { problem: '人離鏡頭太近', video: '手機往後移，頭到腳都入鏡', live: '請往後退，頭到腳都入鏡' },
   'head-cut': { problem: '頭沒有完整入鏡', video: '手機往後移，讓頭入鏡', live: '請往後退，讓頭入鏡' },

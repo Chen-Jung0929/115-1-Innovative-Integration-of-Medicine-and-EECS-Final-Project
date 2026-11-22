@@ -293,7 +293,7 @@ export function App() {
           <p>兩髖中點→兩肩中點連線與畫面垂直線的夾角（0° = 直立；手機需擺正）。</p><p>{qcStatus(sample?.posture?.final.trunkLean, !!sample)}</p></Metric>
         {sides.map(s => {
           const v = sample?.posture?.final.kneeToe[s];
-          return <Metric key={`toe-${s}`} name={`${sideName(s)}膝對腳尖線`} value={kneeToeValue(v)} warn={!!v?.valid && v.value > CUE_POLICY.kneeToeHipWidths} note={kneeToeNote(v, frontalFrame?.view, !!sample, trackNotice)}>
+          return <Metric key={`toe-${s}`} name={`${sideName(s)}膝對腳尖線`} value={kneeToeValue(v)} warn={!!frontalFrame?.cues.some(c => c.id === `knee-${s}`)} note={v?.valid && v.value > CUE_POLICY.kneeToeHipWidths && !(((k => k ? flexionProxy(k) : null)(knee(s)) ?? 0) >= CUE_POLICY.kneeMinFlexionDeg) ? '站直時不判斷，蹲下才檢查' : kneeToeNote(v, frontalFrame?.view, !!sample, trackNotice)}>
             <p>膝蓋離「過腳尖的鉛垂線」多遠，以骨盆寬為單位；+ = 膝在內側（膝蓋內夾）。標準是在線上或微外側，且左右對稱；只適用正面拍攝。</p><p>{qcStatus(v, !!sample)}</p></Metric>;
         })}
         </div></div>

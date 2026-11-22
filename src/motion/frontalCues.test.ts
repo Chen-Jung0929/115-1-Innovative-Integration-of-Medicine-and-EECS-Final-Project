@@ -52,6 +52,6 @@ describe('prompt debouncing', () => {
     const t = createCueTracker();
     const many = instantCues({ ...neutral(), trunkSide: n(12), pelvisTilt: n(8), kneeToe: { left: n(1), right: n(1) } }, squat);
     t.update(0, many);
-    expect(t.update(200, many).map(c => c.id)).toEqual(['trunk', 'pelvis']);
+    expect(t.update(200, many).map(c => c.id)).toEqual(['trunk', 'pelvis', 'knee-left']);
   });
 });
