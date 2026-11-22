@@ -270,7 +270,7 @@ export function App() {
           const angle = knee(s);
           const w = angle?.valid ? sessionFlexion(poses3d, sample, 'knee', s) : null;
           return <Metric key={s} name={`${sideName(s)}膝彎曲`} value={showFlexion(angle, flexionProxy)} alt={w === null ? undefined : `3D 骨架 ${w.toFixed(0)}°`} note={angle?.valid ? '站直約 0°，蹲越低數字越大' : plainReason(angle, !!sample)}>
-            <p>膝彎曲 = 180° − 膝角（自訂，採臨床習慣：站直 0°）。膝角 = 髖–膝–踝在膝蓋的夾角（影像平面，0–180°），內角：{showAngle(angle)}。</p><p>暫定屈曲 proxy：{angle?.valid ? `${flexionProxy(angle)!.toFixed(1)}°` : 'N/A'}（= 180° − 內角，不是已確認的臨床屈曲角）</p><p>Tracking Status：{qcStatus(angle, !!sample)}</p><p>有效取樣比例：{pct(s)}</p><p>3D 骨架（試驗）：{w === null ? 'N/A（這次分析沒有 3D 點，請重新分析）' : `${w.toFixed(1)}°`}。用混合式 3D 骨架（左右上下取自影片的 2D 點、前後深度取自 MediaPipe 3D 點；只有確認站直時才做站直校正）算同一個角度，比較不受拍攝角度影響。與 OpenCap 比對：有做站直校正時整段誤差約 5–12°，沒做時約 15–25°（站直時常多算 20° 以上），僅供比較（自訂）。</p></Metric>;
+            <p>膝彎曲 = 180° − 膝角（自訂，採臨床習慣：站直 0°）。膝角 = 髖–膝–踝在膝蓋的夾角（影像平面，0–180°），內角：{showAngle(angle)}。</p><p>暫定屈曲 proxy：{angle?.valid ? `${flexionProxy(angle)!.toFixed(1)}°` : 'N/A'}（= 180° − 內角，不是已確認的臨床屈曲角）</p><p>Tracking Status：{qcStatus(angle, !!sample)}</p><p>有效取樣比例：{pct(s)}</p><p>3D 骨架（試驗）：{w === null ? 'N/A（這次分析沒有 3D 點，請重新分析）' : `${w.toFixed(1)}°`}。用混合式 3D 骨架（左右上下取自影片的 2D 點、前後深度取自 MediaPipe 3D 點；只有確認站直時才做站直校正）算同一個角度，比較不受拍攝角度影響。與 OpenCap 比對（2 位受試者）：整段誤差約 5–19°，站直時常多算 10–25°（為了不蓋掉真的膝蓋彎曲，站直校正最多只扣 10°），僅供比較（自訂）。</p></Metric>;
         })}
         </div></div>
         <div className="group"><h3 className="group-title">深蹲姿勢（暫定，待物理治療師確認）</h3><div className="posture-measurements">
