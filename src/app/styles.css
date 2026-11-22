@@ -163,7 +163,6 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .cue-panel > * { background: rgba(28,28,30,.72); color: #fff; border-radius: 14px; padding: 8px 14px; margin: 0; font-size: clamp(.95rem, 2.2vw, 1.3rem); font-weight: 600; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
 .cue-panel ul { list-style: none; display: flex; flex-direction: column; gap: 4px; background: rgba(201,52,31,.88); }
 .cue-panel li { color: #fff; }
-.cue-page { font-size: .68em; font-weight: 400; opacity: .8; margin-left: 10px; }
 .cue-ok { background: rgba(29,138,78,.88) !important; color: #fff !important; }
 .cue-muted { color: #f5f5f7 !important; font-weight: 500 !important; }
 /* Colour key sits under the video so the picture stays clear */

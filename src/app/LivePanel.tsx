@@ -13,7 +13,7 @@ import { Overlay } from '../visualization/Overlay';
 import { AngleChart } from '../visualization/AngleChart';
 import pkg from '../../package.json';
 import { Metric } from './Metric';
-import { showAngle, showFlexion } from './plain';
+import { createNoticeHold, noticeText, showAngle, showFlexion, trackingCause, TRACKING_TEXT, type TrackingNotice } from './plain';
 import { createPitchRecorder, pitchFromOrientation, pitchLabel, requestOrientationPermission } from '../motion/devicePitch';
 import { calibrationNote, liftSession } from '../motion/world3d';
 import { Skeleton3D } from '../visualization/Skeleton3D';
@@ -40,12 +40,14 @@ export function waitStatus(ready: Ready | null): string {
 }
 
 /** Plain-language status for the person in front of the camera; detailed reasons stay in the export. */
-export function liveStatus(sample: Sample | undefined): string {
+export function liveStatus(sample: Sample | undefined, notice?: TrackingNotice | null): string {
   if (!sample) return '等待畫面中的人…';
   const t = sample.tracking;
-  if (t.state === 'MANUAL_REVIEW_REQUIRED') return '這一段已結束：畫面中可能有多人，或人物離開太久。';
-  if (t.state === 'LOST') return '沒有偵測到人：請站到畫面中央，讓頭到腳都入鏡。';
-  if (!t.accepted) return '正在確認人物，請保持全身入鏡、稍微停一下…';
+  const cause = notice?.cause ?? (t.accepted ? null : trackingCause(sample));
+  if (t.state === 'MANUAL_REVIEW_REQUIRED') return `這一段已結束：${TRACKING_TEXT[cause === 'confirming' || !cause ? 'lost-track' : cause].problem}。`;
+  // Reasons come from src/app/plain.ts and are held ≥ 0.5 s there, so the line does not flicker.
+  if (notice) return notice.text;
+  if (cause) return noticeText(cause, false, 'live');
   if (!sample.left.valid && !sample.right.valid) return '偵測到人，但看不清膝蓋：請側身面向鏡頭，避免遮住腿部。';
   return '量測中';
 }
@@ -66,6 +68,8 @@ export function LivePanel({ model, allowDownload, side, onSide, disabled }: { mo
   const clockOffset = useRef(0);
   const warmUpMs = useRef(0);
   const pitchRec = useRef(createPitchRecorder());
+  const noticeHold = useRef(createNoticeHold('live'));
+  const [liveNotice, setLiveNotice] = useState<TrackingNotice | null>(null);
   const facingRef = useRef<Facing>('user');
   const [sensor, setSensor] = useState<'off' | 'on' | 'denied' | 'unsupported'>('off');
   const [livePitch, setLivePitch] = useState<number | null>(null);
@@ -122,6 +126,7 @@ export function LivePanel({ model, allowDownload, side, onSide, disabled }: { mo
     if (runInfo.current) runInfo.current = { ...runInfo.current, selection, width, height };
     analyzer.current = createLiveAnalyzer(width, height, selection);
     segmentStart.current = performance.now(); lastSampleMs.current = null; pitchRec.current.reset();
+    noticeHold.current = createNoticeHold('live'); setLiveNotice(null);
     setSample(undefined); setRecent([]); setMeasuring(true); setLivePerf(null);
   }
 
@@ -154,17 +159,19 @@ export function LivePanel({ model, allowDownload, side, onSide, disabled }: { mo
     const next = current.step(candidates, t - clockOffset.current);
     if (!next) { if (current.full) { endSegment(); enterWaiting(); setNotice('已達單段 10 分鐘上限，這一段已保存。站好不動就會自動開始新的一段。'); } return; }
     lastSampleMs.current = t;
+    const held = noticeHold.current.update(next);
     if (next.tracking.state === 'MANUAL_REVIEW_REQUIRED') {
       // The locked segment is never unlocked; it is saved as-is and the next one starts only after a fresh ready check.
       endSegment(); enterWaiting();
-      setNotice('偵測到多人或人離開畫面太久，這一段已結束並保存在下方。站回畫面中不動，會自動開始新的一段。');
+      const why = held && held.cause !== 'confirming' ? TRACKING_TEXT[held.cause].problem : TRACKING_TEXT['lost-track'].problem;
+      setNotice(`${why}，這一段已結束並保存在下方。站回畫面中不動，會自動開始新的一段。`);
       return;
     }
     // End-to-end latency: camera capture (or, if unavailable, frame presentation) to angle ready. Not inference time.
     const basis = meta.captureTime !== undefined ? 'capture-time' : 'presentation-callback';
     perf.current?.sample(next.sampleIndex, inferenceMs, performance.now() - (meta.captureTime ?? meta.presentationTime), basis);
     if (next.sampleIndex % LIVE_SAMPLING_HZ === 0) setLivePerf(perf.current?.summary() ?? null);
-    setSample(next);
+    setSample(next); setLiveNotice(held);
     setRecent(previous => [...previous.filter(s => next.sourceTimeMs - s.sourceTimeMs <= CHART_WINDOW_MS), next]);
   }
 
@@ -256,7 +263,7 @@ export function LivePanel({ model, allowDownload, side, onSide, disabled }: { mo
       </details>
     </section>
     <section className="card" aria-labelledby="live-view-title"><h2 id="live-view-title">即時畫面與角度</h2>
-      {live && <p role="status" className={measuring ? 'live-status' : 'live-status wait'}>{measuring ? liveStatus(sample) : waitStatus(ready)}</p>}
+      {live && <p role="status" className={measuring ? 'live-status' : 'live-status wait'}>{measuring ? liveStatus(sample, liveNotice) : waitStatus(ready)}</p>}
       <div className="workspace"><div className="stage-col">
         <div className={mirrored ? 'video-stage mirrored' : 'video-stage'} hidden={state === 'off'}>
           <video ref={video} playsInline muted aria-label="即時鏡頭畫面" />

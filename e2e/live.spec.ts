@@ -25,7 +25,7 @@ test('live camera starts hands-free, ends a segment on a second person, restarts
   expect(boxes[1]).toEqual(boxes[0]);
   expect(await page.locator('.video-stage:visible video').evaluate((v: HTMLVideoElement) => { const r = v.getBoundingClientRect(); return Math.abs(r.width / r.height - v.videoWidth / v.videoHeight) < 0.01; })).toBe(true);
   await page.evaluate(() => { (window as unknown as { __crowd: boolean }).__crowd = true; });
-  await expect(page.getByText(/這一段已結束並保存/)).toBeVisible();
+  await expect(page.getByText('畫面有其他人，這一段已結束並保存在下方。站回畫面中不動，會自動開始新的一段。')).toBeVisible();
   await expect(page.getByText('畫面中不只一人，請只留下受測者，才會開始量測。')).toBeVisible();
   await expect(page.getByText(/這一段共 \d+ 個取樣/)).toBeVisible(); // locked segment saved, never unlocked
   await page.evaluate(() => { (window as unknown as { __crowd: boolean }).__crowd = false; });

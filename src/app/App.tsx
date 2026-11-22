@@ -25,7 +25,7 @@ import { Metric } from './Metric';
 import { calibrationNote, liftSession, poseAt, sessionFlexion } from '../motion/world3d';
 import { MANUAL_PITCH_RANGE, manualPitch, pitchLabel } from '../motion/devicePitch';
 import { Skeleton3D } from '../visualization/Skeleton3D';
-import { plainReason, qcStatus, showAngle, showFlexion } from './plain';
+import { lockedBannerText, plainReason, qcStatus, showAngle, showFlexion, trackingNotices } from './plain';
 import { frontalTimeline, type BaselineSource } from '../motion/frontalTimeline';
 import { FrontalOverlay, FrontalCuePanel, FrontalLegend } from '../visualization/FrontalOverlay';
 import { CUE_POLICY } from '../motion/frontalCues';
@@ -193,6 +193,8 @@ export function App() {
   const heldGapS = held ? Math.abs(timeMs - (held.decode.timeBasis === 'presentation' ? held.sourceTimeMs : held.requestedTimeMs)) / 1000 : 0;
   const frontal = useMemo(() => session && info ? frontalTimeline(session.samples, info.width, info.height, baselineSource, obliqueRef) : [], [session, info, baselineSource, obliqueRef]);
   const frontalFrame = sample ? frontal.find(f => f.sampleIndex === sample.sampleIndex) : undefined;
+  const notices = useMemo(() => session ? trackingNotices(session.samples, 'video') : null, [session]);
+  const trackNotice = sample ? notices?.get(sample.sampleIndex) ?? null : null;
   const pct = (s: 'left' | 'right') => { const value = session ? coverage(session.samples, s) : null; return value === null ? 'N/A' : `${(value * 100).toFixed(1)}%`; };
 
   const knee = (s: 'left' | 'right') => sample?.[s];
@@ -236,12 +238,12 @@ export function App() {
       <div className="card-head"><h2 id="review-title">動作檢查</h2>
         <div className="toolbar">
           <label className="switch"><input type="checkbox" role="switch" checked={frontalView} onChange={e=>setFrontalView(e.target.checked)} /><span>醫學組檢查線</span></label>
-          {frontalView && <label className="compact">基準線位置<select aria-label="基準線位置" value={baselineSource} onChange={e=>setBaselineSource(e.target.value as BaselineSource)}><option value="standing-trunk">站直時的軀幹中線（預設）</option><option value="heel-midpoint">兩腳跟中點（講義 p.5）</option></select></label>}
+          {frontalView && <label className="compact">基準線位置<select aria-label="基準線位置" value={baselineSource} onChange={e=>setBaselineSource(e.target.value as BaselineSource)}><option value="standing-trunk">站直時的軀幹中線（預設）</option><option value="heel-midpoint">兩腳跟中點</option></select></label>}
           {frontalView && <label className="switch"><input type="checkbox" role="switch" checked={obliqueRef} onChange={e=>setObliqueRef(e.target.checked)} /><span>斜角也顯示（僅供參考）</span></label>}
           <label className="compact">顯示側別<select value={side} onChange={e => setSide(e.target.value as typeof side)}><option value="both">左右都看</option><option value="left">只看左邊</option><option value="right">只看右邊</option></select></label>
         </div>
       </div>
-      {sample?.tracking.state==='MANUAL_REVIEW_REQUIRED'&&<aside className="banner warn">人物一致性無法確認，量測已暫停。請確認單人、完整入鏡後重新分析；必要時可在實驗區人工校正。局部膝部缺點不會單獨造成這個鎖定。</aside>}
+      {sample?.tracking.state==='MANUAL_REVIEW_REQUIRED'&&<aside className="banner warn">{lockedBannerText(trackNotice?.cause ?? 'lost-track', 'video')}</aside>}
       <div className="workspace"><div className="stage-col"><div className="video-stage"><video ref={video} controls={!selecting} playsInline onPlay={()=>{if(selecting)video.current?.pause();}} onLoadedMetadata={e=>{e.currentTarget.defaultPlaybackRate=speed;e.currentTarget.playbackRate=speed;}} onSeeking={() => setSeeking(true)} onSeeked={() => {
         const v = video.current;
         if (!v) return;
@@ -250,7 +252,7 @@ export function App() {
         const known = session?.samples.find(s => Math.abs(s.requestedTimeMs - v.currentTime * 1000) <= 1);
         setTimeMs(known?.sourceTimeMs ?? v.currentTime * 1000); setSeeking(false);
       }} onError={() => { if (info) { setError('影片播放解碼失敗，請改用 H.264 MP4。'); setSession(null); } }} /><Overlay sample={drawn} width={info?.width ?? 640} height={info?.height ?? 360} side={side} diagnostic={diagnostic} muted={frontalView && !!session && !selecting} />
-      {frontalView && session && !selecting && <><FrontalOverlay sample={drawn} frame={frontalFrame} width={info?.width ?? 640} height={info?.height ?? 360} /><FrontalCuePanel frame={frontalFrame} hasSample={!!sample} /></>}
+      {frontalView && session && !selecting && <><FrontalOverlay sample={drawn} frame={frontalFrame} width={info?.width ?? 640} height={info?.height ?? 360} /><FrontalCuePanel frame={frontalFrame} hasSample={!!sample} notice={trackNotice} /></>}
       {selecting && info && !seeking && <RoiSelector width={info.width} height={info.height} roi={draft} onChange={setDraft} drawNew={drawNew} onDrawEnd={()=>setDrawNew(false)} />}
       {experiments && selection && info && !selecting && <svg className="roi-border" viewBox={`0 0 ${info.width} ${info.height}`} aria-label="受測者 ROI 範圍"><rect {...(pipeline==='roi-crop'?(sample?.roi??displayedRoi(session?.samples??[],timeMs)??roiAt(selection,timeMs,info.width,info.height).roi):(sample?.targetReferenceRoi??selection.roi))} fill="none" stroke="#ffda57" strokeWidth={Math.max(2,info.width/250)} /></svg>}
       {!info && !loading && <p className="stage-empty">選擇影片後，畫面會出現在這裡</p>}</div>
@@ -269,7 +271,7 @@ export function App() {
         {sides.map(s => {
           const angle = knee(s);
           const w = angle?.valid ? sessionFlexion(poses3d, sample, 'knee', s) : null;
-          return <Metric key={s} name={`${sideName(s)}膝彎曲`} value={showFlexion(angle, flexionProxy)} alt={w === null ? undefined : `3D 骨架 ${w.toFixed(0)}°`} note={angle?.valid ? '站直約 0°，蹲越低數字越大' : plainReason(angle, !!sample)}>
+          return <Metric key={s} name={`${sideName(s)}膝彎曲`} value={showFlexion(angle, flexionProxy)} alt={w === null ? undefined : `3D 骨架 ${w.toFixed(0)}°`} note={angle?.valid ? '站直約 0°，蹲越低數字越大' : plainReason(angle, !!sample, trackNotice)}>
             <p>膝彎曲 = 180° − 膝角（自訂，採臨床習慣：站直 0°）。膝角 = 髖–膝–踝在膝蓋的夾角（影像平面，0–180°），內角：{showAngle(angle)}。</p><p>暫定屈曲 proxy：{angle?.valid ? `${flexionProxy(angle)!.toFixed(1)}°` : 'N/A'}（= 180° − 內角，不是已確認的臨床屈曲角）</p><p>Tracking Status：{qcStatus(angle, !!sample)}</p><p>有效取樣比例：{pct(s)}</p><p>3D 骨架（試驗）：{w === null ? 'N/A（這次分析沒有 3D 點，請重新分析）' : `${w.toFixed(1)}°`}。用混合式 3D 骨架（左右上下取自影片的 2D 點、前後深度取自 MediaPipe 3D 點；只有確認站直時才做站直校正）算同一個角度，比較不受拍攝角度影響。與 OpenCap 比對（2 位受試者）：整段誤差約 5–19°，站直時常多算 10–25°（為了不蓋掉真的膝蓋彎曲，站直校正最多只扣 10°），僅供比較（自訂）。</p></Metric>;
         })}
         </div></div>
@@ -277,22 +279,22 @@ export function App() {
         {sides.map(s => {
           const angle = sample?.posture?.final.hip[s];
           const w = angle?.valid ? sessionFlexion(poses3d, sample, 'hip', s) : null;
-          return <Metric key={s} name={`${sideName(s)}髖彎曲`} value={showFlexion(angle, hipFlexionProxy)} alt={w === null ? undefined : `3D 骨架 ${w.toFixed(0)}°`} note={angle?.valid ? '站直約 0°，身體越往前折數字越大' : plainReason(angle, !!sample)}>
+          return <Metric key={s} name={`${sideName(s)}髖彎曲`} value={showFlexion(angle, hipFlexionProxy)} alt={w === null ? undefined : `3D 骨架 ${w.toFixed(0)}°`} note={angle?.valid ? '站直約 0°，身體越往前折數字越大' : plainReason(angle, !!sample, trackNotice)}>
             <p>髖彎曲 = 180° − 髖角（自訂，站直 0°）。髖角 = 肩–髖–膝在髖的夾角（影像平面，0–180°），內角：{showAngle(angle)}。暫定髖屈曲 proxy：{angle?.valid ? `${hipFlexionProxy(angle)!.toFixed(1)}°` : 'N/A'}（= 180° − 內角）。</p><p>{qcStatus(angle, !!sample)}</p><p>3D 骨架（試驗）：{w === null ? 'N/A' : `${w.toFixed(1)}°`}（同一個肩–髖–膝角度改用 3D 骨架點計算，自訂）。3D 髖角只是近似值：MediaPipe 的髖點不是真正的髖關節中心，與 OpenCap 比對時不同受試者的偏差方向甚至相反（−14° 到 +25°），請勿當作臨床髖屈曲角。</p></Metric>;
         })}
-        <Metric name="上身（軀幹）前傾" value={showAngle(sample?.posture?.final.trunkLean)} note={sample?.posture?.final.trunkLean.valid ? '0° = 上身直立' : plainReason(sample?.posture?.final.trunkLean, !!sample)}>
+        <Metric name="上身（軀幹）前傾" value={showAngle(sample?.posture?.final.trunkLean)} note={sample?.posture?.final.trunkLean.valid ? '0° = 上身直立' : plainReason(sample?.posture?.final.trunkLean, !!sample, trackNotice)}>
           <p>兩髖中點→兩肩中點連線與畫面垂直線的夾角（0° = 直立；手機需擺正）。</p><p>{qcStatus(sample?.posture?.final.trunkLean, !!sample)}</p></Metric>
         {sides.map(s => {
           const v = sample?.posture?.final.kneeToe[s];
           return <Metric key={`toe-${s}`} name={`${sideName(s)}膝對腳尖線`} value={v?.valid ? `${v.value >= 0 ? '+' : ''}${v.value.toFixed(2)}` : 'N/A'} warn={!!v?.valid && v.value > CUE_POLICY.kneeToeHipWidths} note={v?.valid ? (v.value > 0 ? '膝蓋偏向內側（膝蓋內夾方向）' : '膝蓋在腳尖線上或外側') : '只適用正面拍攝'}>
-            <p>依講義 p.11：膝蓋離「過腳尖的鉛垂線」多遠，以骨盆寬為單位；+ = 膝在內側（膝蓋內夾）。講義標準為在線上或微外側，且左右對稱；只適用正面拍攝。</p><p>{qcStatus(v, !!sample)}</p></Metric>;
+            <p>膝蓋離「過腳尖的鉛垂線」多遠，以骨盆寬為單位；+ = 膝在內側（膝蓋內夾）。標準是在線上或微外側，且左右對稱；只適用正面拍攝。</p><p>{qcStatus(v, !!sample)}</p></Metric>;
         })}
         </div></div>
       </div></div>
       <details className="fold"><summary>畫面上的線和數字代表什麼？</summary>
-        <p>膝彎曲（大數字與曲線）= 180° − 膝角，站直約 0°，蹲越低越大（自訂，採臨床習慣；講義沒有規定角度數值）。膝角定義：髖–膝–踝於膝點的影像平面內角（0–180°）。暫定屈曲 proxy = 180° − 內角；不是已確認的臨床屈曲角。左右為人體解剖側，影片不鏡像。</p>
-        {frontalView && <p className="frontal-note">正面檢查說明：紅色直線是基準線。個案先站直、不動約 1 秒，系統以這段時間的軀幹中線（兩肩中點與兩髖中點）定出位置並固定；之後身體怎麼動線都不動，腳跟明顯移動才重新定位。也可切換成講義 p.5 的「兩腳跟中點」。拍攝角度太斜時預設不判斷；打開「斜角也顯示（僅供參考）」後斜角影片也會畫線與提示，但 2D 投影誤差大、僅供參考。黃線為目前的兩肩線、骨盆線（以髖關節代替 ASIS），白色虛線是「站直時」的肩線／骨盆線，兩條線張開代表變歪了；藍色虛線為軀幹，綠色虛線為過腳尖的鉛垂線；偏離時變紅並出現提示。綠色骨架在此模式下會淡化。左右指個案本身的左右。提示門檻為暫定值（頭 {CUE_POLICY.headHipWidths} 個骨盆寬、肩 {CUE_POLICY.shoulderDeg}°、軀幹 {CUE_POLICY.trunkDeg}°、骨盆 {CUE_POLICY.pelvisDeg}°、膝 {CUE_POLICY.kneeToeHipWidths} 個骨盆寬），待醫學組確認；只適用正面拍攝，皆為 2D 影像平面幾何。</p>}
-        <p>姿勢指標定義：髖角 = 肩–髖–膝於髖點的影像平面內角（0–180°），暫定髖屈曲 proxy = 180° − 內角。上身（軀幹）前傾 = 兩髖中點→兩肩中點連線與畫面垂直線的夾角（0° = 直立；手機需擺正）。膝蓋對腳尖線（依講義 p.11）= 膝蓋離「過腳尖的鉛垂線」多遠，以骨盆寬為單位；+ = 膝在內側（膝蓋內夾），講義標準為在線上或微外側，且左右對稱；只適用正面拍攝。三者都是 2D 影像平面幾何，不是經驗證的臨床角度；點位不可靠時顯示 N/A，不補值。</p>
+        <p>膝彎曲（大數字與曲線）= 180° − 膝角，站直約 0°，蹲越低越大（自訂，採臨床習慣）。膝角定義：髖–膝–踝於膝點的影像平面內角（0–180°）。暫定屈曲 proxy = 180° − 內角；不是已確認的臨床屈曲角。左右為人體解剖側，影片不鏡像。</p>
+        {frontalView && <p className="frontal-note">正面檢查說明：紅色直線是基準線。個案先站直、不動約 1 秒，系統以這段時間的軀幹中線（兩肩中點與兩髖中點）定出位置並固定；之後身體怎麼動線都不動，腳跟明顯移動才重新定位。也可切換成「兩腳跟中點」。拍攝角度太斜時預設不判斷；打開「斜角也顯示（僅供參考）」後斜角影片也會畫線與提示，但 2D 投影誤差大、僅供參考。黃線為目前的兩肩線、骨盆線（以髖關節代替 ASIS），白色虛線是「站直時」的肩線／骨盆線，兩條線張開代表變歪了；藍色虛線為軀幹，綠色虛線為過腳尖的鉛垂線；偏離時變紅並出現提示。綠色骨架在此模式下會淡化。左右指個案本身的左右。提示門檻為暫定值（頭 {CUE_POLICY.headHipWidths} 個骨盆寬、肩 {CUE_POLICY.shoulderDeg}°、軀幹 {CUE_POLICY.trunkDeg}°、骨盆 {CUE_POLICY.pelvisDeg}°、膝 {CUE_POLICY.kneeToeHipWidths} 個骨盆寬），待醫學組確認；只適用正面拍攝，皆為 2D 影像平面幾何。</p>}
+        <p>姿勢指標定義：髖角 = 肩–髖–膝於髖點的影像平面內角（0–180°），暫定髖屈曲 proxy = 180° − 內角。上身（軀幹）前傾 = 兩髖中點→兩肩中點連線與畫面垂直線的夾角（0° = 直立；手機需擺正）。膝蓋對腳尖線 = 膝蓋離「過腳尖的鉛垂線」多遠，以骨盆寬為單位；+ = 膝在內側（膝蓋內夾），標準是在線上或微外側，且左右對稱；只適用正面拍攝。三者都是 2D 影像平面幾何，不是經驗證的臨床角度；點位不可靠時顯示 N/A，不補值。</p>
       </details>
     </section>
     {experiments && sample?.search && <aside className="banner">全畫面搜尋：{sample.search.status}（候選不代表確認身分）。{sample.search.error && <p>全畫面搜尋不可用，請改用 Manual Keyframes 並人工確認；本次搜尋不作身分放行依據。</p>}
