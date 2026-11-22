@@ -3,7 +3,7 @@ import type { InvalidReason, ScalarValue } from '../domain/measurement';
 import { FRONTAL_POLICY, frontalFrame, heelMidpoint, measureFrontal, type FrontalMetrics } from '../biomechanics/frontal';
 import { flexionProxy } from '../biomechanics/knee';
 import { gateReason } from '../tracking/gate';
-import { createBaselineAnchor, type BaselineState } from './baseline';
+import { BASELINE_POLICY, createBaselineAnchor, type BaselineState } from './baseline';
 import { createCueTracker, instantCues, lateralCues, type Cue } from './frontalCues';
 import { LATERAL_POLICY, classifyView, measureLateral, type LateralMetrics, type ViewKind } from '../biomechanics/lateral';
 
@@ -70,6 +70,8 @@ export interface FrontalFrame {
    * "oblique as reference" (oblique-reference-v1). Numbers are 2D projections: reference only.
    */
   approximate: boolean;
+  /** The line was drawn before but the feet moved or tracking paused: waiting for a new standing lock. */
+  relocking: boolean;
 }
 export interface Neutral { head: number; shift: number; shoulderTilt: number; pelvisTilt: number; trunkSide: number }
 type Tilt = keyof Neutral;
@@ -105,9 +107,14 @@ export function frontalTimeline(samples: readonly Sample[], width: number, heigh
   let standingBuf: { timeMs: number; m: FrontalMetrics }[] = [];
   let neutral: Neutral | null = null;
   let lockedAt: number | null = null;
+  // Once this person had a live standing lock (or tracking was locked for identity), the whole-video
+  // baseline is never used again: after the feet move or a pause, the line waits for a new standing lock.
+  let liveOnly = false;
   return [...samples].sort((a, b) => a.sourceTimeMs - b.sourceTimeMs).map(s => {
     const rejected = s.review !== undefined && s.review.label !== 'correct-target';
     const usable = !rejected && s.tracking.accepted;
+    // Identity lock (possible person change): forget the standing reference entirely.
+    if (s.tracking.state === 'MANUAL_REVIEW_REQUIRED') { anchor.reset(); standingBuf = []; neutral = null; lockedAt = null; liveOnly = true; }
     const frame = usable ? frontalFrame(s.landmarks, width, height, ratio) : null;
     const heel = usable ? heelMidpoint(s.landmarks, width, height) : null;
     const f = frame && typeof frame !== 'string' ? frame : null;
@@ -120,10 +127,13 @@ export function frontalTimeline(samples: readonly Sample[], width: number, heigh
     if (usable && standing) standingBuf = [...standingBuf.filter(b => s.sourceTimeMs - b.timeMs <= 1000), { timeMs: s.sourceTimeMs, m: liveRaw }];
     if (live.state !== 'locked') { neutral = null; lockedAt = null; }
     else if (live.lockedAtMs !== lockedAt) { lockedAt = live.lockedAtMs; neutral = neutralFrom(standingBuf.map(b => b.m)); }
-    const useOffline = live.state !== 'locked' && offline !== null;
+    if (live.state === 'locked') liveOnly = true;
+    const useOffline = live.state !== 'locked' && offline !== null && !liveOnly;
     const baseline = useOffline ? offline.baseline : live;
     const raw = useOffline ? gated(measureFrontal(s.landmarks, width, height, offline.baseline.x, ratio), s) : liveRaw;
-    const metrics = relative(raw, useOffline ? offline.neutral : neutral);
+    const rel = relative(raw, useOffline ? offline.neutral : neutral);
+    // Feet moved away from the locked line: the line is about to be redrawn, so no shift/head prompts against it.
+    const metrics = !useOffline && anchor.away() ? { ...rel, shift: blocked('baseline-pending'), head: blocked('baseline-pending') } : rel;
     const calibration = baseline.state !== 'locked' ? null : useOffline ? 'whole-video' as const : 'standing-lock' as const;
     const rawView = usable ? classifyView(s.landmarks, width, height) : null;
     if (rawView !== null) {
@@ -144,7 +154,7 @@ export function frontalTimeline(samples: readonly Sample[], width: number, heigh
     }
     const instant = !usable ? [] : view === 'frontal' ? instantCues(metrics, knee) : view === 'side' && lateral ? lateralCues(lateral, knee[lateral.side]) : [];
     const cues = tracker.update(s.sourceTimeMs, instant);
-    return { sampleIndex: s.sampleIndex, tracked: usable, baseline, metrics, neutral: useOffline ? offline.neutral : neutral, view, lateral, cues, calibration, clipView, approximate };
+    return { sampleIndex: s.sampleIndex, tracked: usable, baseline, metrics, neutral: useOffline ? offline.neutral : neutral, view, lateral, cues, calibration, clipView, approximate, relocking: liveOnly && baseline.state !== 'locked' };
   });
 }
 
@@ -162,12 +172,15 @@ function offlineCalibration(samples: readonly Sample[], width: number, height: n
     const l = flexionProxy(s.left), r = flexionProxy(s.right);
     if (typeof f === 'string' || typeof h === 'string' || l === null || r === null) return [];
     const cx = source === 'heel-midpoint' ? h.x : (f.shoulderMid.x + f.hipMid.x) / 2;
-    return [{ s, cx, heelY: h.y, flex: Math.max(l, r) }];
+    return [{ s, cx, heelX: h.x, heelY: h.y, hipWidth: f.hipWidth, flex: Math.max(l, r) }];
   });
   let chosen = pool.filter(p => p.flex <= STANDING_MAX_KNEE_FLEXION_DEG);
   if (chosen.length < OFFLINE_CALIBRATION.minSamples) chosen = pool.filter(p => p.flex <= OFFLINE_CALIBRATION.relaxedMaxKneeFlexionDeg);
   if (chosen.length < OFFLINE_CALIBRATION.minSamples) return null;
   const median = (v: number[]) => { const a = [...v].sort((x, y) => x - y); return a[Math.floor(a.length / 2)]!; };
+  // The person stood in more than one place (stepped sideways): one whole-video line would be wrong for part of the clip.
+  const heelXs = chosen.map(c => c.heelX), scale = median(chosen.map(c => c.hipWidth));
+  if ((Math.max(...heelXs) - Math.min(...heelXs)) / scale > BASELINE_POLICY.relockDistanceHipWidths) return null;
   const x = median(chosen.map(c => c.cx)), heelY = median(chosen.map(c => c.heelY));
   const neutral = neutralFrom(chosen.map(c => gated(measureFrontal(c.s.landmarks, width, height, x, ratio), c.s)));
   return { baseline: { state: 'locked', x, heelY, lockedAtMs: chosen[0]!.s.sourceTimeMs }, neutral };

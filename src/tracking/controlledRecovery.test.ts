@@ -4,11 +4,16 @@ import {humanPose} from '../test/fixtures';
 import {gateAngle} from './gate';
 import {kneeAngle} from '../biomechanics/knee';
 const ref={x:0,y:0,width:640,height:360};
+/**
+ * Upper-body jump with the feet left in place (ADR-086): a whole-body teleport now counts as a
+ * different person and locks, so the bounded-recovery behaviour is exercised with planted feet.
+ */
+function jumped(dx:number){const p=humanPose(dx),feet=humanPose();for(const i of [27,28,29,30,31,32])p[i]={...feet[i]!};return p;}
 function initialized(controlledSingle=true){const t=createFullFrameIdentity(640,360,{controlledSingle});for(let i=0;i<16;i++)t.observe([humanPose()],i*200,ref);return t;}
 it('3.2s single-person jump is invalid until three strict confirmations and separate joint recovery',()=>{
  const t=initialized();const valid:boolean[]=[];
  for(let i=16;i<30;i++){
-  const p=humanPose(.14);p[26]!.visibility=.1; // One occluded knee must remain invalid, not prevent reliable left-side recovery.
+  const p=jumped(.14);p[26]!.visibility=.1; // One occluded knee must remain invalid, not prevent reliable left-side recovery.
   const r=t.observe([p],i*200,ref);
   valid.push(gateAngle(kneeAngle(p,'left',640,360),r.tracking,'left').valid);
   expect(r.tracking.state).not.toBe('MANUAL_REVIEW_REQUIRED');
@@ -34,8 +39,8 @@ it('timeout, large anchor displacement and explicit manual locks cannot auto-rec
  const manual=initialized();manual.requireManual('human-confirmation-needed');expect(manual.observe([humanPose()],3200,ref).tracking.accepted).toBe(false);
 });
 it('missing or unstable recovery observations reset confirmations; no interpolation is accepted',()=>{
- const t=initialized();t.observe([humanPose(.14)],3200,ref);t.observe([humanPose(.14)],3400,ref);
+ const t=initialized();t.observe([jumped(.14)],3200,ref);t.observe([jumped(.14)],3400,ref);
  expect(t.observe([],3600,ref).tracking.accepted).toBe(false);
- expect(t.observe([humanPose(.14)],3800,ref).tracking.recovery!.confirmations).toBe(0);
- expect(t.observe([humanPose(.14)],4000,ref).tracking.accepted).toBe(false);
+ expect(t.observe([jumped(.14)],3800,ref).tracking.recovery!.confirmations).toBe(0);
+ expect(t.observe([jumped(.14)],4000,ref).tracking.accepted).toBe(false);
 });

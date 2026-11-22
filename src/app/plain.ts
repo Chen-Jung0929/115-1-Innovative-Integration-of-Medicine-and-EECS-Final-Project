@@ -57,12 +57,13 @@ export const showFlexion = (angle: AngleValue | undefined, toFlexion: (a: AngleV
  * Tracked samples can still carry a non-blocking framing hint (head or feet cut off), shown next to the
  * posture prompts and instead of "stand still" when the cut feet keep the baseline from locking.
  */
-export type TrackingCause = 'rejected' | 'others' | 'no-person' | 'too-close' | 'head-cut' | 'feet-cut' | 'side-cut' | 'unclear' | 'lost-track' | 'confirming';
+export type TrackingCause = 'rejected' | 'others' | 'teleport' | 'no-person' | 'too-close' | 'head-cut' | 'feet-cut' | 'side-cut' | 'unclear' | 'lost-track' | 'confirming';
 export type NoticeMode = 'video' | 'live';
 interface CauseText { problem: string; video: string; live: string }
 export const TRACKING_TEXT: Record<TrackingCause, CauseText> = {
   'rejected': { problem: '已標記為不是個案', video: '這一格不判斷', live: '這一格不判斷' },
   'others': { problem: '畫面有其他人', video: '只留個案一人入鏡', live: '只留個案一人入鏡' },
+  'teleport': { problem: '可能換了人', video: '請用同一人、不剪接的影片', live: '請只留個案一人入鏡' },
   'no-person': { problem: '偵測不到人', video: '請讓頭到腳都入鏡（含頭頂）', live: '請讓頭到腳都入鏡（含頭頂）' },
   'too-close': { problem: '人離鏡頭太近', video: '手機往後移，頭到腳都入鏡', live: '請往後退，頭到腳都入鏡' },
   'head-cut': { problem: '頭沒有完整入鏡', video: '手機往後移，讓頭入鏡', live: '請往後退，讓頭入鏡' },
@@ -77,20 +78,22 @@ const EDGE = 0.02;
 const seen = (p: { x: number; y: number; visibility: number } | undefined) => !!p && Number.isFinite(p.x) && Number.isFinite(p.y) && p.visibility >= 0.5;
 
 /** Framing problem visible even when the person is tracked: head or feet cut by the frame edge. */
-export function framingHint(landmarks: readonly Landmark[]): 'head-cut' | 'feet-cut' | 'too-close' | null {
+export function framingHint(landmarks: readonly Landmark[], width = 1, height = 1): 'head-cut' | 'feet-cut' | 'too-close' | null {
   if (!landmarks.length) return null;
-  const head = headCutOff(landmarks), feet = feetCutOff(landmarks);
+  const head = headCutOff(landmarks, width, height), feet = feetCutOff(landmarks);
   return head && feet ? 'too-close' : head ? 'head-cut' : feet ? 'feet-cut' : null;
 }
 
-export function trackingCause(sample: Pick<Sample, 'landmarks' | 'tracking' | 'review'>): TrackingCause {
+export function trackingCause(sample: Pick<Sample, 'landmarks' | 'tracking' | 'review'>, width = 1, height = 1): TrackingCause {
   if (sample.review && sample.review.label !== 'correct-target') return 'rejected';
   const t = sample.tracking;
   if (t.reasons.some(r => r.startsWith('ambiguous'))) return 'others';
+  // Feet jumped to a new place / stance in one step (hard cut, person swap): ADR-086.
+  if (t.reasons.some(r => r.startsWith('feet-teleport'))) return 'teleport';
   const pts = sample.landmarks;
   if (!pts.length) return 'no-person';
   const at = (i: number) => pts[i];
-  const top = headCutOff(pts) || [11, 12].some(i => { const p = at(i); return !!p && Number.isFinite(p.y) && p.y < EDGE; });
+  const top = headCutOff(pts, width, height) || [11, 12].some(i => { const p = at(i); return !!p && Number.isFinite(p.y) && p.y < EDGE; });
   const ankles = [27, 28].map(at);
   const bottom = feetCutOff(pts) || ankles.every(p => !seen(p));
   if (top && bottom) return 'too-close';
@@ -132,7 +135,7 @@ export function lockedBannerText(cause: TrackingCause, mode: NoticeMode, sinceMs
  */
 export const NOTICE_HOLD_MS = 500;
 /** Causal (past-only) hold, shared by uploaded videos and the live camera. */
-export function createNoticeHold(mode: NoticeMode = 'video') {
+export function createNoticeHold(mode: NoticeMode = 'video', width = 1, height = 1) {
   let shown: TrackingNotice | null = null;
   let pending = null as { key: string; since: number } | null;
   let frozen: { cause: TrackingCause; since: number } | null = null;
@@ -143,7 +146,7 @@ export function createNoticeHold(mode: NoticeMode = 'video') {
       if (!locked) frozen = null;
       let raw: TrackingNotice | null = null;
       if (rejected || !s.tracking.accepted) {
-        let cause = trackingCause(s);
+        let cause = trackingCause(s, width, height);
         if (locked && !rejected) {
           frozen ??= { cause: shown && shown.cause !== 'confirming' ? shown.cause : cause === 'confirming' ? 'lost-track' : cause, since: s.sourceTimeMs };
           cause = frozen.cause;
@@ -151,7 +154,7 @@ export function createNoticeHold(mode: NoticeMode = 'video') {
         const isLock = locked && !rejected;
         raw = { cause, blocking: true, locked: isLock, ...(isLock ? { sinceMs: frozen!.since } : {}), text: noticeText(cause, isLock, mode) };
       } else {
-        const hint = framingHint(s.landmarks);
+        const hint = framingHint(s.landmarks, width, height);
         if (hint) raw = { cause: hint, blocking: false, locked: false, text: noticeText(hint, false, mode) };
       }
       const key = raw ? `${raw.blocking}|${raw.text}` : '';
@@ -166,8 +169,8 @@ export function createNoticeHold(mode: NoticeMode = 'video') {
     },
   };
 }
-export function trackingNotices(samples: readonly Sample[], mode: NoticeMode = 'video'): Map<number, TrackingNotice | null> {
-  const hold = createNoticeHold(mode);
+export function trackingNotices(samples: readonly Sample[], mode: NoticeMode = 'video', width = 1, height = 1): Map<number, TrackingNotice | null> {
+  const hold = createNoticeHold(mode, width, height);
   return new Map([...samples].sort((a, b) => a.sourceTimeMs - b.sourceTimeMs).map(s => [s.sampleIndex, hold.update(s)] as const));
 }
 

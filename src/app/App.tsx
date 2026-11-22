@@ -27,7 +27,7 @@ import { MANUAL_PITCH_RANGE, manualPitch, pitchLabel } from '../motion/devicePit
 import { Skeleton3D } from '../visualization/Skeleton3D';
 import { kneeToeNote, kneeToeValue, lockedBannerText, plainReason, qcStatus, showAngle, showFlexion, trackingNotices } from './plain';
 import { frontalTimeline, type BaselineSource } from '../motion/frontalTimeline';
-import { FrontalOverlay, FrontalCuePanel, FrontalLegend } from '../visualization/FrontalOverlay';
+import { FrontalOverlay, FrontalCuePanel, FrontalLegend, linesDrawn } from '../visualization/FrontalOverlay';
 import { CUE_POLICY } from '../motion/frontalCues';
 import { LivePanel } from './LivePanel';
 
@@ -193,7 +193,7 @@ export function App() {
   const heldGapS = held ? Math.abs(timeMs - (held.decode.timeBasis === 'presentation' ? held.sourceTimeMs : held.requestedTimeMs)) / 1000 : 0;
   const frontal = useMemo(() => session && info ? frontalTimeline(session.samples, info.width, info.height, baselineSource, obliqueRef) : [], [session, info, baselineSource, obliqueRef]);
   const frontalFrame = sample ? frontal.find(f => f.sampleIndex === sample.sampleIndex) : undefined;
-  const notices = useMemo(() => session ? trackingNotices(session.samples, 'video') : null, [session]);
+  const notices = useMemo(() => session ? trackingNotices(session.samples, 'video', session.metadata.sourceWidthPx, session.metadata.sourceHeightPx) : null, [session]);
   const trackNotice = sample ? notices?.get(sample.sampleIndex) ?? null : null;
   // While a seek is in flight there is no sample yet: keep the last prompt instead of flashing "no result".
   const lastCue = useRef<{ frame: typeof frontalFrame; hasSample: boolean; notice: typeof trackNotice } | null>(null);
@@ -243,7 +243,7 @@ export function App() {
     <section className="card" aria-labelledby="review-title">
       <div className="card-head"><h2 id="review-title">動作檢查</h2>
         <div className="toolbar">
-          <label className="switch"><input type="checkbox" role="switch" checked={frontalView} onChange={e=>setFrontalView(e.target.checked)} /><span>醫學組檢查線</span></label>
+          <label className="switch"><input type="checkbox" role="switch" checked={frontalView} onChange={e=>setFrontalView(e.target.checked)} /><span>姿勢檢查線</span></label>
           {frontalView && <label className="compact">基準線位置<select aria-label="基準線位置" value={baselineSource} onChange={e=>setBaselineSource(e.target.value as BaselineSource)}><option value="standing-trunk">站直時的軀幹中線（預設）</option><option value="heel-midpoint">兩腳跟中點</option></select></label>}
           {frontalView && <label className="switch"><input type="checkbox" role="switch" checked={obliqueRef} onChange={e=>setObliqueRef(e.target.checked)} /><span>斜角也顯示（僅供參考）</span></label>}
           <label className="compact">顯示側別<select value={side} onChange={e => setSide(e.target.value as typeof side)}><option value="both">左右都看</option><option value="left">只看左邊</option><option value="right">只看右邊</option></select></label>
@@ -263,8 +263,8 @@ export function App() {
       {experiments && selection && info && !selecting && <svg className="roi-border" viewBox={`0 0 ${info.width} ${info.height}`} aria-label="受測者 ROI 範圍"><rect {...(pipeline==='roi-crop'?(sample?.roi??displayedRoi(session?.samples??[],timeMs)??roiAt(selection,timeMs,info.width,info.height).roi):(sample?.targetReferenceRoi??selection.roi))} fill="none" stroke="#ffda57" strokeWidth={Math.max(2,info.width/250)} /></svg>}
       {!info && !loading && <p className="stage-empty">選擇影片後，畫面會出現在這裡</p>}</div>
         {frontalView && session && !selecting && <FrontalCuePanel {...cue} />}
-        {frontalView && session && !selecting && <FrontalLegend view={frontalFrame?.view} />}
-        {frontalView && session && !selecting && frontalFrame?.calibration==='whole-video' && !everStoodStill && <p className="muted small">這段影片裡沒有「站直不動 1 秒」的片段，基準線改用整段影片中站得最直的幾格來定。</p>}
+        {frontalView && session && !selecting && linesDrawn(frontalFrame) && <FrontalLegend view={frontalFrame?.view} />}
+        {frontalView && session && !selecting && frontalFrame?.calibration==='whole-video' && frontalFrame.view==='frontal' && !everStoodStill && <p className="muted small">這段影片裡沒有「站直不動 1 秒」的片段，基準線改用整段影片中站得最直的幾格來定。</p>}
         {session && !selecting && <Skeleton3D sample={drawn} points={pose3d} note={calibrationNote(lift3d?.context)} pitchText={pitchLabel(session.cameraPitch)}>
           <label className="compact pitch-input">拍攝時手機俯角（°）<input type="number" inputMode="decimal" min={MANUAL_PITCH_RANGE.min} max={MANUAL_PITCH_RANGE.max} step={1} placeholder="未提供" disabled={session.cameraPitch?.source === 'device-orientation'}
             value={session.cameraPitch ? String(Math.round(session.cameraPitch.deg)) : ''} onChange={e => { if (!storedSession) return; const p = manualPitch(e.target.value); const { cameraPitch: _old, ...rest } = storedSession; setSession(p ? { ...rest, cameraPitch: p } : rest); }} /></label>
@@ -272,7 +272,7 @@ export function App() {
         </Skeleton3D>}
         <div className="speed" role="group" aria-label="播放速度"><span className="muted small">播放速度</span><div className="segmented small-seg">{SPEEDS.map(r=><button key={r} aria-pressed={speed===r} onClick={()=>setSpeed(r)}>{r===1?'正常':`${r}×`}</button>)}</div></div>
         {session && <label className="scrub">逐格檢查<input aria-label="已分析取樣" type="range" min={0} max={session.samples.length-1} disabled={selecting} value={sampleIndex} onChange={e => jump(Number(e.target.value))} /><span className="muted">#{sampleIndex} / {session.samples.length-1}</span></label>}
-        <p className="muted small">來源影格時間：{(timeMs/1000).toFixed(3)} 秒。{held ? `顯示最近的分析影格（取樣 #${held.sampleIndex}，相差 ${heldGapS.toFixed(2)} 秒；影片每秒分析 ${hz} 次）` : sample ? `對應取樣 #${sample.sampleIndex}（${sample.decode.timeBasis}）` : '這附近沒有分析結果（可能在分析範圍外），骨架與角度不顯示。'}</p>
+        <p className="muted small">來源影格時間：{(timeMs/1000).toFixed(3)} 秒。{held ? `顯示最近的分析影格（取樣 #${held.sampleIndex}，相差 ${heldGapS.toFixed(2)} 秒；影片每秒分析 ${hz} 次）` : sample ? `對應取樣 #${sample.sampleIndex}` : '這附近沒有分析結果（可能在分析範圍外），骨架與角度不顯示。'}</p>
       </div><div className="readout">
         <div className="group"><h3 className="group-title">膝蓋</h3>{(frontalFrame?.clipView ?? frontalFrame?.view) === 'frontal' && <p className="muted small">正面拍攝會低估膝彎曲；膝角度以側面拍攝較準。</p>}<div className="measurements">
         {sides.map(s => {
@@ -300,7 +300,7 @@ export function App() {
       </div></div>
       <details className="fold"><summary>畫面上的線和數字代表什麼？</summary>
         <p>膝彎曲（大數字與曲線）= 180° − 膝角，站直約 0°，蹲越低越大（自訂，採臨床習慣）。膝角定義：髖–膝–踝於膝點的影像平面內角（0–180°）。暫定屈曲 proxy = 180° − 內角；不是已確認的臨床屈曲角。左右為人體解剖側，影片不鏡像。</p>
-        {frontalView && <p className="frontal-note">正面檢查說明：紅色直線是基準線。個案先站直、不動約 1 秒，系統以這段時間的軀幹中線（兩肩中點與兩髖中點）定出位置並固定；之後身體怎麼動線都不動，腳跟明顯移動才重新定位。也可切換成「兩腳跟中點」。拍攝角度太斜時預設不判斷；打開「斜角也顯示（僅供參考）」後斜角影片也會畫線與提示，但 2D 投影誤差大、僅供參考。黃線為目前的兩肩線、骨盆線（以髖關節代替 ASIS），白色虛線是「站直時」的肩線／骨盆線，兩條線張開代表變歪了；藍色虛線為軀幹，綠色虛線為過腳尖的鉛垂線；偏離時變紅並出現提示。綠色骨架在此模式下會淡化。左右指個案本身的左右。提示門檻為暫定值（頭 {CUE_POLICY.headHipWidths} 個骨盆寬、肩 {CUE_POLICY.shoulderDeg}°、軀幹 {CUE_POLICY.trunkDeg}°、骨盆 {CUE_POLICY.pelvisDeg}°、膝 {CUE_POLICY.kneeToeHipWidths} 個骨盆寬），待醫學組確認；只適用正面拍攝，皆為 2D 影像平面幾何。</p>}
+        {frontalView && <p className="frontal-note">正面檢查說明：紅色直線是基準線。個案先站直、不動約 1 秒，系統以這段時間的軀幹中線（兩肩中點與兩髖中點）定出位置並固定；之後身體怎麼動線都不動，腳跟明顯移動才重新定位。也可切換成「兩腳跟中點」。拍攝角度太斜時預設不判斷；打開「斜角也顯示（僅供參考）」後斜角影片也會畫線與提示，但 2D 投影誤差大、僅供參考。黃線為目前的兩肩線、骨盆線（以髖關節代替 ASIS），白色虛線是「站直時」的肩線／骨盆線，兩條線張開代表變歪了；藍色虛線為軀幹，綠色虛線為過腳尖的鉛垂線；偏離時變紅並出現提示。綠色骨架在此模式下會淡化。左右指個案本身的左右。提示門檻為暫定值（頭 {CUE_POLICY.headHipWidths} 個骨盆寬、肩 {CUE_POLICY.shoulderDeg}°、軀幹 {CUE_POLICY.trunkDeg}°、骨盆 {CUE_POLICY.pelvisDeg}°、膝 {CUE_POLICY.kneeToeHipWidths} 個骨盆寬），待治療師確認；只適用正面拍攝，皆為 2D 影像平面幾何。</p>}
         <p>姿勢指標定義：髖角 = 肩–髖–膝於髖點的影像平面內角（0–180°），暫定髖屈曲 proxy = 180° − 內角。上身（軀幹）前傾 = 兩髖中點→兩肩中點連線與畫面垂直線的夾角（0° = 直立；手機需擺正）。膝蓋對腳尖線 = 膝蓋離「過腳尖的鉛垂線」多遠，以骨盆寬為單位；+ = 膝在內側（膝蓋內夾），標準是在線上或微外側，且左右對稱；只適用正面拍攝。三者都是 2D 影像平面幾何，不是經驗證的臨床角度；點位不可靠時顯示 N/A，不補值。</p>
       </details>
     </section>
@@ -341,7 +341,7 @@ export function App() {
       <label><input type="checkbox" checked={diagnostic} onChange={e=>setDiagnostic(e.target.checked)} />顯示被拒絕骨架供人工檢查（紅色，不代表有效量測）</label>
       {session?.run && <p>結果管線：{PIPELINE_NAMES[session.run.pipeline.id]} · 模型 hash：{session.metadata.model.assetSha256.slice(0,16)} · session：{session.metadata.sessionId}</p>}
       {sample?.subjectDecision && <p>本影格選中候選：{sample.subjectDecision.selectedIndex===null?'N/A':sample.subjectDecision.selectedIndex+1}；候選編號僅限此影格，不是人物 ID。</p>}
-      {sample && <p role="status">人工判斷：{sample.review?.label??'尚未標註'} · 追蹤狀態：{sample.tracking.state} · 人物一致性：{sample.tracking.identity}（未經人工確認） · 點位信心：{sample.tracking.landmarkConfidence} · 幾何：{sample.tracking.plausibility} · 連續性：{sample.tracking.continuity} · 原因：{sample.tracking.reasons.join(', ')||'未觸發篩檢警示；仍可能選錯或混合人物'}</p>}
+      {sample && <p role="status">影格時間來源：{sample.decode.timeBasis} · 人工判斷：{sample.review?.label??'尚未標註'} · 追蹤狀態：{sample.tracking.state} · 人物一致性：{sample.tracking.identity}（未經人工確認） · 點位信心：{sample.tracking.landmarkConfidence} · 幾何：{sample.tracking.plausibility} · 連續性：{sample.tracking.continuity} · 原因：{sample.tracking.reasons.join(', ')||'未觸發篩檢警示；仍可能選錯或混合人物'}</p>}
     {session && <ReviewPanel session={session} sample={sample} onReview={(index,review)=>{if(!storedSession)return;const next={...storedSession,samples:storedSession.samples.map(s=>s.sampleIndex===index?applyReview(s,review):s)};setSession(next);setComparison(previous=>previous?{...previous,entries:previous.entries.map(e=>e.session?.metadata.sessionId===next.metadata.sessionId?{...e,session:next}:e)}:null);}} />}
     </details>
     </div>

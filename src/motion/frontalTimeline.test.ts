@@ -31,13 +31,28 @@ describe('frontal timeline over analysed samples', () => {
     expect(t[0]!.metrics.trunkSide.invalidReasons).toEqual(['target-lost']);
   });
   it('head cut off by the frame: no head check or head neutral, the other checks still calibrate (ADR-085)', () => {
-    const cut = (lean = 0) => { const p = pose(lean); for (const i of [0, 2, 5]) p[i] = { ...p[i]!, y: .03 }; return p; };
+    const cut = (lean = 0) => { const p = pose(lean); for (const i of [0, 2, 5]) p[i] = { ...p[i]!, y: .01 }; return p; };
     const t = frontalTimeline([0, 1, 2, 3, 4, 5].map(i => at(i, cut())).concat([6, 7, 8].map(i => at(i, cut(.08)))), 100, 100);
     expect(t[5]!.calibration).toBe('standing-lock');
     expect(t[5]!.metrics.head.invalidReasons).toEqual(['out-of-frame']);
     expect(t[5]!.metrics.trunkSide.valid).toBe(true);
     expect(t[8]!.cues.map(c => c.id)).toContain('trunk');
     expect(t.flatMap(f => f.cues).some(c => c.id === 'head')).toBe(false);
+  });
+  it('a sideways step relocks: no stale or whole-video baseline, no shift prompts until standing still again', () => {
+    const stepped = () => { const p = pose(); for (const i of [11, 12, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 0, 2, 5]) p[i] = { ...p[i]!, x: p[i]!.x + .2 }; return p; };
+    const t = frontalTimeline([0, 1, 2, 3, 4, 5].map(i => at(i, pose())).concat([6, 7, 8, 9, 10].map(i => at(i, stepped()))), 100, 100);
+    expect(t[5]!.baseline.state).toBe('locked');
+    expect(t[10]!.baseline.state).toBe('searching'); // feet moved > 0.35 hip widths for ≥ 600 ms
+    expect(t[10]!.calibration).toBeNull();
+    expect(t.slice(6).flatMap(f => f.cues).some(c => c.id === 'shift' || c.id === 'head')).toBe(false);
+  });
+  it('an identity lock forgets the standing reference', () => {
+    const locked = { ...makeSample().tracking, accepted: false, state: 'MANUAL_REVIEW_REQUIRED' as const, identity: 'identity-uncertain' as const };
+    const t = frontalTimeline([0, 1, 2, 3, 4, 5].map(i => at(i, pose())).concat([at(6, pose(), { tracking: locked }), at(7, pose())]), 100, 100);
+    expect(t[5]!.baseline.state).toBe('locked');
+    expect(t[7]!.baseline.state).toBe('searching');
+    expect(t[7]!.neutral).toBeNull();
   });
   it('keeps the analysed sample index for each frame', () => {
     const t = frontalTimeline([at(1, pose()), at(0, pose())], 100, 100);

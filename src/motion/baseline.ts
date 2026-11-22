@@ -48,6 +48,8 @@ export function createBaselineAnchor(policy: typeof BASELINE_POLICY = BASELINE_P
   let current: BaselineState = SEARCHING;
   let lastSeenMs: number | null = null;
   let awaySinceMs: number | null = null;
+  /** Heel-midpoint x when the lock was made: the feet are compared with this, not with the line (which may be the trunk midline). */
+  let lockedHeelX: number | null = null;
 
   function update(o: BaselineObservation): BaselineState {
     const usable = o.heel && o.hipWidthPx && o.hipWidthPx > 0 && [o.heel.x, o.heel.y, o.hipWidthPx, o.timeMs].every(Number.isFinite);
@@ -60,7 +62,7 @@ export function createBaselineAnchor(policy: typeof BASELINE_POLICY = BASELINE_P
     lastSeenMs = o.timeMs;
 
     if (current.state === 'locked') {
-      if (Math.abs(obs.x - current.x) / obs.scale <= policy.relockDistanceHipWidths) { awaySinceMs = null; return current; }
+      if (Math.abs(obs.x - (lockedHeelX ?? current.x)) / obs.scale <= policy.relockDistanceHipWidths) { awaySinceMs = null; return current; }
       awaySinceMs ??= o.timeMs;
       if (o.timeMs - awaySinceMs < policy.relockHoldMs) return current;
       // Feet moved: search again, seeded with this observation.
@@ -83,9 +85,12 @@ export function createBaselineAnchor(policy: typeof BASELINE_POLICY = BASELINE_P
       const x = window.reduce((s, w) => s + w.cx, 0) / window.length;
       const heelY = window.reduce((s, w) => s + w.y, 0) / window.length;
       current = { state: 'locked', x, heelY, lockedAtMs: obs.timeMs };
+      lockedHeelX = window.reduce((s, w) => s + w.x, 0) / window.length;
       window = [];
     }
     return current;
   }
-  return { update, reset: () => { window = []; current = SEARCHING; lastSeenMs = null; awaySinceMs = null; } };
+  /** Feet currently away from where the lock was made (waiting out relockHoldMs). */
+  const away = () => current.state === 'locked' && awaySinceMs !== null;
+  return { update, away, reset: () => { window = []; current = SEARCHING; lastSeenMs = null; awaySinceMs = null; lockedHeelX = null; } };
 }

@@ -126,7 +126,7 @@ export function LivePanel({ model, allowDownload, side, onSide, disabled }: { mo
     if (runInfo.current) runInfo.current = { ...runInfo.current, selection, width, height };
     analyzer.current = createLiveAnalyzer(width, height, selection);
     segmentStart.current = performance.now(); lastSampleMs.current = null; pitchRec.current.reset();
-    noticeHold.current = createNoticeHold('live'); setLiveNotice(null);
+    noticeHold.current = createNoticeHold('live', width, height); setLiveNotice(null);
     setSample(undefined); setRecent([]); setMeasuring(true); setLivePerf(null);
   }
 

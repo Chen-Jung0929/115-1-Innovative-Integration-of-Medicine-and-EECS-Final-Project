@@ -1,5 +1,5 @@
 import {describe,expect,it} from 'vitest';
-import {createFullFrameIdentity,plantedContinuity} from './identity';
+import {createFullFrameIdentity,feetStep,plantedContinuity} from './identity';
 import type {Landmark} from '../domain/analysis';
 const W=720,H=1280,ref={x:0,y:0,width:W,height:H};
 /**
@@ -45,7 +45,7 @@ describe('planted feet keep a squatting person tracked (planted-feet-continuity-
   for(let i=20;i<60;i++){const r=t.observe([person(0,{dx:120,shank:180,scale:1.6})],i*100,ref);expect(r.tracking.accepted,`t=${i*100}`).toBe(false);states.push(r.tracking.state);}
   expect(states.at(-1)).toBe('MANUAL_REVIEW_REQUIRED');
   // Same feet position but a clearly different shank is not "the same planted feet" either.
-  expect(plantedContinuity(person(0,{shank:180}),person(0),W,H)).toBe(false);
+  expect(plantedContinuity(person(0,{shank:200}),person(0),W,H)).toBe(false);
   expect(plantedContinuity(person(0,{dx:60}),person(0),W,H)).toBe(false);
   expect(plantedContinuity(person(1),person(0),W,H)).toBe(true);
  });
@@ -67,5 +67,38 @@ describe('planted feet keep a squatting person tracked (planted-feet-continuity-
   for(let i=0;i<20;i++)m.observe([person(0)],i*100,ref);
   expect(m.observe([person(0),person(0,{dx:250})],2000,ref).tracking.state).toBe('MANUAL_REVIEW_REQUIRED');
   for(let i=21;i<40;i++)expect(m.observe([person(0)],i*100,ref).tracking.accepted).toBe(false);
+ });
+});
+
+describe('a hard cut to another person locks (feet chain, ADR-086)', ()=>{
+ it('swap_cut: different person, similar place and size, wider stance → locks at the 2nd frame, never recovers', ()=>{
+  const t=createFullFrameIdentity(W,H,{controlledSingle:true});
+  for(let i=0;i<40;i++)expect(t.observe([person(0,{hipWidth:50})],i*100,ref).tracking.accepted).toBe(true);
+  // Person B: torso 40 px left, stance 110 px wide, shank 104 px (reviewer clip: heels 445/396 → 395/286 px).
+  const B=()=>person(0,{dx:-40,hipWidth:110,shank:104});
+  const first=t.observe([B()],4000,ref).tracking;
+  expect(first.accepted).toBe(false);expect(first.reasons).toContain('feet-teleport-pending');
+  const second=t.observe([B()],4100,ref).tracking;
+  expect(second.state).toBe('MANUAL_REVIEW_REQUIRED');expect(second.reasons).toContain('feet-teleport');
+  for(let i=42;i<90;i++)expect(t.observe([B()],i*100,ref).tracking.accepted,`t=${i*100}`).toBe(false);
+ });
+ it('a whole-body teleport of the same build locks too; only feet back where they were can lift it', ()=>{
+  const t=createFullFrameIdentity(W,H,{controlledSingle:true});
+  for(let i=0;i<20;i++)t.observe([person(0)],i*100,ref);
+  t.observe([person(0,{dx:150})],2000,ref);
+  expect(t.observe([person(0,{dx:150})],2100,ref).tracking.state).toBe('MANUAL_REVIEW_REQUIRED');
+  for(let i=22;i<40;i++)expect(t.observe([person(0,{dx:150})],i*100,ref).tracking.accepted).toBe(false);
+  const back=[40,41,42,43,44,45].map(i=>t.observe([person(0)],i*100,ref).tracking);
+  expect(back[5]!.accepted).toBe(true);
+ });
+ it('a one-frame foot glitch (both feet collapsed) does not lock', ()=>{
+  const t=createFullFrameIdentity(W,H,{controlledSingle:true});
+  for(let i=0;i<20;i++)t.observe([person(0)],i*100,ref);
+  const glitch=person(0);for(const i of [27,28,29,30])glitch[i]={...glitch[i]!,x:.5};
+  expect(t.observe([glitch],2000,ref).tracking.accepted).toBe(false);
+  for(let i=21;i<30;i++)expect(t.observe([person(0)],i*100,ref).tracking.state).not.toBe('MANUAL_REVIEW_REQUIRED');
+  expect(t.observe([person(0)],3000,ref).tracking.accepted).toBe(true);
+  expect(feetStep(person(1),person(0),W,H)).toBe('continuous');
+  expect(feetStep(person(0,{hipWidth:110}),person(0,{hipWidth:50}),W,H)).toBe('teleport');
  });
 });

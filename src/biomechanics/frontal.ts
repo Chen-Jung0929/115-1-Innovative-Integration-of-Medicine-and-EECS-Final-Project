@@ -61,16 +61,28 @@ export function heelMidpoint(landmarks: readonly Landmark[], width: number, heig
 }
 
 /**
- * frame-edge-hints-v1 (ADR-085, normalized image coordinates). When the head is above the frame,
+ * frame-edge-hints-v2 (ADR-085/086, normalized image coordinates). When the head is above the frame,
  * MediaPipe does not put the face points outside the image: it squashes them just inside the top edge
- * (lab_headcut: nose 0.064, ears 0.04; squats cropped 320 px: nose ≈ 0.0). Face points of fully framed
- * people sat at ≥ 0.22 in every test clip, so any face point (0–10) above HEAD_CUT_MAX_FACE_Y means
- * the head is cut. Feet: any ankle/heel/toe below FEET_CUT_MIN_Y, or both heels unreliable.
+ * (lab_headcut: nose 0.064, ears 0.04; squats cropped 320 px: nose ≈ 0.0). A tall person whose hair
+ * touches the edge also has face points near the top (tall_top: eyes 0.059) but a normal neck, so the
+ * head counts as cut when any face point (0–10) is above 0.03, or when a face point is above 0.08 AND
+ * the nose sits less than 0.25 torso lengths (shoulder-mid to hip-mid, image) above the shoulder line
+ * (normal ≥ 0.37 in every full-body clip; lab_headcut median 0.125). Feet: any ankle/heel/toe below
+ * 0.98, or both heels unreliable.
  */
-export const FRAME_EDGE_POLICY = { version: 'frame-edge-hints-v1', headCutMaxFaceY: 0.06, feetCutMinY: 0.98, minVisibility: 0.5 } as const;
+export const FRAME_EDGE_POLICY = { version: 'frame-edge-hints-v2', headCutMaxFaceY: 0.03, headNearTopMaxFaceY: 0.08, minNoseShoulderTorso: 0.25, feetCutMinY: 0.98, minVisibility: 0.5 } as const;
 const fin = (p: Landmark | undefined): p is Landmark => !!p && Number.isFinite(p.x) && Number.isFinite(p.y);
-export function headCutOff(landmarks: readonly Landmark[]): boolean {
-  return landmarks.slice(0, 11).some(p => fin(p) && p.y < FRAME_EDGE_POLICY.headCutMaxFaceY);
+export function headCutOff(landmarks: readonly Landmark[], width = 1, height = 1): boolean {
+  const face = landmarks.slice(0, 11).filter(fin);
+  if (!face.length) return false;
+  const top = Math.min(...face.map(p => p.y));
+  if (top < FRAME_EDGE_POLICY.headCutMaxFaceY) return true;
+  if (top >= FRAME_EDGE_POLICY.headNearTopMaxFaceY) return false;
+  const [ls, rs, lh, rh, nose] = [11, 12, 23, 24, 0].map(i => landmarks[i]);
+  if (![ls, rs, lh, rh, nose].every(fin)) return false;
+  const sx = (ls!.x + rs!.x) / 2 * width, sy = (ls!.y + rs!.y) / 2 * height, hx = (lh!.x + rh!.x) / 2 * width, hy = (lh!.y + rh!.y) / 2 * height;
+  const torso = Math.hypot(sx - hx, sy - hy);
+  return torso > 0 && (sy - nose!.y * height) / torso < FRAME_EDGE_POLICY.minNoseShoulderTorso;
 }
 export function feetCutOff(landmarks: readonly Landmark[]): boolean {
   if (!landmarks.length) return false;
@@ -126,7 +138,7 @@ export function measureFrontal(landmarks: readonly Landmark[], width: number, he
   const up = f.hipMid.y - f.shoulderMid.y;
   return {
     // A cut-off head has squashed face points: no head check (it would read as a false sideways offset).
-    head: headCutOff(landmarks) ? bad('out-of-frame') : typeof head === 'string' ? bad(head) : fromBaseline(head.x),
+    head: headCutOff(landmarks, width, height) ? bad('out-of-frame') : typeof head === 'string' ? bad(head) : fromBaseline(head.x),
     shoulderTilt: ok(tilt(f.ls, f.rs)),
     trunkSide: up <= 0 ? bad('degenerate-geometry') : ok(Math.atan2((f.shoulderMid.x - f.hipMid.x) * f.leftDir, up) * DEG),
     shift: fromBaseline(f.hipMid.x),

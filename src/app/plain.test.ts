@@ -39,6 +39,7 @@ describe('why the person was not tracked (tracking-notice-v1)', () => {
       ['confirming', untracked(humanPose(), { reasons: ['identity-recovery-confirmation-pending'] })],
       ['lost-track', untracked(humanPose(), { reasons: ['target-not-continuous'] })],
       ['rejected', makeSample({ review: { label: 'wrong-target', identityId: 'x', reviewerId: 'r' } })],
+      ['teleport', untracked(humanPose(), { state: 'MANUAL_REVIEW_REQUIRED', reasons: ['feet-teleport', 'manual-reselection-required'] })],
     ];
     for (const [want, s] of cases) expect(trackingCause(s), want).toBe(want);
     expect(noticeText('head-cut', false, 'video')).toBe('頭沒有完整入鏡：手機往後移，讓頭入鏡');
@@ -56,6 +57,7 @@ describe('why the person was not tracked (tracking-notice-v1)', () => {
         expect(text).not.toMatch(/[a-z]{3,}|講義|p\.\d/);
         expect(text.length, text).toBeLessThanOrEqual(19); // one line in the 390 px phone prompt box
         if (c !== 'others') expect(text).not.toMatch(/其他人|擋住/);
+        if (c !== 'teleport') expect(text).not.toMatch(/換了人/);
       }
     }
   });
@@ -95,6 +97,11 @@ describe('framing hints on tracked frames and the knee-to-toe note', () => {
     expect(framingHint(head)).toBe('head-cut');
     expect(framingHint(moved([[29, { y: 1.08 }], [30, { y: 1.1 }]]))).toBe('feet-cut');
     expect(framingHint(humanPose())).toBeNull();
+    // tall_top: hair touches the top edge, eyes at 0.059, but the neck is normal → not a cut head.
+    const tall = moved([[0, { y: 0.071 }], [2, { y: 0.059 }], [5, { y: 0.059 }], [11, { y: 0.18 }], [12, { y: 0.18 }], [23, { y: 0.45 }], [24, { y: 0.45 }]]);
+    expect(framingHint(tall, 720, 1280)).toBeNull();
+    // Real head cut (lab_headcut): face squashed to the top, nose just above the shoulders.
+    expect(framingHint(moved([[0, { y: 0.064 }], [7, { y: 0.04 }], [11, { y: 0.083 }], [12, { y: 0.083 }]]), 720, 1280)).toBe('head-cut');
     const n = trackingNotices([makeSample({ landmarks: head, sourceTimeMs: 0, sampleIndex: 0 })]);
     expect(n.get(0)).toMatchObject({ cause: 'head-cut', blocking: false });
   });
