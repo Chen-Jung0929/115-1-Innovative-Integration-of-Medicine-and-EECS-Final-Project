@@ -108,21 +108,27 @@ export function FrontalOverlay({ sample, frame, width, height }: { sample: Sampl
   return <canvas ref={ref} width={width} height={height} className="frontal-layer" aria-label="醫學組檢查疊圖：點位、基準線與檢查線" />;
 }
 
-/** Plain-language prompt box shown over the video. */
+/** Plain-language prompt box shown under the video (it used to cover the head and the baseline label). */
 export function FrontalCuePanel({ frame, hasSample, notice }: { frame: FrontalFrame | undefined; hasSample: boolean; notice?: TrackingNotice | null }) {
+  const cueList = (cues: FrontalFrame['cues']) => <ul>{cues.map(c => <li key={c.id}>⚠ {c.text}</li>)}</ul>;
   let body: ReactNode;
+  let hintUsed = false;
   if (!hasSample || !frame) body = <p className="cue-muted">此影格沒有分析結果</p>;
   // Why the person is not tracked, held ≥ 0.5 s so it cannot flicker (src/app/plain.ts trackingNotices).
-  else if (notice) body = <p className="cue-muted">{notice.text}</p>;
+  else if (notice?.blocking) { body = <p className="cue-muted">{notice.text}</p>; hintUsed = true; }
   else if (!frame.tracked) body = <p className="cue-muted">這一格看不清楚個案，暫不判斷</p>;
   else if (frame.view === 'oblique') body = <p className="cue-muted">{frame.clipView === 'oblique' ? '這支影片是斜角拍攝：醫學組檢查線只適用正面或正側面，膝、髖角度仍可參考（可打開「斜角也顯示（僅供參考）」）' : '身體轉得太斜，先不判斷（正面或正側面拍才準）'}</p>;
-  else if (frame.view === 'side') body = frame.cues.length ? <ul>{frame.cues.map(c => <li key={c.id}>⚠ {c.text}</li>)}</ul> : <p className="cue-ok">✓ 側面：膝蓋與上身在範圍內</p>;
+  else if (frame.view === 'side') body = frame.cues.length ? cueList(frame.cues) : <p className="cue-ok">✓ 側面：膝蓋與上身在範圍內</p>;
   else if (frame.view !== 'frontal') body = <p className="cue-muted">看不清楚軀幹點位，暫不判斷</p>;
-  else if (frame.approximate && frame.baseline.state === 'locked') body = <><p className="cue-muted">斜角拍攝，僅供參考（2D 投影會有誤差）</p>{frame.cues.length ? <ul>{frame.cues.map(c => <li key={c.id}>⚠ {c.text}</li>)}</ul> : <p className="cue-ok">✓ 姿勢在基準線附近</p>}</>;
+  else if (frame.approximate && frame.baseline.state === 'locked') body = <><p className="cue-muted">斜角拍攝，僅供參考（2D 投影會有誤差）</p>{frame.cues.length ? cueList(frame.cues) : <p className="cue-ok">✓ 姿勢在基準線附近</p>}</>;
+  // Cut-off feet keep the baseline from locking: say that instead of asking to stand still.
+  else if (frame.baseline.state !== 'locked' && notice && notice.cause !== 'head-cut') { body = <p className="cue-muted">{notice.text}</p>; hintUsed = true; }
   else if (frame.baseline.state !== 'locked') body = <p className="cue-muted">還找不到站直的畫面：請個案先站直、不動約 1 秒，才能畫基準線</p>;
   else if (frame.cues.length === 0) body = <p className="cue-ok">✓ 姿勢在基準線附近</p>;
-  else body = <ul>{frame.cues.map(c => <li key={c.id}>⚠ {c.text}</li>)}</ul>;
-  return <div className="cue-panel" role="status" aria-live="polite">{body}</div>;
+  else body = cueList(frame.cues);
+  // Framing hint (head or feet cut off) on a tracked frame: shown above the prompts, which still apply.
+  const hint = notice && !notice.blocking && !hintUsed && frame?.tracked ? <p className="cue-hint">{notice.text}</p> : null;
+  return <div className="cue-panel" role="status" aria-live="polite">{hint}{body}</div>;
 }
 
 /** Colour key for the frontal overlay. */

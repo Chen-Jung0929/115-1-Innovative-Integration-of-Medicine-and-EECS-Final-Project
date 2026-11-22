@@ -60,6 +60,25 @@ export function heelMidpoint(landmarks: readonly Landmark[], width: number, heig
   return typeof p === 'string' ? p : mid(p[0]!, p[1]!);
 }
 
+/**
+ * frame-edge-hints-v1 (ADR-085, normalized image coordinates). When the head is above the frame,
+ * MediaPipe does not put the face points outside the image: it squashes them just inside the top edge
+ * (lab_headcut: nose 0.064, ears 0.04; squats cropped 320 px: nose ≈ 0.0). Face points of fully framed
+ * people sat at ≥ 0.22 in every test clip, so any face point (0–10) above HEAD_CUT_MAX_FACE_Y means
+ * the head is cut. Feet: any ankle/heel/toe below FEET_CUT_MIN_Y, or both heels unreliable.
+ */
+export const FRAME_EDGE_POLICY = { version: 'frame-edge-hints-v1', headCutMaxFaceY: 0.06, feetCutMinY: 0.98, minVisibility: 0.5 } as const;
+const fin = (p: Landmark | undefined): p is Landmark => !!p && Number.isFinite(p.x) && Number.isFinite(p.y);
+export function headCutOff(landmarks: readonly Landmark[]): boolean {
+  return landmarks.slice(0, 11).some(p => fin(p) && p.y < FRAME_EDGE_POLICY.headCutMaxFaceY);
+}
+export function feetCutOff(landmarks: readonly Landmark[]): boolean {
+  if (!landmarks.length) return false;
+  const feet = [27, 28, 29, 30, 31, 32].map(i => landmarks[i]);
+  if (feet.some(p => fin(p) && p.y > FRAME_EDGE_POLICY.feetCutMinY)) return true;
+  return [29, 30].every(i => { const p = landmarks[i]; return !fin(p) || !(p.visibility >= FRAME_EDGE_POLICY.minVisibility); });
+}
+
 /** Head reference point: eye midpoint (≈ 眉心) when both eyes are reliable, otherwise the nose. */
 export function headPoint(landmarks: readonly Landmark[], width: number, height: number): Point | InvalidReason {
   const eyes = sourcePoints(landmarks, [FRONTAL_LANDMARKS.leftEye, FRONTAL_LANDMARKS.rightEye], width, height);
@@ -106,7 +125,8 @@ export function measureFrontal(landmarks: readonly Landmark[], width: number, he
   const head = headPoint(landmarks, width, height);
   const up = f.hipMid.y - f.shoulderMid.y;
   return {
-    head: typeof head === 'string' ? bad(head) : fromBaseline(head.x),
+    // A cut-off head has squashed face points: no head check (it would read as a false sideways offset).
+    head: headCutOff(landmarks) ? bad('out-of-frame') : typeof head === 'string' ? bad(head) : fromBaseline(head.x),
     shoulderTilt: ok(tilt(f.ls, f.rs)),
     trunkSide: up <= 0 ? bad('degenerate-geometry') : ok(Math.atan2((f.shoulderMid.x - f.hipMid.x) * f.leftDir, up) * DEG),
     shift: fromBaseline(f.hipMid.x),

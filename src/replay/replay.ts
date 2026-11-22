@@ -2,7 +2,7 @@ import type {Landmark,Sample,Session} from '../domain/analysis';
 import {QC_POLICY,ANALYSIS_SCHEMA_VERSION} from '../domain/analysis';
 import {kneeObservation} from '../biomechanics/jointQuality';
 import {kneeAngle} from '../biomechanics/knee';
-import {createFullFrameIdentity,IDENTITY_POLICY,SINGLE_RECOVERY_POLICY} from '../tracking/identity';
+import {createFullFrameIdentity,IDENTITY_POLICY,PLANTED_FEET_POLICY,SINGLE_RECOVERY_POLICY} from '../tracking/identity';
 import {createTargetTracker} from '../tracking/target';
 import {createFullFrameIdentity as legacyIdentity,IDENTITY_POLICY as LEGACY_IDENTITY_POLICY} from '../tracking/legacy/identity';
 import {createTargetTracker as legacyTarget,TRACKING_POLICY as LEGACY_TRACKING_POLICY} from '../tracking/legacy/target';
@@ -66,7 +66,7 @@ export function replaySession(original:Session,strategy:ReplayStrategy):ReplayRe
   // Original inference timing belongs to the parent; replay is not a new MediaPipe run.
   delete session.run;
   session.qcReplay={strategy,originalSessionId:original.metadata.sessionId,usesSavedObservations:true,...(original.run?{detectionRun:structuredClone(original.run)}:{})};
-  session.trackingPolicy=legacy?{...LEGACY_TRACKING_POLICY,identityPolicy:crop?'legacy-roi-controller':LEGACY_IDENTITY_POLICY,replayStrategy:strategy}:{...TRACKING_POLICY,identityPolicy:IDENTITY_POLICY,...Object.fromEntries(Object.entries(SINGLE_RECOVERY_POLICY).map(([key,value])=>[`controlled_${key}`,value])),jointPolicy:JOINT_POLICY.version,jointRecoveryConfirmations:confirmations,...Object.fromEntries(Object.entries(JOINT_POLICY).map(([key,value])=>[`joint_${key}`,key==='recoveryConfirmations'?confirmations:value])),replayStrategy:strategy};
+  session.trackingPolicy=legacy?{...LEGACY_TRACKING_POLICY,identityPolicy:crop?'legacy-roi-controller':LEGACY_IDENTITY_POLICY,replayStrategy:strategy}:{...TRACKING_POLICY,identityPolicy:IDENTITY_POLICY,...Object.fromEntries(Object.entries(SINGLE_RECOVERY_POLICY).map(([key,value])=>[`controlled_${key}`,value])),...Object.fromEntries(Object.entries(PLANTED_FEET_POLICY).map(([key,value])=>[`planted_${key}`,value])),jointPolicy:JOINT_POLICY.version,jointRecoveryConfirmations:confirmations,...Object.fromEntries(Object.entries(JOINT_POLICY).map(([key,value])=>[`joint_${key}`,key==='recoveryConfirmations'?confirmations:value])),replayStrategy:strategy};
   return {strategy,session,changes,originalSessionId:original.metadata.sessionId};
 }
 

@@ -30,6 +30,15 @@ describe('frontal timeline over analysed samples', () => {
     expect(t.every(f => f.baseline.state === 'searching' && f.cues.length === 0)).toBe(true);
     expect(t[0]!.metrics.trunkSide.invalidReasons).toEqual(['target-lost']);
   });
+  it('head cut off by the frame: no head check or head neutral, the other checks still calibrate (ADR-085)', () => {
+    const cut = (lean = 0) => { const p = pose(lean); for (const i of [0, 2, 5]) p[i] = { ...p[i]!, y: .03 }; return p; };
+    const t = frontalTimeline([0, 1, 2, 3, 4, 5].map(i => at(i, cut())).concat([6, 7, 8].map(i => at(i, cut(.08)))), 100, 100);
+    expect(t[5]!.calibration).toBe('standing-lock');
+    expect(t[5]!.metrics.head.invalidReasons).toEqual(['out-of-frame']);
+    expect(t[5]!.metrics.trunkSide.valid).toBe(true);
+    expect(t[8]!.cues.map(c => c.id)).toContain('trunk');
+    expect(t.flatMap(f => f.cues).some(c => c.id === 'head')).toBe(false);
+  });
   it('keeps the analysed sample index for each frame', () => {
     const t = frontalTimeline([at(1, pose()), at(0, pose())], 100, 100);
     expect(t.map(f => f.sampleIndex)).toEqual([0, 1]);

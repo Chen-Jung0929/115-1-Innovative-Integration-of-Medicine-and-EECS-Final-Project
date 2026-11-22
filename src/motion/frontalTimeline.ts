@@ -197,6 +197,8 @@ function neutralFrom(ms: FrontalMetrics[]): Neutral | null {
   const out = {} as Neutral;
   for (const k of TILTS) {
     const vals = ms.map(m => m[k]).filter(v => v.valid).map(v => v.value!);
+    // Head out of frame while standing: no head neutral (head check stays N/A), the rest still calibrates.
+    if (!vals.length && k === 'head') { out[k] = Number.NaN; continue; }
     if (!vals.length) return null;
     out[k] = vals.reduce((a, b) => a + b, 0) / vals.length;
   }
@@ -206,7 +208,7 @@ function relative(m: FrontalMetrics, n: Neutral | null): FrontalMetrics {
   const out = { ...m };
   for (const k of TILTS) {
     const v = m[k];
-    out[k] = !v.valid ? v : n === null ? blocked('baseline-pending') : { valid: true, value: v.value - n[k], invalidReasons: [] };
+    out[k] = !v.valid ? v : n === null ? blocked('baseline-pending') : Number.isNaN(n[k]) ? blocked('out-of-frame') : { valid: true, value: v.value - n[k], invalidReasons: [] };
   }
   return out;
 }

@@ -25,7 +25,7 @@ import { Metric } from './Metric';
 import { calibrationNote, liftSession, poseAt, sessionFlexion } from '../motion/world3d';
 import { MANUAL_PITCH_RANGE, manualPitch, pitchLabel } from '../motion/devicePitch';
 import { Skeleton3D } from '../visualization/Skeleton3D';
-import { lockedBannerText, plainReason, qcStatus, showAngle, showFlexion, trackingNotices } from './plain';
+import { kneeToeNote, kneeToeValue, lockedBannerText, plainReason, qcStatus, showAngle, showFlexion, trackingNotices } from './plain';
 import { frontalTimeline, type BaselineSource } from '../motion/frontalTimeline';
 import { FrontalOverlay, FrontalCuePanel, FrontalLegend } from '../visualization/FrontalOverlay';
 import { CUE_POLICY } from '../motion/frontalCues';
@@ -195,6 +195,12 @@ export function App() {
   const frontalFrame = sample ? frontal.find(f => f.sampleIndex === sample.sampleIndex) : undefined;
   const notices = useMemo(() => session ? trackingNotices(session.samples, 'video') : null, [session]);
   const trackNotice = sample ? notices?.get(sample.sampleIndex) ?? null : null;
+  // While a seek is in flight there is no sample yet: keep the last prompt instead of flashing "no result".
+  const lastCue = useRef<{ frame: typeof frontalFrame; hasSample: boolean; notice: typeof trackNotice } | null>(null);
+  const cue = seeking && lastCue.current ? lastCue.current : { frame: frontalFrame, hasSample: !!sample, notice: trackNotice };
+  if (!seeking) lastCue.current = cue;
+  // The whole-video calibration note is only true when the clip never had a live standing lock.
+  const everStoodStill = useMemo(() => frontal.some(f => f.calibration === 'standing-lock'), [frontal]);
   const pct = (s: 'left' | 'right') => { const value = session ? coverage(session.samples, s) : null; return value === null ? 'N/A' : `${(value * 100).toFixed(1)}%`; };
 
   const knee = (s: 'left' | 'right') => sample?.[s];
@@ -243,7 +249,7 @@ export function App() {
           <label className="compact">顯示側別<select value={side} onChange={e => setSide(e.target.value as typeof side)}><option value="both">左右都看</option><option value="left">只看左邊</option><option value="right">只看右邊</option></select></label>
         </div>
       </div>
-      {sample?.tracking.state==='MANUAL_REVIEW_REQUIRED'&&<aside className="banner warn">{lockedBannerText(trackNotice?.cause ?? 'lost-track', 'video')}</aside>}
+      {sample?.tracking.state==='MANUAL_REVIEW_REQUIRED'&&<aside className="banner warn">{lockedBannerText(trackNotice?.cause ?? 'lost-track', 'video', trackNotice?.sinceMs)}</aside>}
       <div className="workspace"><div className="stage-col"><div className="video-stage"><video ref={video} controls={!selecting} playsInline onPlay={()=>{if(selecting)video.current?.pause();}} onLoadedMetadata={e=>{e.currentTarget.defaultPlaybackRate=speed;e.currentTarget.playbackRate=speed;}} onSeeking={() => setSeeking(true)} onSeeked={() => {
         const v = video.current;
         if (!v) return;
@@ -252,12 +258,13 @@ export function App() {
         const known = session?.samples.find(s => Math.abs(s.requestedTimeMs - v.currentTime * 1000) <= 1);
         setTimeMs(known?.sourceTimeMs ?? v.currentTime * 1000); setSeeking(false);
       }} onError={() => { if (info) { setError('影片播放解碼失敗，請改用 H.264 MP4。'); setSession(null); } }} /><Overlay sample={drawn} width={info?.width ?? 640} height={info?.height ?? 360} side={side} diagnostic={diagnostic} muted={frontalView && !!session && !selecting} />
-      {frontalView && session && !selecting && <><FrontalOverlay sample={drawn} frame={frontalFrame} width={info?.width ?? 640} height={info?.height ?? 360} /><FrontalCuePanel frame={frontalFrame} hasSample={!!sample} notice={trackNotice} /></>}
+      {frontalView && session && !selecting && <><FrontalOverlay sample={drawn} frame={frontalFrame} width={info?.width ?? 640} height={info?.height ?? 360} /></>}
       {selecting && info && !seeking && <RoiSelector width={info.width} height={info.height} roi={draft} onChange={setDraft} drawNew={drawNew} onDrawEnd={()=>setDrawNew(false)} />}
       {experiments && selection && info && !selecting && <svg className="roi-border" viewBox={`0 0 ${info.width} ${info.height}`} aria-label="受測者 ROI 範圍"><rect {...(pipeline==='roi-crop'?(sample?.roi??displayedRoi(session?.samples??[],timeMs)??roiAt(selection,timeMs,info.width,info.height).roi):(sample?.targetReferenceRoi??selection.roi))} fill="none" stroke="#ffda57" strokeWidth={Math.max(2,info.width/250)} /></svg>}
       {!info && !loading && <p className="stage-empty">選擇影片後，畫面會出現在這裡</p>}</div>
+        {frontalView && session && !selecting && <FrontalCuePanel {...cue} />}
         {frontalView && session && !selecting && <FrontalLegend view={frontalFrame?.view} />}
-        {frontalView && session && !selecting && frontalFrame?.calibration==='whole-video' && <p className="muted small">這段影片裡沒有「站直不動 1 秒」的片段，基準線改用整段影片中站得最直的幾格來定。</p>}
+        {frontalView && session && !selecting && frontalFrame?.calibration==='whole-video' && !everStoodStill && <p className="muted small">這段影片裡沒有「站直不動 1 秒」的片段，基準線改用整段影片中站得最直的幾格來定。</p>}
         {session && !selecting && <Skeleton3D sample={drawn} points={pose3d} note={calibrationNote(lift3d?.context)} pitchText={pitchLabel(session.cameraPitch)}>
           <label className="compact pitch-input">拍攝時手機俯角（°）<input type="number" inputMode="decimal" min={MANUAL_PITCH_RANGE.min} max={MANUAL_PITCH_RANGE.max} step={1} placeholder="未提供" disabled={session.cameraPitch?.source === 'device-orientation'}
             value={session.cameraPitch ? String(Math.round(session.cameraPitch.deg)) : ''} onChange={e => { if (!storedSession) return; const p = manualPitch(e.target.value); const { cameraPitch: _old, ...rest } = storedSession; setSession(p ? { ...rest, cameraPitch: p } : rest); }} /></label>
@@ -267,7 +274,7 @@ export function App() {
         {session && <label className="scrub">逐格檢查<input aria-label="已分析取樣" type="range" min={0} max={session.samples.length-1} disabled={selecting} value={sampleIndex} onChange={e => jump(Number(e.target.value))} /><span className="muted">#{sampleIndex} / {session.samples.length-1}</span></label>}
         <p className="muted small">來源影格時間：{(timeMs/1000).toFixed(3)} 秒。{held ? `顯示最近的分析影格（取樣 #${held.sampleIndex}，相差 ${heldGapS.toFixed(2)} 秒；影片每秒分析 ${hz} 次）` : sample ? `對應取樣 #${sample.sampleIndex}（${sample.decode.timeBasis}）` : '這附近沒有分析結果（可能在分析範圍外），骨架與角度不顯示。'}</p>
       </div><div className="readout">
-        <div className="group"><h3 className="group-title">膝蓋</h3><div className="measurements">
+        <div className="group"><h3 className="group-title">膝蓋</h3>{(frontalFrame?.clipView ?? frontalFrame?.view) === 'frontal' && <p className="muted small">正面拍攝會低估膝彎曲；膝角度以側面拍攝較準。</p>}<div className="measurements">
         {sides.map(s => {
           const angle = knee(s);
           const w = angle?.valid ? sessionFlexion(poses3d, sample, 'knee', s) : null;
@@ -286,7 +293,7 @@ export function App() {
           <p>兩髖中點→兩肩中點連線與畫面垂直線的夾角（0° = 直立；手機需擺正）。</p><p>{qcStatus(sample?.posture?.final.trunkLean, !!sample)}</p></Metric>
         {sides.map(s => {
           const v = sample?.posture?.final.kneeToe[s];
-          return <Metric key={`toe-${s}`} name={`${sideName(s)}膝對腳尖線`} value={v?.valid ? `${v.value >= 0 ? '+' : ''}${v.value.toFixed(2)}` : 'N/A'} warn={!!v?.valid && v.value > CUE_POLICY.kneeToeHipWidths} note={v?.valid ? (v.value > 0 ? '膝蓋偏向內側（膝蓋內夾方向）' : '膝蓋在腳尖線上或外側') : '只適用正面拍攝'}>
+          return <Metric key={`toe-${s}`} name={`${sideName(s)}膝對腳尖線`} value={kneeToeValue(v)} warn={!!v?.valid && v.value > CUE_POLICY.kneeToeHipWidths} note={kneeToeNote(v, frontalFrame?.view, !!sample, trackNotice)}>
             <p>膝蓋離「過腳尖的鉛垂線」多遠，以骨盆寬為單位；+ = 膝在內側（膝蓋內夾）。標準是在線上或微外側，且左右對稱；只適用正面拍攝。</p><p>{qcStatus(v, !!sample)}</p></Metric>;
         })}
         </div></div>

@@ -159,8 +159,10 @@ table { border-collapse: collapse; width: 100%; } th, td { padding: 10px; border
 pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* Prompts drawn over the video */
-.cue-panel { position: absolute; top: 12px; left: 12px; right: 12px; line-height: 1.45; pointer-events: none; display: flex; }
-.cue-panel > * { background: rgba(28,28,30,.72); color: #fff; border-radius: 14px; padding: 8px 14px; margin: 0; font-size: clamp(.95rem, 2.2vw, 1.3rem); font-weight: 600; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+/* Prompt box sits directly under the video so it never covers the head or the baseline label */
+.cue-panel { margin: 8px 0 0; line-height: 1.45; display: flex; flex-direction: column; gap: 6px; min-height: 2.6em; }
+.cue-panel > * { background: #2c2c2e; color: #fff; border-radius: 14px; padding: 8px 14px; margin: 0; font-size: clamp(.95rem, 2.2vw, 1.15rem); font-weight: 600; }
+.cue-hint { background: #8a5a00 !important; color: #fff !important; font-weight: 500 !important; }
 .cue-panel ul { list-style: none; display: flex; flex-direction: column; gap: 4px; background: rgba(201,52,31,.88); }
 .cue-panel li { color: #fff; }
 .cue-ok { background: rgba(29,138,78,.88) !important; color: #fff !important; }
@@ -203,7 +205,6 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; }
   label.compact { justify-content: space-between; }
   label.compact select { flex: 1; max-width: 70%; }
   .angle { font-size: 1.5rem; }
-  .cue-panel { top: 8px; left: 8px; right: 8px; }
   .actions button { flex: 1 1 auto; }
 }
 

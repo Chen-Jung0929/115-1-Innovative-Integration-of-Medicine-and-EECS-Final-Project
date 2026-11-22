@@ -5,8 +5,46 @@ import {selectInitialSubject,type CandidateSelection} from '../selection/subject
 import {TRACKING_POLICY as POLICY} from './policy';
 import {kneeObservation} from '../biomechanics/jointQuality';
 import {createJointQuality} from './jointQuality';
-export const IDENTITY_POLICY='controlled-single-bounded-recovery-v4';
+export const IDENTITY_POLICY='controlled-single-bounded-recovery-v5-planted-feet';
 export const SINGLE_RECOVERY_POLICY={version:'controlled-single-bounded-v1',windowMs:1600,confirmations:3,maxStepGapMs:300,maxAnchorDistanceTorso:2,maxAnchorScale:1.5} as const;
+/**
+ * planted-feet-continuity-v1 (ADR-084, controlled single-person mode only). In a frontal squat the
+ * trunk leans toward the camera and its 2D shoulder–hip length shrinks 2–3× within 0.3 s, which the
+ * torso-length identity screens read as a different person. Shank length (knee–ankle) and the feet do
+ * not change in a squat, so "both feet stayed planted and the shank is the same size" is accepted as
+ * continuity evidence, and a single-candidate pause (UNCERTAIN or an automatic lock) may recover after
+ * that evidence holds for sustainMs. Different feet position or shank length (a swap) never qualifies.
+ * Engineering values, not calibrated identity probabilities.
+ */
+export const PLANTED_FEET_POLICY={version:'planted-feet-continuity-v1',maxFootMoveXShank:.25,maxFootMoveYShank:.6,maxShankScale:1.3,maxHipWidthScale:1.25,minHipWidthShank:.3,maxHipShiftShank:1,sustainMs:500,maxStepGapMs:300} as const;
+const FEET=[27,28,29,30] as const;
+/** Mean knee–ankle length (px) over legs whose knee and ankle are confident, or null. */
+export function shankLength(points:readonly Landmark[],width:number,height:number):number|null {
+ const l=([[25,27],[26,28]] as const).flatMap(([k,a])=>confident(points[k])&&confident(points[a])?[Math.hypot((points[k]!.x-points[a]!.x)*width,(points[k]!.y-points[a]!.y)*height)]:[]);
+ const m=l.length?l.reduce((a,b)=>a+b,0)/l.length:0;
+ return Number.isFinite(m)&&m>=POLICY.minTorsoPx?m:null;
+}
+/**
+ * Both ankles and heels within 0.25 shank sideways and 0.6 shank up/down of the reference (MediaPipe moves
+ * planted feet up to ~0.55 shank vertically while the person rises from a squat, lab_front 2.6 s), same shank (and hip width when measurable), hips not shifted. */
+export function plantedContinuity(points:readonly Landmark[],reference:readonly Landmark[],width:number,height:number):boolean {
+ const p=PLANTED_FEET_POLICY;
+ const shank=shankLength(reference,width,height),now=shankLength(points,width,height);
+ if(shank===null||now===null||Math.max(now/shank,shank/now)>p.maxShankScale)return false;
+ const px=(q:Landmark)=>({x:q.x*width,y:q.y*height});
+ for(const i of FEET){
+  const a=points[i],b=reference[i];
+  if(!confident(a)||!confident(b)||a.x<0||a.x>1||a.y<0||a.y>1)return false;
+  const A=px(a),B=px(b);if(Math.abs(A.x-B.x)>p.maxFootMoveXShank*shank||Math.abs(A.y-B.y)>p.maxFootMoveYShank*shank)return false;
+ }
+ if(![23,24].every(i=>confident(points[i])&&confident(reference[i])))return false;
+ const hip=(q:readonly Landmark[])=>({mid:(q[23]!.x+q[24]!.x)/2*width,width:Math.abs(q[23]!.x-q[24]!.x)*width});
+ const H=hip(points),R=hip(reference);
+ if(Math.abs(H.mid-R.mid)>p.maxHipShiftShank*shank)return false;
+ if(H.width>=p.minHipWidthShank*shank&&R.width>=p.minHipWidthShank*shank&&Math.max(H.width/R.width,R.width/H.width)>p.maxHipWidthScale)return false;
+ return true;
+}
+const RECOVERABLE_LOCKS=new Set(['controlled-recovery-window-exceeded','controlled-recovery-outside-anchor','identity-observation-gap-exceeded','recovery-not-identity-consistent','temporal-torso-jump-or-scale-change']);
 export function associateByContinuity(candidates:readonly Landmark[][],previous:Torso,dtSeconds:number,width:number,height:number):CandidateSelection {
  if(!(dtSeconds>0))return {selectedIndex:null,proposedIndex:null,reason:'non-increasing-source-time'};
  const ranked=candidates.map((p,index)=>({index,b:torsoOf(p,width,height)})).filter(c=>c.b).map(c=>({...c,d:Math.hypot(c.b!.x-previous.x,c.b!.y-previous.y)/Math.max(c.b!.length,previous.length),scale:Math.max(c.b!.length/previous.length,previous.length/c.b!.length)})).sort((a,b)=>a.d-b.d);
@@ -18,17 +56,30 @@ export function associateByContinuity(candidates:readonly Landmark[][],previous:
 export function createFullFrameIdentity(width:number,height:number,options:{crop?:boolean;jointConfirmations?:2|3;controlledSingle?:boolean}={}) {
  let previous:{body:Torso;time:number}|null=null,state:TrackingState='TRACKING',returns=0,manualReason='';
  let transient:{anchor:Torso;start:number;last:Torso|null;lastTime:number;count:number}|null=null;
+ // planted-feet-continuity-v1: landmarks of the last accepted observation, the running planted-feet streak,
+ // and whether the current lock may be lifted by it (only automatic temporal locks in controlled mode).
+ let lastGood:{points:readonly Landmark[];time:number}|null=null,planted:{since:number;last:number}|null=null;
+ let manualRecoverable=false,neverRecover=false;
  const controlled=options.controlledSingle===true&&!options.crop;
  const joints=createJointQuality(width,height,options.jointConfirmations??2);
- return {requireManual(reason:string){state='MANUAL_REVIEW_REQUIRED';manualReason=reason;},observe(candidates:readonly Landmark[][],time:number,reference:Roi){
+ return {requireManual(reason:string){state='MANUAL_REVIEW_REQUIRED';manualReason=reason;neverRecover=true;},observe(candidates:readonly Landmark[][],time:number,reference:Roi){
   let decision=previous?associateByContinuity(candidates,previous.body,(time-previous.time)/1000,width,height):selectInitialSubject(candidates,reference,width,height);
   if((options.crop||controlled)&&candidates.length>1)decision={selectedIndex:null,proposedIndex:null,reason:'ambiguous-candidates'};
   const points=decision.proposedIndex===null?[]:candidates[decision.proposedIndex]!;
   const qc=poseQuality(points,width,height),body=torsoOf(points,width,height);
   const reasons:string[]=[];
+  // Squat shrinkage is not an identity change: same planted feet and shank size keep continuity (ADR-084).
+  if(controlled&&previous&&lastGood&&!transient&&state!=='MANUAL_REVIEW_REQUIRED'&&candidates.length===1&&body&&decision.reason==='target-not-continuous'
+   &&time-previous.time<=POLICY.recoveryGapMs&&plantedContinuity(points,lastGood.points,width,height)){
+   decision={selectedIndex:decision.proposedIndex,proposedIndex:decision.proposedIndex,reason:'planted-feet-continuity'};
+   reasons.push('planted-feet-continuity');
+  }
   let accepted=decision.selectedIndex!==null&&body!==null;
   let continuity:TrackingQuality['continuity']=!previous?'initial':accepted?'continuous':'discontinuous';
-  const lock=(reason:string)=>{state='MANUAL_REVIEW_REQUIRED';manualReason=reason;accepted=false;};
+  const lock=(reason:string)=>{
+   state='MANUAL_REVIEW_REQUIRED';manualReason=reason;accepted=false;
+   if(controlled&&RECOVERABLE_LOCKS.has(reason))manualRecoverable=true;else neverRecover=true;
+  };
   if(!Number.isFinite(time))lock('invalid-source-time');
   if(decision.reason.startsWith('ambiguous')||decision.reason==='non-increasing-source-time')lock(decision.reason);
   if(previous&&!transient&&time-previous.time>POLICY.recoveryGapMs)lock('identity-observation-gap-exceeded');
@@ -86,8 +137,20 @@ export function createFullFrameIdentity(width:number,height:number,options:{crop
    else if(++returns<POLICY.recoveryConfirmations){state='UNCERTAIN';accepted=false;reasons.push('identity-recovery-confirmation-pending');}
   }
   }
+  // Single-candidate recovery from UNCERTAIN or an automatic lock: feet planted where they were at the last
+  // accepted observation, same shank size, torso reliable, continuously for sustainMs (ADR-084).
+  const mayRecover=state==='MANUAL_REVIEW_REQUIRED'?manualRecoverable&&!neverRecover:true;
+  if(controlled&&!accepted&&mayRecover&&lastGood&&candidates.length===1&&body&&qc.accepted&&plantedContinuity(points,lastGood.points,width,height)){
+   const pp=PLANTED_FEET_POLICY;
+   planted=planted&&time>planted.last&&time-planted.last<=pp.maxStepGapMs?{since:planted.since,last:time}:{since:time,last:time};
+   if(time-planted.since>=pp.sustainMs){
+    accepted=true;state='TRACKING';manualReason='';manualRecoverable=false;transient=null;planted=null;recovery=undefined;returns=0;
+    decision={...decision,selectedIndex:decision.proposedIndex};
+    reasons.length=0;reasons.push('planted-feet-recovery-confirmed');
+   }else reasons.push('planted-feet-recovery-pending');
+  }else if(!accepted)planted=null;
   if(state==='MANUAL_REVIEW_REQUIRED')reasons.push(manualReason,'manual-reselection-required');
-  if(accepted){previous={body:body!,time};state='TRACKING';returns=0;}
+  if(accepted){previous={body:body!,time};lastGood={points,time};state='TRACKING';returns=0;planted=null;}
   if(reasons.includes('temporal-torso-jump-or-scale-change'))continuity='discontinuous';
   const jointQuality=joints.observe(points,time,accepted,options.crop?reference:undefined);
   const tracking:TrackingQuality={...(recovery?{recovery}:{}),state,accepted,identity:accepted?'consistent-unverified':!candidates.length?'target-lost':'identity-uncertain',landmarkConfidence:qc.landmarkConfidence,plausibility:qc.plausibility,continuity,reasons:[...new Set(reasons)],joints:jointQuality};

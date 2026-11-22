@@ -13,7 +13,7 @@ describe('plain-language measurement status', () => {
   });
 });
 
-import { lockedBannerText, noticeText, trackingCause, trackingNotices, NOTICE_HOLD_MS, TRACKING_TEXT, type TrackingCause } from './plain';
+import { framingHint, kneeToeNote, kneeToeValue, lockedBannerText, noticeText, trackingCause, trackingNotices, NOTICE_HOLD_MS, TRACKING_TEXT, type TrackingCause } from './plain';
 import { accepted, humanPose, makeSample } from '../test/fixtures';
 import type { Landmark } from '../domain/analysis';
 import type { TrackingQuality } from '../domain/tracking';
@@ -27,6 +27,8 @@ describe('why the person was not tracked (tracking-notice-v1)', () => {
     const cases: [TrackingCause, ReturnType<typeof makeSample>][] = [
       // User report: one person, head above the frame (MediaPipe extrapolates the nose above y = 0, shoulders at the edge).
       ['head-cut', untracked(moved([[0, { y: -0.05 }], [11, { y: 0 }], [12, { y: 0.01 }]]))],
+      // lab_headcut (the user's screenshot): face points squashed INSIDE the frame, nothing below 0.
+      ['head-cut', untracked(moved([[0, { y: 0.064 }], [7, { y: 0.04 }], [8, { y: 0.04 }], [11, { y: 0.083 }], [12, { y: 0.083 }]]))],
       // Head fully out: MediaPipe usually returns no pose at all.
       ['no-person', untracked([], { state: 'LOST', identity: 'target-lost', reasons: ['no-pose', 'waiting-for-initial-reliable-pose'] })],
       ['feet-cut', untracked(moved([[27, { y: 1.04 }], [28, { y: 1.03 }]]))],
@@ -41,10 +43,11 @@ describe('why the person was not tracked (tracking-notice-v1)', () => {
     for (const [want, s] of cases) expect(trackingCause(s), want).toBe(want);
     expect(noticeText('head-cut', false, 'video')).toBe('頭沒有完整入鏡：手機往後移，讓頭入鏡');
     expect(noticeText('head-cut', false, 'live')).toBe('頭沒有完整入鏡：請往後退，讓頭入鏡');
-    expect(noticeText('feet-cut', false, 'video')).toBe('腳沒有入鏡：手機往後移或放低');
+    expect(noticeText('feet-cut', false, 'video')).toBe('腳沒有完整入鏡：手機往後移，讓腳跟入鏡');
     expect(noticeText('others', false, 'live')).toBe('畫面有其他人：只留個案一人入鏡');
-    expect(noticeText('head-cut', true, 'video')).toBe('頭沒有完整入鏡，之後暫停判斷');
-    expect(lockedBannerText('head-cut', 'video')).toBe('頭沒有完整入鏡，為避免認錯人，之後的畫面暫停判斷。重拍時手機往後移，讓頭入鏡。');
+    expect(noticeText('head-cut', true, 'video')).toBe('頭沒有完整入鏡，暫停判斷');
+    expect(noticeText('confirming', false, 'video')).toBe('無法確認是同一人：這一格暫不判斷');
+    expect(lockedBannerText('head-cut', 'video', 2200)).toBe('從 2.2 秒起無法確定是同一人（頭沒有完整入鏡），暫停判斷，數字不顯示。重拍時手機往後移，讓頭入鏡。');
   });
   it('never blames other people or blocking unless that is what happened, and shows no codes', () => {
     for (const c of Object.keys(TRACKING_TEXT) as TrackingCause[]) {
@@ -58,7 +61,10 @@ describe('why the person was not tracked (tracking-notice-v1)', () => {
   });
   it('uses the tracking reason for metric notes instead of a generic code word', () => {
     const bad = { valid: false as const, rawAngleDeg: null, invalidReasons: ['identity-uncertain'] as ['identity-uncertain'] };
-    expect(plainReason(bad, true, { cause: 'head-cut', locked: false, text: '' })).toBe('頭沒有完整入鏡');
+    expect(plainReason(bad, true, { cause: 'head-cut', blocking: true, locked: false, text: '' })).toBe('頭沒有完整入鏡');
+    const hip = { valid: false as const, rawAngleDeg: null, invalidReasons: ['joint-landmark-invalid'] as ['joint-landmark-invalid'] };
+    expect(plainReason(hip, true, { cause: 'feet-cut', blocking: false, locked: false, text: '' })).toBe('腳沒有完整入鏡');
+    expect(plainReason(hip, true, { cause: 'head-cut', blocking: false, locked: false, text: '' })).toBe('這個關節位置不合理');
     expect(plainReason(bad, true)).toBe('還在確認是不是同一人');
   });
   it('holds a reason for at least 0.5 s so it cannot flicker frame to frame', () => {
@@ -78,7 +84,29 @@ describe('why the person was not tracked (tracking-notice-v1)', () => {
     const head = moved([[0, { y: -0.05 }], [11, { y: 0 }]]);
     const lock = { state: 'MANUAL_REVIEW_REQUIRED' as const, reasons: ['identity-observation-gap-exceeded', 'manual-reselection-required'] };
     const n = trackingNotices([untracked(head, {}, 0, 0), untracked(head, {}, 700, 1), untracked(humanPose(), lock, 800, 2), untracked(head, lock, 900, 3), untracked(humanPose(), lock, 3000, 4)]);
-    expect(n.get(2)).toEqual({ cause: 'head-cut', locked: true, text: '頭沒有完整入鏡，之後暫停判斷' });
-    expect(n.get(4)?.text).toBe('頭沒有完整入鏡，之後暫停判斷');
+    expect(n.get(2)).toEqual({ cause: 'head-cut', blocking: true, locked: true, sinceMs: 800, text: '頭沒有完整入鏡，暫停判斷' });
+    expect(n.get(4)?.text).toBe('頭沒有完整入鏡，暫停判斷');
+  });
+});
+
+describe('framing hints on tracked frames and the knee-to-toe note', () => {
+  it('flags a cut head or cut feet even when the person is tracked, without blocking prompts', () => {
+    const head = moved([[0, { y: 0.064 }], [7, { y: 0.04 }], [11, { y: 0.083 }]]);
+    expect(framingHint(head)).toBe('head-cut');
+    expect(framingHint(moved([[29, { y: 1.08 }], [30, { y: 1.1 }]]))).toBe('feet-cut');
+    expect(framingHint(humanPose())).toBeNull();
+    const n = trackingNotices([makeSample({ landmarks: head, sourceTimeMs: 0, sampleIndex: 0 })]);
+    expect(n.get(0)).toMatchObject({ cause: 'head-cut', blocking: false });
+  });
+  it('uses a dead band around the toe line and gives the real reason when the value is missing', () => {
+    const val = (value: number) => ({ valid: true as const, value, invalidReasons: [] as [] });
+    expect(kneeToeValue(val(0.001))).toBe('0.00');
+    expect(kneeToeNote(val(0.004), 'frontal', true)).toBe('膝蓋在腳尖線上');
+    expect(kneeToeNote(val(0.2), 'frontal', true)).toContain('內側');
+    expect(kneeToeNote(val(-0.2), 'frontal', true)).toBe('膝蓋在腳尖線外側');
+    const missing = (r: 'unsupported-view' | 'out-of-frame') => ({ valid: false as const, value: null, invalidReasons: [r] as [typeof r] });
+    expect(kneeToeNote(missing('unsupported-view'), 'frontal', true)).toBe('只適用正面拍攝');
+    expect(kneeToeNote(missing('out-of-frame'), 'side', true)).toBe('只適用正面拍攝');
+    expect(kneeToeNote(missing('out-of-frame'), 'frontal', true, { cause: 'feet-cut', blocking: false, locked: false, text: '' })).toBe('腳沒有完整入鏡');
   });
 });
