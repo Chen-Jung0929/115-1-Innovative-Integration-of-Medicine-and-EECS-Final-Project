@@ -178,12 +178,17 @@ describe('hybrid 3D lift', () => {
     expect(['applied', 'capped']).toContain(live.context!.legs.left.status);
   });
 
-  it('standing check: a straight leg held for less than 1 s is not treated as standing', () => {
-    // Continuous squats that only touch straight for an instant (0.1 s at 10 Hz).
-    const clip = Array.from({ length: 40 }, (_, i) => ({ timeMs: i * 100, landmarks: observe(body(45 * (1 - Math.cos(2 * Math.PI * i / 10))), 0.05) }));
+  it('standing check: a straight leg held for under 0.5 s is not treated as standing', () => {
+    // Quick squats (straight → 30° within one sample) that pause straight for only 0.3 s (3 samples at 10 Hz).
+    const flexAt = (i: number) => { const k = i % 13; return k < 3 ? 0 : 30 + 30 * (1 - Math.cos(2 * Math.PI * (k - 3) / 10)); };
+    const clip = Array.from({ length: 52 }, (_, i) => ({ timeMs: i * 100, landmarks: observe(body(flexAt(i)), 0.05) }));
     const { context } = liftClip(clip, W, H, { smoothSeconds: 0 });
     expect(context!.legs.left.status).toBe('not-standing');
     expect(context!.legs.right.status).toBe('not-standing');
+    // The same clip with 0.6 s pauses does count as standing.
+    const flexLong = (i: number) => { const k = i % 16; return k < 6 ? 0 : 30 + 30 * (1 - Math.cos(2 * Math.PI * (k - 6) / 10)); };
+    const long = Array.from({ length: 48 }, (_, i) => ({ timeMs: i * 100, landmarks: observe(body(flexLong(i)), 0.05) }));
+    expect(['applied', 'capped']).toContain(liftClip(long, W, H, { smoothSeconds: 0 }).context!.legs.left.status);
   });
 
   it('never returns non-finite poses: collapsed or NaN inputs are skipped', () => {

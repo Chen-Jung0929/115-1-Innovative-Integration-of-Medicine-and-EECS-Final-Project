@@ -55,7 +55,7 @@ export const MAX_CORRECTION_DEG = 10;
  */
 const MIN_STANDING_EXTENSION = 0.85;
 /** Standing = the leg stays near its longest and the hip stays still for at least this long (ADR-079). */
-export const STILL_SECONDS = 1;
+export const STILL_SECONDS = 0.5;
 /** "Near its longest": ≥ this fraction of the clip's (or running) 95th-percentile hip–ankle length. */
 const NEAR_MAX = 0.97;
 /** "Still": hip height and hip–ankle length each move less than this (m) within the window. */
@@ -366,7 +366,7 @@ const cosOf = (up: Vec3) => Math.max(0.5, Math.hypot(up[0], up[1]) / (norm(up) |
  * Calibrate one leg on the frames of still standing (stillStanding), using only depth-free checks:
  * image hip–ankle length near its maximum and ≥ MIN_STANDING_EXTENSION of the world thigh + shank (divided by
  * the cosine of the camera pitch, since a vertical leg looks shorter from a tilted camera), 2D knee bend
- * ≤ MAX_IMAGE_BEND_DEG, hip still for STILL_SECONDS. The correction is capped at MAX_CORRECTION_DEG, so a
+ * ≤ MAX_IMAGE_BEND_DEG, hip still for STILL_SECONDS (0.5 s). The correction is capped at MAX_CORRECTION_DEG, so a
  * real contracture hidden in depth keeps most of its angle.
  */
 function legStats(P: Vec3[][], lms: readonly Landmark[][], times: readonly number[], side: AnatomicalSide, up: Vec3, stillSeconds = STILL_SECONDS): LegCalibration {

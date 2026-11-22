@@ -132,6 +132,6 @@ export function Skeleton3D({ sample, points, note, pitchText, children }: { samp
     {children}
     {pitchText && <p className="muted small">{pitchText}，已用來把骨架轉正。</p>}
     {note && <p className="muted small">{note}</p>}
-    <p className="muted small">拖曳可旋轉。藍色 = 個案左側、橘色 = 右側。骨頭模型取自 OpenSim（只用來顯示，長度依個案縮放）。骨架的左右上下位置跟著影片，前後深度是模型估計的，腳踩在地板格線上；{pitchText ? '' : '沒有鏡頭俯角時，手機若上下傾斜，整副骨架會跟著前後傾。'}僅供參考。</p>
+    <p className="muted small">拖曳可旋轉。藍色 = 個案左側、橘色 = 右側。骨頭模型取自 OpenSim（只用來顯示，長度依個案縮放）。骨架的左右上下位置跟著影片，前後深度是模型估計的，腳踩在地板格線上；要做站直校正，請在開始或結束時站穩約 1 秒。{pitchText ? '' : '沒有鏡頭俯角時，手機若上下傾斜，整副骨架會跟著前後傾。'}僅供參考。</p>
   </div>;
 }
