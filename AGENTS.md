@@ -54,7 +54,7 @@ Use the existing checkout. Do not create worktrees unless explicitly requested.
 - Read docs/PIPELINE_COMPARISON.md first. Pause ROI tracking expansion; retain B for regression.
 - A/C must infer on original full frames. Target reference is selection metadata, never an implicit crop.
 - Keep detection, selection, temporal identity, observation QC and angles separate. Never use candidate order as identity.
-- Freeze source/model hashes and 5Hz settings for comparisons; disclose decoder alignment and denominator limits.
+- Freeze source/model hashes and the sampling rate for comparisons (10 Hz since ADR-081; use `?hz=5` to reproduce runs made at the earlier 5 Hz); disclose decoder alignment and denominator limits.
 - No fabricated human results or claims that cropping hypotheses are confirmed. Preserve raw/auto/manual results per pipeline.
 
 ## QC recovery and replay scope

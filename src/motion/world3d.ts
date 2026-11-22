@@ -8,8 +8,10 @@ const sampleTime = (s: Sample) => s.decode.timeBasis === 'presentation' ? s.sour
 const trusted = (s: Sample) => s.tracking.accepted && (!s.review || s.review.label === 'correct-target');
 
 export interface SessionLift { poses: SessionPoses; context: LiftContext | null }
-export function liftSession(samples: readonly Sample[], width: number, height: number): SessionLift {
-  const { poses, context } = liftClip(samples.map(s => ({ timeMs: sampleTime(s), landmarks: trusted(s) ? s.landmarks : null })), width, height);
+/** cameraPitchDeg (+ = lens tilted down), when known from the phone sensor or typed in, stands the skeleton upright (ADR-080). */
+export function liftSession(samples: readonly Sample[], width: number, height: number, cameraPitchDeg?: number | null): SessionLift {
+  const pitch = cameraPitchDeg !== null && cameraPitchDeg !== undefined && Number.isFinite(cameraPitchDeg) ? { cameraPitchDeg } : {};
+  const { poses, context } = liftClip(samples.map(s => ({ timeMs: sampleTime(s), landmarks: trusted(s) ? s.landmarks : null })), width, height, pitch);
   const out = new Map<number, Vec3[]>();
   samples.forEach((s, i) => { const p = poses[i]; if (p) out.set(s.sampleIndex, p); });
   return { poses: out, context };

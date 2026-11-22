@@ -15,7 +15,7 @@ export const BASELINE_POLICY = {
   /** Heels must stay within this range (hip widths) for `lockWindowMs` before locking. */
   lockToleranceHipWidths: 0.15,
   lockWindowMs: 1000,
-  /** At least this many observations inside the window (5 Hz video ≈ 5–6 per second). */
+  /** At least this many observations inside the window (10 Hz video ≈ 10 per second; old 5 Hz sessions ≈ 5–6). */
   minLockSamples: 4,
   /** Heels farther than this from the locked line … */
   relockDistanceHipWidths: 0.35,

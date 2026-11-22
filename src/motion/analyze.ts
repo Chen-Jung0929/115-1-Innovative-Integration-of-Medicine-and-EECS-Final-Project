@@ -1,7 +1,7 @@
 import { checkedPipeline,DEFAULT_PIPELINE,type PipelineConfig } from '../domain/pipeline';
 import { createFullFrameIdentity } from '../tracking/identity';
 import type { Session, Sample } from '../domain/analysis';
-import { ANGLE_DEFINITION, QC_POLICY, SAMPLING_HZ, ANALYSIS_SCHEMA_VERSION } from '../domain/analysis';
+import { ANGLE_DEFINITION, QC_POLICY, SAMPLING_HZ, ANALYSIS_SCHEMA_VERSION, ALLOWED_SAMPLING_HZ } from '../domain/analysis';
 import { measureKnees, trackingPolicySnapshot } from './measure';
 import { loadVideo, seekFrame, releaseVideo } from '../input/video';
 import { createPoseEngine, modelBytes, MODEL_VERSION } from '../pose/mediapipe';
@@ -14,7 +14,8 @@ import { gatePosture } from '../tracking/gate';
 import { measurePosture } from '../biomechanics/posture';
 import pkg from '../../package.json';
 
-export interface AnalysisOptions {pipeline?:PipelineConfig;asset?:Awaited<ReturnType<typeof modelBytes>>;sourceSha256?:string;comparisonId?:string}
+export interface AnalysisOptions {pipeline?:PipelineConfig;asset?:Awaited<ReturnType<typeof modelBytes>>;sourceSha256?:string;comparisonId?:string;samplingHz?:number}
+
 export async function analyze(url: string, filename: string, model: File | null, allowOfficialDownload: boolean, selection: SubjectSelection, signal: AbortSignal, progress: (done: number, total: number, phase: string) => void, options:AnalysisOptions={}): Promise<Session> {
   const started=performance.now();
   const pipeline=checkedPipeline(options.pipeline??DEFAULT_PIPELINE);
@@ -47,7 +48,8 @@ export async function analyze(url: string, filename: string, model: File | null,
     const fullFrame=document.createElement('canvas');fullFrame.width=decoder.videoWidth;fullFrame.height=decoder.videoHeight;
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('此瀏覽器無法建立影格畫布。');
-    const times = sampleTimes(decoder.duration, SAMPLING_HZ);
+    const samplingHz = (ALLOWED_SAMPLING_HZ as readonly number[]).includes(options.samplingHz ?? NaN) ? options.samplingHz! : SAMPLING_HZ;
+    const times = sampleTimes(decoder.duration, samplingHz);
     const samples: Sample[] = [];
     let previous = -1;
     for (const [index, time] of times.entries()) {
@@ -88,7 +90,7 @@ export async function analyze(url: string, filename: string, model: File | null,
     if (!samples.length) throw new Error('沒有可分析的影格。');
     completed={
       run:{pipeline,inputSpace:cropping?'roi-crop':'full-frame',sourceSha256:options.sourceSha256??null,comparisonId:options.comparisonId??null,analysisDurationMs:performance.now()-started,modelPreparationMs,requestedSamples:times.length},
-      analysisRevision:{parentSessionId:null,selectionRevision:selection.revision,correctionSource:selection.correctionSource},trackingPolicy:trackingPolicySnapshot(), subjectSelection: {...selection,roi}, sourceFilename: filename, durationMs: decoder.duration * 1000, samplingHz: SAMPLING_HZ, samples,
+      analysisRevision:{parentSessionId:null,selectionRevision:selection.revision,correctionSource:selection.correctionSource},trackingPolicy:trackingPolicySnapshot(), subjectSelection: {...selection,roi}, sourceFilename: filename, durationMs: decoder.duration * 1000, samplingHz, samples,
       metadata: { schemaVersion: ANALYSIS_SCHEMA_VERSION, sessionId: crypto.randomUUID(), sourceId: crypto.randomUUID(), inputKind: 'video',
         sourceWidthPx: decoder.videoWidth, sourceHeightPx: decoder.videoHeight, inferenceMirrored: false, displayMirrored: false,
         model: { packageVersion: MODEL_VERSION, assetId: asset.id, assetSha256: asset.hash, delegate: 'CPU' },

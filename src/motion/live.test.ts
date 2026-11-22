@@ -56,6 +56,8 @@ describe('live camera analysis', () => {
     expect(session.livePerformance).toBeUndefined();
     const perf = createPerformanceRecorder({ userAgent: 'test', delegate: 'CPU', width: 640, height: 360, warmUpMs: 1, sourceClockOffsetMs: 1000 }).summary();
     expect(liveSession(live.samples, info(selection), 5000, perf).livePerformance?.sourceClockOffsetMs).toBe(1000);
+    expect(session.cameraPitch).toBeUndefined(); // optional field, schema not bumped
+    expect(liveSession(live.samples, info(selection), 5000, undefined, { deg: 12, source: 'device-orientation', readings: 30 }).cameraPitch?.deg).toBe(12);
   });
 });
 describe('hands-free ready gate', () => {

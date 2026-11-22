@@ -1,4 +1,4 @@
-import type { Landmark, Sample, Session } from '../domain/analysis';
+import type { CameraPitch, Landmark, Sample, Session } from '../domain/analysis';
 import { ANGLE_DEFINITION, QC_POLICY, ANALYSIS_SCHEMA_VERSION, MAX_DURATION_SECONDS } from '../domain/analysis';
 import { DEFAULT_PIPELINE } from '../domain/pipeline';
 import type { LivePerformance } from '../domain/performance';
@@ -8,7 +8,7 @@ import { measureKnees, trackingPolicySnapshot } from './measure';
 import { poseQuality, type Torso } from '../biomechanics/poseQuality';
 import { kneeObservation } from '../biomechanics/jointQuality';
 
-/** Target live inference rate. Higher than offline 5 Hz so feedback feels immediate; identity gates are per-second. */
+/** Target live inference rate. Same as uploaded video since ADR-081 (was higher than offline 5 Hz) so feedback feels immediate; identity gates are per-second. */
 export const LIVE_SAMPLING_HZ = 10;
 export const LIVE_MAX_SAMPLES = MAX_DURATION_SECONDS * LIVE_SAMPLING_HZ;
 
@@ -55,10 +55,11 @@ export function createLiveAnalyzer(width: number, height: number, selection: Sub
 export interface LiveRunInfo { width: number; height: number; selection: SubjectSelection; displayMirrored: boolean; startedAt: number; model: Session['metadata']['model']; appVersion: string; modelPreparationMs: number }
 
 /** Package a finished live segment like an offline session so the same CSV / JSON export works. */
-export function liveSession(samples: readonly Sample[], info: LiveRunInfo, now = performance.now(), livePerformance?: LivePerformance): Session {
+export function liveSession(samples: readonly Sample[], info: LiveRunInfo, now = performance.now(), livePerformance?: LivePerformance, cameraPitch?: CameraPitch | null): Session {
   const first = samples[0]?.sourceTimeMs ?? 0, last = samples.at(-1)?.sourceTimeMs ?? 0;
   return {
     ...(livePerformance ? { livePerformance } : {}),
+    ...(cameraPitch ? { cameraPitch } : {}),
     run: { pipeline: { ...DEFAULT_PIPELINE }, inputSpace: 'full-frame', sourceSha256: null, comparisonId: null, analysisDurationMs: now - info.startedAt, modelPreparationMs: info.modelPreparationMs, requestedSamples: samples.length },
     analysisRevision: { parentSessionId: null, selectionRevision: info.selection.revision, correctionSource: info.selection.correctionSource },
     trackingPolicy: trackingPolicySnapshot(), subjectSelection: info.selection,

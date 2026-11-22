@@ -17,7 +17,7 @@ export const CUE_POLICY = {
   kneeToeHipWidths: 0.45,
   /** Knee checks only once the person is clearly squatting (knee flexion proxy, degrees). */
   kneeMinFlexionDeg: 30,
-  /** A condition must hold this long before its prompt appears (≈ 2 samples at 5 Hz). */
+  /** A condition must hold this long before its prompt appears (≈ 2 samples at 10 Hz). */
   holdMs: 200,
   maxShown: 2,
   /** Side view (handout p.12). Knee ahead of the toe line, in shank lengths. */

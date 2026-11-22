@@ -19,8 +19,8 @@ function body(flex: number): Vec3[] {
   return P;
 }
 /** Camera pitched down by PITCH, 3 m away: orthographic image + world landmarks (hip-centred, gravity frame). */
-function observe(P: Vec3[], kneeBias = 0, worldFollowsCamera = false): Landmark[] {
-  const c = Math.cos(PITCH), s = Math.sin(PITCH), hip = [0, 1, 2].map(k => (P[23]![k]! + P[24]![k]!) / 2);
+function observe(P: Vec3[], kneeBias = 0, worldFollowsCamera = false, pitch = PITCH): Landmark[] {
+  const c = Math.cos(pitch), s = Math.sin(pitch), hip = [0, 1, 2].map(k => (P[23]![k]! + P[24]![k]!) / 2);
   return P.map((p, i) => {
     const cam = [p[0], c * p[1] - s * (p[2] + 3), s * p[1] + c * (p[2] + 3)];
     const w: Vec3 = [p[0] - hip[0]!, p[1] - hip[1]!, p[2] - hip[2]! - (i === 25 || i === 26 ? kneeBias : 0)];
@@ -162,6 +162,28 @@ describe('hybrid 3D lift', () => {
     const tilt = (p: Vec3[]) => { const v = [0, 1, 2].map(j => (p[11]![j]! + p[12]![j]!) / 2 - (p[27]![j]! + p[28]![j]!) / 2); return Math.acos(-v[1]! / Math.hypot(...v)) * 180 / Math.PI; };
     expect(tilt(liftClip(clip, W, H, { smoothSeconds: 0 }).poses[0]!)).toBeGreaterThan(8); // pitch not observable
     expect(tilt(liftClip(clip, W, H, { smoothSeconds: 0, cameraPitchDeg: 10 }).poses[0]!)).toBeLessThan(1);
+  });
+
+  it('standing check: a 12° pitched phone still calibrates a straight-standing subject (pitch known)', () => {
+    const P12 = 12 * Math.PI / 180;
+    const clip = Array.from({ length: 40 }, (_, i) => {
+      const f = i < 12 ? 0 : 45 * (1 - Math.cos(2 * Math.PI * (i - 12) / 20));
+      return { timeMs: i * 100, landmarks: observe(body(f), 0.05, true, P12) };
+    });
+    const { context, poses } = liftClip(clip, W, H, { smoothSeconds: 0, cameraPitchDeg: 12 });
+    expect(['applied', 'capped']).toContain(context!.legs.left.status);
+    expect(Math.abs(flexion3D(poses[0]!, 'knee', 'left')!)).toBeLessThan(5);
+    const live = createCausalLifter(W, H, { smoothSeconds: 0, cameraPitchDeg: 12 });
+    clip.forEach(c => live.step(c.landmarks, c.timeMs));
+    expect(['applied', 'capped']).toContain(live.context!.legs.left.status);
+  });
+
+  it('standing check: a straight leg held for less than 1 s is not treated as standing', () => {
+    // Continuous squats that only touch straight for an instant (0.1 s at 10 Hz).
+    const clip = Array.from({ length: 40 }, (_, i) => ({ timeMs: i * 100, landmarks: observe(body(45 * (1 - Math.cos(2 * Math.PI * i / 10))), 0.05) }));
+    const { context } = liftClip(clip, W, H, { smoothSeconds: 0 });
+    expect(context!.legs.left.status).toBe('not-standing');
+    expect(context!.legs.right.status).toBe('not-standing');
   });
 
   it('never returns non-finite poses: collapsed or NaN inputs are skipped', () => {

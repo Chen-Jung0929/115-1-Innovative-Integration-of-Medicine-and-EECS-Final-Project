@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Sample, Session } from '../domain/analysis';
 import { cameraErrorMessage, cameraUnavailableReason, openCamera, stopCamera, type Facing } from '../input/camera';
 import { fullFrameSelection } from '../input/singleSubject';
@@ -14,6 +14,9 @@ import { AngleChart } from '../visualization/AngleChart';
 import pkg from '../../package.json';
 import { Metric } from './Metric';
 import { showAngle, showFlexion } from './plain';
+import { createPitchRecorder, pitchFromOrientation, pitchLabel, requestOrientationPermission } from '../motion/devicePitch';
+import { calibrationNote, liftSession } from '../motion/world3d';
+import { Skeleton3D } from '../visualization/Skeleton3D';
 
 type Side = 'left' | 'right' | 'both';
 type Analyzer = ReturnType<typeof createLiveAnalyzer>;
@@ -62,6 +65,10 @@ export function LivePanel({ model, allowDownload, side, onSide, disabled }: { mo
   const perf = useRef<ReturnType<typeof createPerformanceRecorder> | null>(null);
   const clockOffset = useRef(0);
   const warmUpMs = useRef(0);
+  const pitchRec = useRef(createPitchRecorder());
+  const facingRef = useRef<Facing>('user');
+  const [sensor, setSensor] = useState<'off' | 'on' | 'denied' | 'unsupported'>('off');
+  const [livePitch, setLivePitch] = useState<number | null>(null);
   const [facing, setFacing] = useState<Facing>('user');
   const [mirrored, setMirrored] = useState(true);
   const [state, setState] = useState<'off' | 'starting' | 'live'>('off');
@@ -97,7 +104,7 @@ export function LivePanel({ model, allowDownload, side, onSide, disabled }: { mo
     analyzer.current = null;
     setMeasuring(false);
     if (a && info && a.samples.length) {
-      const session = liveSession(a.samples, { ...info, startedAt: segmentStart.current }, performance.now(), perf.current?.summary());
+      const session = liveSession(a.samples, { ...info, startedAt: segmentStart.current }, performance.now(), perf.current?.summary(), pitchRec.current.summary());
       setResults(previous => [session, ...previous].slice(0, MAX_KEPT_SEGMENTS)); setShown(0);
     }
   }
@@ -114,7 +121,7 @@ export function LivePanel({ model, allowDownload, side, onSide, disabled }: { mo
     perf.current = createPerformanceRecorder({ userAgent: navigator.userAgent, delegate: 'CPU', width, height, warmUpMs: warmUpMs.current, sourceClockOffsetMs: mediaTimeMs });
     if (runInfo.current) runInfo.current = { ...runInfo.current, selection, width, height };
     analyzer.current = createLiveAnalyzer(width, height, selection);
-    segmentStart.current = performance.now(); lastSampleMs.current = null;
+    segmentStart.current = performance.now(); lastSampleMs.current = null; pitchRec.current.reset();
     setSample(undefined); setRecent([]); setMeasuring(true); setLivePerf(null);
   }
 
@@ -203,9 +210,25 @@ export function LivePanel({ model, allowDownload, side, onSide, disabled }: { mo
     setNotice('前一段已保存在下方。站好不動就會自動開始新的一段。');
   }
 
+  // Phone tilt sensor (ADR-080): readings during a measured segment; its median becomes the segment's camera pitch.
+  facingRef.current = facing;
+  useEffect(() => {
+    if (sensor !== 'on') return;
+    const onTilt = (e: DeviceOrientationEvent) => {
+      const p = pitchFromOrientation(e.beta, e.gamma, facingRef.current);
+      setLivePitch(p);
+      if (analyzer.current) pitchRec.current.add(p);
+    };
+    window.addEventListener('deviceorientation', onTilt);
+    return () => window.removeEventListener('deviceorientation', onTilt);
+  }, [sensor]);
+  async function enableSensor() { const r = await requestOrientationPermission(); setSensor(r === 'granted' ? 'on' : r); }
+
   const live = state === 'live';
   const pct = (s: 'left' | 'right') => { const value = analyzer.current ? coverage(analyzer.current.samples, s) : null; return value === null ? 'N/A' : `${(value * 100).toFixed(0)}%`; };
   const result = results[shown] ?? null;
+  const resultLift = useMemo(() => result ? liftSession(result.samples, result.metadata.sourceWidthPx, result.metadata.sourceHeightPx, result.cameraPitch?.deg) : null, [result]);
+  const resultLast = result && resultLift ? [...result.samples].reverse().find(s => resultLift.poses.has(s.sampleIndex)) : undefined;
 
   return <>
     <section className="card" aria-labelledby="live-title">
@@ -219,6 +242,10 @@ export function LivePanel({ model, allowDownload, side, onSide, disabled }: { mo
       <div className="live-options">
         <label className="compact">鏡頭方向<select value={facing} disabled={state !== 'off'} onChange={e => { const f = e.target.value as Facing; setFacing(f); setMirrored(f === 'user'); }}><option value="user">前鏡頭（筆電、自拍）</option><option value="environment">後鏡頭（手機架在旁邊）</option></select></label>
         <label className="switch"><input type="checkbox" role="switch" checked={mirrored} disabled={state !== 'off'} onChange={e => setMirrored(e.target.checked)} /><span>畫面像照鏡子</span></label>
+        {sensor === 'off' && <button className="secondary" onClick={() => void enableSensor()}>使用手機傾斜感測器（鏡頭俯角）</button>}
+        {sensor === 'on' && <span className="muted small">{livePitch === null ? '等待手機傾斜感測器…（筆電通常沒有）' : `鏡頭俯角 ${livePitch.toFixed(0)}°（手機感測器）`}</span>}
+        {sensor === 'denied' && <span className="muted small">未取得傾斜感測器權限（iPhone 需在 https 網址按按鈕允許）。</span>}
+        {sensor === 'unsupported' && <span className="muted small">這個瀏覽器沒有傾斜感測器。</span>}
         <label className="compact">顯示側別<select value={side} onChange={e => onSide(e.target.value as Side)}><option value="both">左右都看</option><option value="left">只看左邊</option><option value="right">只看右邊</option></select></label>
       </div>
       {error && <p role="alert" className="error">{error}</p>}{notice && <p role="status" className="notice">{notice}</p>}
@@ -251,6 +278,7 @@ export function LivePanel({ model, allowDownload, side, onSide, disabled }: { mo
       {result ? <><p>這一段共 {result.samples.length} 個取樣、{(result.durationMs / 1000).toFixed(1)} 秒。<span className="muted">時間軸為鏡頭影格時間，每段從 0 秒起算；無效取樣保留為斷點。</span></p>
         {result.livePerformance && <p className="live-perf">效能：{perfText(result.livePerformance)}（詳細數字在研究 JSON 的 livePerformance）</p>}
         <AngleChart samples={result.samples} side={side} timeMs={result.samples.at(-1)?.sourceTimeMs ?? 0} />
+        {resultLift && resultLast && <Skeleton3D sample={resultLast} points={resultLift.poses.get(resultLast.sampleIndex)} note={calibrationNote(resultLift.context)} pitchText={pitchLabel(result.cameraPitch)} />}
         <div className="actions">
           <button className="secondary" onClick={() => downloadFile(`knee-live-${result.metadata.sessionId}.csv`, toCsv(result), 'text/csv;charset=utf-8')}>下載 CSV</button>
           <button className="secondary" onClick={() => downloadFile(`research-live-${result.metadata.sessionId}.json`, JSON.stringify(result, null, 2), 'application/json')}>下載研究 JSON（含 landmarks）</button>

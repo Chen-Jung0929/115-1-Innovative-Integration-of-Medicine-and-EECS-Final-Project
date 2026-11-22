@@ -48,7 +48,18 @@ export interface LegCalibration { standingExtension: number; kneeDepthOffset: nu
 /** Largest standing knee-flexion change the calibration may make (自訂, safety cap). */
 export const MAX_CORRECTION_DEG = 10;
 /** "Standing" needs the image hip–ankle length ≥ this share of thigh + shank (pitch-corrected). */
-const MIN_STANDING_EXTENSION = 0.95;
+/**
+ * Loose sanity floor for "the leg is near full length" (image hip–ankle ÷ world thigh + shank ÷ cos pitch).
+ * Standing is decided by time (STILL_SECONDS of stillness at the clip's own near-maximum leg length); this
+ * floor only rejects clips whose longest leg is clearly bent (a 45° knee reads ≈ 0.92, 60° ≈ 0.87).
+ */
+const MIN_STANDING_EXTENSION = 0.85;
+/** Standing = the leg stays near its longest and the hip stays still for at least this long (ADR-079). */
+export const STILL_SECONDS = 1;
+/** "Near its longest": ≥ this fraction of the clip's (or running) 95th-percentile hip–ankle length. */
+const NEAR_MAX = 0.97;
+/** "Still": hip height and hip–ankle length each move less than this (m) within the window. */
+const STILL_RANGE_M = 0.03;
 /** …and a 2D knee bend ≤ this. A bend seen in the image is never a depth artefact, but MediaPipe's 2D knee already reads ~20° in a standing side view (DEV), hence 25°. */
 const MAX_IMAGE_BEND_DEG = 25;
 export interface LiftOptions {
@@ -71,8 +82,10 @@ export interface LiftOptions {
    * The world landmarks follow the camera, so without this a tilted phone tilts the whole skeleton (ADR-076).
    */
   cameraPitchDeg?: number;
+  /** Seconds of still, near-full-length leg that count as standing (ADR-079). */
+  stillSeconds?: number;
 }
-export const LIFT_DEFAULTS: Required<LiftOptions> = { imageXY: true, kneeCalibration: true, fadeFrom: 0.75, smoothSeconds: 0.1, gravity: true, upCue: 'world', footLock: true, cameraPitchDeg: 0 };
+export const LIFT_DEFAULTS: Required<LiftOptions> = { imageXY: true, kneeCalibration: true, fadeFrom: 0.75, smoothSeconds: 0.1, gravity: true, upCue: 'world', footLock: true, cameraPitchDeg: 0, stillSeconds: STILL_SECONDS };
 
 /** Joints used for the camera fit, extension and floor (shoulders, hips, knees, ankles, heels, toes). */
 const BODY = [11, 12, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32];
@@ -329,22 +342,47 @@ function capOffset(P: Vec3[], side: AnatomicalSide, offset: number): { offset: n
   return { offset: offset * lo, deg: correctionOf(P, side, offset * lo), capped: true };
 }
 /**
- * Calibrate one leg on its most extended 10% of frames, only when two depth-free checks agree that it was
- * straight: (1) image hip–ankle length ≥ 95% of the world thigh + shank (divided by the cosine of the camera
- * pitch, since a vertical leg looks shorter from a tilted camera); (2) the 2D knee bend ≤ 15°. Then the
- * correction is capped at MAX_CORRECTION_DEG, so a real contracture hidden in depth keeps most of its angle.
+ * Frames that belong to a still standing stretch: every frame of a window lasting ≥ STILL_SECONDS
+ * (span + one sample interval, so 5 samples at 5 Hz or 10 at 10 Hz qualify) is near the maximum leg length,
+ * passes the sanity floor and the image-bend check, and the hip height and leg length stay within
+ * STILL_RANGE_M. Windows never bridge a gap longer than 0.5 s.
  */
-function legStats(P: Vec3[][], lms: readonly Landmark[][], side: AnatomicalSide, up: Vec3): LegCalibration {
+function stillStanding(t: readonly number[], ext: readonly number[], hipY: readonly number[], ok: readonly boolean[], seconds = STILL_SECONDS): boolean[] {
+  const n = t.length, out = new Array<boolean>(n).fill(false);
+  if (!n) return out;
+  const dt = median(t.slice(1).map((v, i) => v - t[i]!).filter(d => d > 0)) || 100;
+  for (let i = 0; i < n; i++) {
+    let lo = Infinity, hi = -Infinity, elo = Infinity, ehi = -Infinity;
+    for (let j = i; j < n && ok[j] && (j === i || t[j]! - t[j - 1]! <= 500); j++) {
+      lo = Math.min(lo, hipY[j]!); hi = Math.max(hi, hipY[j]!); elo = Math.min(elo, ext[j]!); ehi = Math.max(ehi, ext[j]!);
+      if (hi - lo > STILL_RANGE_M || ehi - elo > STILL_RANGE_M) break;
+      if (t[j]! - t[i]! + dt >= seconds * 1000 - 1) { for (let k = i; k <= j; k++) out[k] = true; }
+    }
+  }
+  return out;
+}
+const cosOf = (up: Vec3) => Math.max(0.5, Math.hypot(up[0], up[1]) / (norm(up) || 1));
+/**
+ * Calibrate one leg on the frames of still standing (stillStanding), using only depth-free checks:
+ * image hip–ankle length near its maximum and ≥ MIN_STANDING_EXTENSION of the world thigh + shank (divided by
+ * the cosine of the camera pitch, since a vertical leg looks shorter from a tilted camera), 2D knee bend
+ * ≤ MAX_IMAGE_BEND_DEG, hip still for STILL_SECONDS. The correction is capped at MAX_CORRECTION_DEG, so a
+ * real contracture hidden in depth keeps most of its angle.
+ */
+function legStats(P: Vec3[][], lms: readonly Landmark[][], times: readonly number[], side: AnatomicalSide, up: Vec3, stillSeconds = STILL_SECONDS): LegCalibration {
   const [h, , a] = LEG[side];
   const ext = P.map(p => inPlane(p[h]!, p[a]!));
-  const top = percentile(ext, 90), standingIdx = P.map((_, i) => i).filter(i => ext[i]! >= top);
-  const standing = standingIdx.map(i => P[i]!);
+  const top = percentile(ext, 95), len = worldLeg(lms, side) * cosOf(up);
+  const bent = P.map(p => imageBend(p, side));
+  const long = ext.map(e => e >= NEAR_MAX * top && e >= MIN_STANDING_EXTENSION * len);
+  const base = { ...NO_LEG, standingExtension: top };
+  if (!long.some(Boolean)) return { ...base, status: 'not-standing' };
+  if (!long.some((l, i) => l && bent[i]! <= MAX_IMAGE_BEND_DEG)) return { ...base, status: 'bent-in-image' };
+  const hipY = P.map(p => (p[23]![1] + p[24]![1]) / 2);
+  const still = stillStanding(times, ext, hipY, long.map((l, i) => l && bent[i]! <= MAX_IMAGE_BEND_DEG), stillSeconds);
+  const standing = P.filter((_, i) => still[i]);
+  if (!standing.length) return { ...base, status: 'not-standing' };
   const standingExtension = median(standing.map(p => inPlane(p[h]!, p[a]!)));
-  const cosPitch = Math.max(0.5, Math.hypot(up[0], up[1]) / (norm(up) || 1));
-  const extension = standingExtension / (worldLeg(standingIdx.map(i => lms[i]! as Landmark[]), side) * cosPitch);
-  const base = { ...NO_LEG, standingExtension };
-  if (!(extension >= MIN_STANDING_EXTENSION)) return { ...base, status: 'not-standing' };
-  if (median(standing.map(p => imageBend(p, side))) > MAX_IMAGE_BEND_DEG) return { ...base, status: 'bent-in-image' };
   const offsets = standing.map(p => kneeChordDepth(p, side)), offset = median(offsets);
   const rep = standing[offsets.indexOf([...offsets].sort((x, y) => Math.abs(x - offset) - Math.abs(y - offset))[0]!)]!;
   const c = capOffset(rep, side, offset);
@@ -393,10 +431,11 @@ export function liftClip(frames: readonly LiftFrame[], width: number, height: nu
     cam = solveCamera(sums) ?? cam;
     scales = smoothTrack(smooth.map((lm, k) => ({ t: frames[idx[k]!]!.timeMs, v: frameScale(lm, width, height, cam.rotation) })), SCALE_SMOOTH_S);
   }
+  const times = idx.map(i => frames[i]!.timeMs);
   const camera = smooth.map((lm, k) => cameraPoints(lm, width, height, cam.rotation, scales[k]!, o.imageXY));
   const { up, source } = chooseUp(o.upCue, cam.rotation, camera, o.cameraPitchDeg);
   let ctx: LiftContext = { width, height, ...cam, pxPerM: median(scales), legs: { left: NO_LEG, right: NO_LEG }, gravity: rotationToUp(up), upSource: source, floorY: 0, originX: 0, originZ: 0 };
-  if (o.kneeCalibration) ctx = { ...ctx, legs: { left: legStats(camera, smooth, 'left', up), right: legStats(camera, smooth, 'right', up) } };
+  if (o.kneeCalibration) ctx = { ...ctx, legs: { left: legStats(camera, smooth, times, 'left', up, o.stillSeconds), right: legStats(camera, smooth, times, 'right', up, o.stillSeconds) } };
   camera.forEach(P => { if (o.kneeCalibration) applyKnee(P, ctx, o.fadeFrom); });
   if (o.footLock) { const lock = footLock(); camera.forEach(P => lock(P, ctx.gravity)); }
   ctx = finishContext(ctx, camera, o.gravity);
@@ -433,7 +472,7 @@ function oneEuro(minCutoff = 5, beta = 1, dCutoff = 1) {
 export function createCausalLifter(width: number, height: number, options: LiftOptions = {}) {
   const o = { ...LIFT_DEFAULTS, ...options };
   const filter = oneEuro(), sums = emptySums(), floor = emptyFloor(), lock = footLock(), floors: number[] = [];
-  const newLeg = () => ({ ext: 0, raw: 0, off: 0, deg: 0, capped: false, n: 0, len: 0, nl: 0 });
+  const newLeg = () => ({ ext: 0, raw: 0, off: 0, deg: 0, capped: false, n: 0, len: 0, nl: 0, recent: [] as { t: number; ext: number; hipY: number; ok: boolean }[] });
   const legs = { left: newLeg(), right: newLeg() };
   let last = -Infinity, origin: [number, number] | null = null, scale: number | null = null;
   let context: LiftContext | null = null;
@@ -454,14 +493,19 @@ export function createCausalLifter(width: number, height: number, options: LiftO
       const w = pitched(worldUp(cam.rotation), o.cameraPitchDeg);
       let up: Vec3 = o.upCue === 'image' ? pitched([0, -1, 0], o.cameraPitchDeg) : w, source: LiftContext['upSource'] = o.upCue === 'image' ? 'image' : 'world';
       if (o.upCue === 'floor') { addFloorPoints(floor, P, context?.upSource === 'floor' ? transposeUp(context.gravity) : w); const f = floorUp(floor, w); if (f) { up = f; source = 'floor'; } }
-      const cosPitch = Math.max(0.5, Math.hypot(up[0], up[1]) / (norm(up) || 1));
+      const cosPitch = cosOf(up);
       const legCal = {} as Record<AnatomicalSide, LegCalibration>;
       for (const side of SIDES) {
         const leg = legs[side], [h, k, a] = LEG[side], ext = inPlane(P[h]!, P[a]!);
         const wl = norm(sub(lm[h]!.world! as Vec3, lm[k]!.world! as Vec3)) + norm(sub(lm[k]!.world! as Vec3, lm[a]!.world! as Vec3));
         leg.nl++; leg.len += (wl - leg.len) / Math.min(leg.nl, 50);
         leg.ext = Math.max(ext, leg.ext * Math.exp(-dtS / 60)); // a glitch-long maximum fades over ~1 min
-        const straight = ext >= 0.97 * leg.ext && ext / (leg.len * cosPitch) >= MIN_STANDING_EXTENSION && imageBend(P, side) <= MAX_IMAGE_BEND_DEG;
+        const ok = ext >= NEAR_MAX * leg.ext && ext >= MIN_STANDING_EXTENSION * leg.len * cosPitch && imageBend(P, side) <= MAX_IMAGE_BEND_DEG;
+        leg.recent.push({ t: timeMs, ext, hipY: (P[23]![1] + P[24]![1]) / 2, ok });
+        while (leg.recent.length > 2 && timeMs - leg.recent[1]!.t > o.stillSeconds * 1000 + 600) leg.recent.shift();
+        // Still standing = the trailing STILL_SECONDS all pass (same rule as the offline stillStanding).
+        const r = leg.recent, flags = stillStanding(r.map(x => x.t), r.map(x => x.ext), r.map(x => x.hipY), r.map(x => x.ok), o.stillSeconds);
+        const straight = flags[flags.length - 1] === true;
         if (straight) { // running mean of the raw offset, capped against this verified standing frame
           leg.n++; leg.raw += (kneeChordDepth(P, side) - leg.raw) / Math.min(leg.n, 20);
           const c = capOffset(P, side, leg.raw); leg.off = c.offset; leg.deg = Math.max(0, c.deg); leg.capped = c.capped;

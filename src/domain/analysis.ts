@@ -30,8 +30,15 @@ export interface Sample extends RoiProposal {
   left: AngleValue;
   right: AngleValue;
 }
+/**
+ * Camera pitch (°, + = lens tilted down toward the floor) used to stand the 3D skeleton upright (ADR-080).
+ * Optional; schema not bumped. 'device-orientation' = median phone tilt sensor reading over the live
+ * segment; 'manual' = typed in for an uploaded video.
+ */
+export interface CameraPitch { deg: number; source: 'device-orientation' | 'manual'; readings?: number }
 export interface Session {
   livePerformance?: LivePerformance;
+  cameraPitch?: CameraPitch;
   qcReplay?:{strategy:string;originalSessionId:string;usesSavedObservations:true;detectionRun?:NonNullable<Session['run']>};
   run?:{pipeline:PipelineConfig;inputSpace:'full-frame'|'roi-crop';sourceSha256:string|null;comparisonId:string|null;analysisDurationMs:number;modelPreparationMs:number;requestedSamples:number};
   metadata: AnalysisMetadata;
@@ -47,5 +54,13 @@ export const ANGLE_DEFINITION = 'knee-image-interior-v1';
 export const PROXY_DEFINITION = 'knee-flexion-proxy-180-minus-interior-v1';
 export const QC_POLICY = 'controlled-single-core-qc-v7';
 export const ANALYSIS_SCHEMA_VERSION = '10';
-export const SAMPLING_HZ = 5;
+/** Uploaded-video analysis rate (ADR-081: 5 → 10 Hz; old sessions keep their own samplingHz). */
+export const SAMPLING_HZ = 10;
 export const MAX_DURATION_SECONDS = 600;
+/** Rates an uploaded video may be analysed at: 10 Hz default, 5 Hz only to compare with sessions made before ADR-081. */
+export const ALLOWED_SAMPLING_HZ = [5, 10] as const;
+/** `?hz=5` in the page address re-runs the frozen 5 Hz setting (AGENTS.md comparisons); anything else = SAMPLING_HZ. */
+export function samplingHzFrom(search: string): number {
+  const v = Number(new URLSearchParams(search).get('hz'));
+  return (ALLOWED_SAMPLING_HZ as readonly number[]).includes(v) ? v : SAMPLING_HZ;
+}

@@ -4,7 +4,7 @@ import {comparePipelines,sha256File} from '../motion/compare';
 import type {ComparisonBundle} from '../validation/comparison';
 import {ComparisonPanel} from '../validation/ComparisonPanel';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Session } from '../domain/analysis';
+import { SAMPLING_HZ, samplingHzFrom, type Session } from '../domain/analysis';
 import { MODEL_URL, PROJECT_MODEL_URL } from '../pose/mediapipe';
 import { checkFile, loadVideo, seekFrame, observePresentedFrame } from '../input/video';
 import { analyze } from '../motion/analyze';
@@ -23,6 +23,7 @@ import { AngleChart, CHART_METRICS, type ChartMetric } from '../visualization/An
 import { hipFlexionProxy } from '../biomechanics/posture';
 import { Metric } from './Metric';
 import { calibrationNote, liftSession, poseAt, sessionFlexion } from '../motion/world3d';
+import { MANUAL_PITCH_RANGE, manualPitch, pitchLabel } from '../motion/devicePitch';
 import { Skeleton3D } from '../visualization/Skeleton3D';
 import { plainReason, qcStatus, showAngle, showFlexion } from './plain';
 import { frontalTimeline, type BaselineSource } from '../motion/frontalTimeline';
@@ -117,7 +118,7 @@ export function App() {
       const sourceSha256=sourceFile.current?await sha256File(sourceFile.current):undefined;controller.signal.throwIfAborted();
       const result = await analyze(url.current, info.name, model, allowDownload, structuredClone(selection), controller.signal, (done, total, phase) => {
         if (!controller.signal.aborted) setProgress({ done, total, phase });
-      },{pipeline:{id:pipeline,numPoses:pipeline==='full-frame-multi'?multiPoses:1},...(sourceSha256?{sourceSha256}:{})});
+      },{pipeline:{id:pipeline,numPoses:pipeline==='full-frame-multi'?multiPoses:1},samplingHz:samplingHzFrom(location.search),...(sourceSha256?{sourceSha256}:{})});
       controller.signal.throwIfAborted(); if(storedSession)setHistory(h=>[...h,storedSession]);setSession({...result,analysisRevision:{...result.analysisRevision,parentSessionId:storedSession?.metadata.sessionId??null}});setStale(false);
       if (video.current && result.samples[0]) video.current.currentTime = result.samples[0].requestedTimeMs / 1000;
       setNotice('分析完成；播放不會再次推論。可用取樣滑桿檢查每個已分析影格。');
@@ -129,7 +130,7 @@ export function App() {
     task.current?.abort();uiSeek.current?.abort();const controller=new AbortController();task.current=controller;
     video.current?.pause();setBusy(true);setError('');setNotice('');
     try{
-      const bundle=await comparePipelines(url.current,sourceFile.current,model,allowDownload,selection,multiPoses,controller.signal,(done,total,phase)=>{if(!controller.signal.aborted)setProgress({done,total,phase});});
+      const bundle=await comparePipelines(url.current,sourceFile.current,model,allowDownload,selection,multiPoses,controller.signal,(done,total,phase)=>{if(!controller.signal.aborted)setProgress({done,total,phase});},undefined,samplingHzFrom(location.search));
       controller.signal.throwIfAborted();setComparison(bundle);
       const first=bundle.entries.find(e=>e.session)?.session;
       if(first){if(storedSession)setHistory(h=>[...h,storedSession]);setSession(first);setPipeline(first.run!.pipeline.id);setStale(false);setSampleIndex(0);void seekPlayback(0);}
@@ -179,14 +180,16 @@ export function App() {
     }catch(e){setError(message(e));}
   }
   const exact = session && !seeking ? (matchingSample(session.samples, timeMs) ?? (video.current?.paused ? session.samples.find(s=>s.decode.timeBasis==='seek-position-estimate' && Math.abs(s.requestedTimeMs-video.current!.currentTime*1000)<.001):undefined)) : undefined;
-  // Between 5 Hz samples (playing or paused): show the closest analyzed frame (at most ~0.1 s away) and say so.
-  const held = !exact && session && !seeking ? nearestSample(session.samples, timeMs, NEAREST_MS) : undefined;
+  // Between samples (playing or paused): show the closest analyzed frame (at most half an interval away) and say so.
+  // Windows follow the session's own rate, so old 5 Hz sessions still display as before (ADR-081).
+  const hz = session?.samplingHz && session.samplingHz > 0 ? session.samplingHz : SAMPLING_HZ;
+  const held = !exact && session && !seeking ? nearestSample(session.samples, timeMs, nearestMs(hz)) : undefined;
   const sample = exact ?? held;
   // Drawing only: skeleton and check lines glide between samples; every number still comes from `sample`.
-  const drawn = held && session ? smoothedSample(session.samples, timeMs, held, SMOOTH_MAX_GAP_MS) : sample;
-  const lift3d = useMemo(() => session ? liftSession(session.samples, session.metadata.sourceWidthPx, session.metadata.sourceHeightPx) : null, [session]);
+  const drawn = held && session ? smoothedSample(session.samples, timeMs, held, smoothMaxGapMs(hz)) : sample;
+  const lift3d = useMemo(() => session ? liftSession(session.samples, session.metadata.sourceWidthPx, session.metadata.sourceHeightPx, session.cameraPitch?.deg) : null, [session]);
   const poses3d = lift3d?.poses ?? null;
-  const pose3d = poses3d && session && sample ? (held ? poseAt(session.samples, poses3d, timeMs, held, SMOOTH_MAX_GAP_MS) : poses3d.get(sample.sampleIndex)) : undefined;
+  const pose3d = poses3d && session && sample ? (held ? poseAt(session.samples, poses3d, timeMs, held, smoothMaxGapMs(hz)) : poses3d.get(sample.sampleIndex)) : undefined;
   const heldGapS = held ? Math.abs(timeMs - (held.decode.timeBasis === 'presentation' ? held.sourceTimeMs : held.requestedTimeMs)) / 1000 : 0;
   const frontal = useMemo(() => session && info ? frontalTimeline(session.samples, info.width, info.height, baselineSource, obliqueRef) : [], [session, info, baselineSource, obliqueRef]);
   const frontalFrame = sample ? frontal.find(f => f.sampleIndex === sample.sampleIndex) : undefined;
@@ -253,10 +256,14 @@ export function App() {
       {!info && !loading && <p className="stage-empty">選擇影片後，畫面會出現在這裡</p>}</div>
         {frontalView && session && !selecting && <FrontalLegend view={frontalFrame?.view} />}
         {frontalView && session && !selecting && frontalFrame?.calibration==='whole-video' && <p className="muted small">這段影片裡沒有「站直不動 1 秒」的片段，基準線改用整段影片中站得最直的幾格來定。</p>}
-        {session && !selecting && <Skeleton3D sample={drawn} points={pose3d} note={calibrationNote(lift3d?.context)} />}
+        {session && !selecting && <Skeleton3D sample={drawn} points={pose3d} note={calibrationNote(lift3d?.context)} pitchText={pitchLabel(session.cameraPitch)}>
+          <label className="compact pitch-input">拍攝時手機俯角（°）<input type="number" inputMode="decimal" min={MANUAL_PITCH_RANGE.min} max={MANUAL_PITCH_RANGE.max} step={1} placeholder="未提供" disabled={session.cameraPitch?.source === 'device-orientation'}
+            value={session.cameraPitch ? String(Math.round(session.cameraPitch.deg)) : ''} onChange={e => { if (!storedSession) return; const p = manualPitch(e.target.value); const { cameraPitch: _old, ...rest } = storedSession; setSession(p ? { ...rest, cameraPitch: p } : rest); }} /></label>
+          <p className="muted small">影片檔沒有手機感測器資料。可在拍攝前用手機的水平儀 App 量俯角（鏡頭往下為正，0–30°）填在這裡，或改用「即時鏡頭」模式自動讀取；不填就照原本方式估計。</p>
+        </Skeleton3D>}
         <div className="speed" role="group" aria-label="播放速度"><span className="muted small">播放速度</span><div className="segmented small-seg">{SPEEDS.map(r=><button key={r} aria-pressed={speed===r} onClick={()=>setSpeed(r)}>{r===1?'正常':`${r}×`}</button>)}</div></div>
         {session && <label className="scrub">逐格檢查<input aria-label="已分析取樣" type="range" min={0} max={session.samples.length-1} disabled={selecting} value={sampleIndex} onChange={e => jump(Number(e.target.value))} /><span className="muted">#{sampleIndex} / {session.samples.length-1}</span></label>}
-        <p className="muted small">來源影格時間：{(timeMs/1000).toFixed(3)} 秒。{held ? `顯示最近的分析影格（取樣 #${held.sampleIndex}，相差 ${heldGapS.toFixed(2)} 秒；影片每秒分析 5 次）` : sample ? `對應取樣 #${sample.sampleIndex}（${sample.decode.timeBasis}）` : '這附近沒有分析結果（可能在分析範圍外），骨架與角度不顯示。'}</p>
+        <p className="muted small">來源影格時間：{(timeMs/1000).toFixed(3)} 秒。{held ? `顯示最近的分析影格（取樣 #${held.sampleIndex}，相差 ${heldGapS.toFixed(2)} 秒；影片每秒分析 ${hz} 次）` : sample ? `對應取樣 #${sample.sampleIndex}（${sample.decode.timeBasis}）` : '這附近沒有分析結果（可能在分析範圍外），骨架與角度不顯示。'}</p>
       </div><div className="readout">
         <div className="group"><h3 className="group-title">膝蓋</h3><div className="measurements">
         {sides.map(s => {
@@ -293,7 +300,7 @@ export function App() {
     <section className="card" aria-labelledby="chart-title"><div className="card-head"><h2 id="chart-title">角度曲線與匯出</h2>
       {session && <label className="compact">曲線指標<select aria-label="曲線指標" value={chartMetric} onChange={e=>setChartMetric(e.target.value as ChartMetric)}>{(Object.keys(CHART_METRICS) as ChartMetric[]).map(k=><option key={k} value={k}>{CHART_METRICS[k].label}</option>)}</select></label>}</div>
       {session ? <><AngleChart samples={session.samples} side={side} timeMs={timeMs} metric={chartMetric} poses={poses3d} />{chartMetric.endsWith('3d')&&!session.samples.some(s=>s.landmarks.some(p=>p.world))&&<p>這次分析沒有 3D 骨架點，請重新分析。</p>}{chartMetric!=='knee'&&chartMetric!=='knee3d'&&!session.samples.some(s=>s.posture)&&<p>此分析版本沒有姿勢指標，請重新分析。</p>}
-        <p className="muted small">已分析 {session.samples.length} 個取樣；每秒 5 次目標取樣，不代表全部影格。可辨識的重複呈現時間已排除；無效取樣保留為曲線斷點。</p>
+        <p className="muted small">已分析 {session.samples.length} 個取樣；每秒 {hz} 次目標取樣，不代表全部影格。可辨識的重複呈現時間已排除；無效取樣保留為曲線斷點。</p>
         <div className="actions">
         <button className="secondary" onClick={() => downloadFile(`knee-${session.metadata.sessionId}.csv`, toCsv(session), 'text/csv;charset=utf-8')}>下載 CSV</button>
         <button className="secondary" onClick={() => downloadFile(`research-${session.metadata.sessionId}.json`, JSON.stringify(session, null, 2), 'application/json')}>下載研究 JSON（含 landmarks）</button>
@@ -333,11 +340,11 @@ export function App() {
     <footer className="disclaimer">本系統為學術概念驗證，不提供醫療診斷或治療建議。2D 影像平面幾何角不是經驗證的臨床角度；側面視角較適合觀察，遮蔽與透視會影響結果。</footer>
   </div>;
 }
-/** Half a 5 Hz interval plus decoder jitter: every frame maps to its closest analyzed sample, so the skeleton lags at most ~0.1 s. */
-const NEAREST_MS = 120;
-/** Skeleton smoothing only bridges neighbouring 5 Hz samples (one interval plus jitter), never a gap. */
-const SMOOTH_MAX_GAP_MS = 250;
-/** Slow motion by default: easier for PTs to follow, and the 5 Hz skeleton keeps up with the body better. */
+/** Half a sampling interval plus decoder jitter: every frame maps to its closest analyzed sample (5 Hz → 120 ms, 10 Hz → 70 ms). */
+const nearestMs = (hz: number) => 500 / hz + 20;
+/** Skeleton smoothing only bridges neighbouring samples (one interval plus jitter), never a gap (5 Hz → 250 ms, 10 Hz → 150 ms). */
+const smoothMaxGapMs = (hz: number) => 1000 / hz + 50;
+/** Slow motion by default: easier for PTs to follow, and the sampled skeleton keeps up with the body better. */
 const SPEEDS = [0.25, 0.5, 1] as const;
 const DEFAULT_SPEED = 0.5;
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
