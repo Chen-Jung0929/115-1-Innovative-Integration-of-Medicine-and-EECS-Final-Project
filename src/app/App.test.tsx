@@ -11,4 +11,9 @@ describe('dataset demo screen', () => {
     const html=renderToStaticMarkup(<App />);
     expect(html).toContain('不提供醫療診斷或治療建議'); expect(html).toContain('暫定屈曲 proxy'); expect(html).toContain('N/A');
   });
+  it('offers a live camera mode next to uploaded video, without starting the camera on load', () => {
+    const html=renderToStaticMarkup(<App />);
+    expect(html).toContain('上傳影片'); expect(html).toContain('即時鏡頭');
+    expect(html).not.toContain('開啟鏡頭');
+  });
 });

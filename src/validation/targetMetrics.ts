@@ -1,11 +1,13 @@
 import type { Sample } from '../domain/analysis';
 import type { HumanReview } from '../domain/tracking';
+import { reviewedPosture } from '../tracking/gate';
 export function applyReview(sample: Sample, review: HumanReview | undefined): Sample {
   const {review: _old, ...rest}=sample;
-  if (!review) return {...rest,...sample.automaticAngles};
+  const posture=(allowed:boolean)=>sample.posture?{posture:{...sample.posture,final:reviewedPosture(sample.posture.automatic,allowed)}}:{};
+  if (!review) return {...rest,...sample.automaticAngles,...posture(true)};
   review = {...review,identityId:review.label==='correct-target'?'target':['mixed-landmarks','uncertain'].includes(review.label)?'':review.identityId.trim()};
   const allowed = review.label === 'correct-target';
-  return {...rest,review,...(allowed?sample.automaticAngles:{left:{valid:false,rawAngleDeg:null,invalidReasons:['identity-uncertain']},right:{valid:false,rawAngleDeg:null,invalidReasons:['identity-uncertain']}})};
+  return {...rest,review,...posture(allowed),...(allowed?sample.automaticAngles:{left:{valid:false,rawAngleDeg:null,invalidReasons:['identity-uncertain']},right:{valid:false,rawAngleDeg:null,invalidReasons:['identity-uncertain']}})};
 }
 export function targetMetrics(samples: readonly Sample[]) {
   const reviewed=samples.filter(s=>s.review);

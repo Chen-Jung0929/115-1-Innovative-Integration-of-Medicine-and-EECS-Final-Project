@@ -80,7 +80,7 @@ confidence 不在 [0,1]、缺點或任一向量 <1e-6 px 判為無效。0° 本�
 
 Input seek 原圖 → canvas 裁切 ROI → PoseEngine 的獨立候選陣列 → fromCrop 原圖映射 →
 TargetTracker 四維篩檢 → rawAngles／automaticAngles → 人工 review → 最終角度、圖表、CSV。
-ROI 固定且 referenceTimeMs=0；所有來源時間與 5 Hz 目標網格不變。
+ROI 固定且 referenceTimeMs=0；所有來源時間與 10 Hz 目標網格不變。
 
 新增 src/tracking（純 TS：ROI、可替換 TargetTracker、identity gate），
 src/validation（純指標、人工覆核及 React review panel）。核心 knee.ts 仍只處理幾何與點位 QC，
@@ -95,7 +95,7 @@ CSV 附 ROI／自動與最終 validity／人工標籤／政策版本。原始模
 ## ROI 編輯與 keyframes（Phase A）
 
 草稿與分析 session 分離；Apply 建立新 selection ID／revision，舊分析標記 stale 並保留原始 JSON。完成重分析後保留前版記憶體存檔。
-Manual Keyframes 使用影片尋時位置（media-position ms）記錄人工重新確認，固定 5 Hz 目標網格不變；線性插值 source-pixel x/y/width/height，最後一框之後保持。每 sample 記錄實際 ROI、更新原因、manual keyframe ID。
+Manual Keyframes 使用影片尋時位置（media-position ms）記錄人工重新確認，固定 10 Hz 目標網格不變；線性插值 source-pixel x/y/width/height，最後一框之後保持。每 sample 記錄實際 ROI、更新原因、manual keyframe ID。
 到達新人工 keyframe 的第一個取樣重新建立模型／tracker，避免沿用錯誤內部追蹤；角度永遠來自該次實際模型觀測，不插值。selection 與分析版本記錄 parentSelectionId／parentSessionId，重分析不修改舊 session。
 
 ## v0.4.0 current controller contract
@@ -114,7 +114,7 @@ Controller 只用前一 accepted pose 更新下一框；明確記錄每 sample R
 
 ```mermaid
 flowchart TD
- I[5Hz source frame] --> D{Pipeline}
+ I[10Hz source frame] --> D{Pipeline}
  D -->|A/C full original frame| P[Pose Detection: 1 or 2/3 candidates]
  P --> S[Subject Selection: initial torso reference]
  S --> T[Temporal Identity: source coordinates]
@@ -128,13 +128,13 @@ flowchart TD
 
 A/C 的 inference ROI 永遠為全圖；targetReferenceRoi 不是裁切範圍，選人與裁切分離。
 完整raw候選保留，subjectDecision 記 selected／proposed index（不當固定身分）。
-同源 runner 固定影片／模型hash、selection與5Hz，獨立依序執行三法並保留單法失敗。
+同源 runner 固定影片／模型hash、selection與10Hz，獨立依序執行三法並保留單法失敗。
 不直接宣稱每法 decoder 取得相同呈現影格；輸出 common target grid、timing basis、已知偏移及完整分母。
 
 ## v0.5.1 QC 分離（v0.6沿用，初始化更新見下節）
 
 本節取代上文以全身幾何 gate 身分的描述，詳見 [QC_REPLAY.md](QC_REPLAY.md)。
-Detection／ROI／5Hz 工作流不擴充；A/C 完整影格、B 原裁切設計維持。
+Detection／ROI／10Hz 工作流不擴充；A/C 完整影格、B 原裁切設計維持。
 `identity.ts` 只用 torso／候選證據做 identity state 與歷史更新；`target.ts` 為 B 包裝 crop 的 torso 約束。
 `biomechanics/jointQuality.ts` 為每側純觀測 QC；`tracking/jointQuality.ts` 為每側 temporal state／確認序列。
 
@@ -161,7 +161,7 @@ Offline replay 使用相同核心；CLI 不載入 MediaPipe 或模型、不啟�
 ## v0.6 單人主要流程
 
 UI 與 analyze 共用 DEFAULT_PIPELINE（完整原尺寸影格／numPoses1）。上傳成功由 input/singleSubject.ts 建立全圖參考，
-source=controlled-single-default；不要求ROI、不偽造人工確認／manualKeyframeId。核心幾何／逐側QC與5Hz時間序列共用，保留實驗分支。
+source=controlled-single-default；不要求ROI、不偽造人工確認／manualKeyframeId。核心幾何／逐側QC與10Hz時間序列共用，保留實驗分支。
 主要UI只需影片／模型、分析、影格／角度／曲線與CSV／研究JSON；管線選擇、ROI與比較預設收合，研究診斷及標註另收合。
 初始未取得可靠torso時可等待，不因首筆空觀測直接人工鎖定；可靠初始化後仍受原identity安全恢復與逐側joint確認。
 全圖樣本previousState保存實際上一筆狀態，不固定寫TRACKING；schema9與policy版本反映本版語意。
