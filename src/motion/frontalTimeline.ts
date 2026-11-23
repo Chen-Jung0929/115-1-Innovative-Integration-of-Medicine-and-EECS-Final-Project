@@ -5,7 +5,7 @@ import { flexionProxy } from '../biomechanics/knee';
 import { gateReason } from '../tracking/gate';
 import { BASELINE_POLICY, createBaselineAnchor, type BaselineState } from './baseline';
 import { createCueTracker, instantCues, lateralCues, type Cue } from './frontalCues';
-import { LATERAL_POLICY, classifyView, measureLateral, type LateralMetrics, type ViewKind } from '../biomechanics/lateral';
+import { LATERAL_POLICY, classifyView, measureLateral, viewRatio, type LateralMetrics, type ViewKind } from '../biomechanics/lateral';
 
 /**
  * Where the baseline sits once locked.
@@ -36,10 +36,12 @@ export const VIEW_HOLD_MS = 600;
  */
 export const WHOLE_VIDEO_VIEW_MIN_SHARE = 0.6;
 /**
- * oblique-reference-v1: when the user opts in, oblique views (shoulder/torso ratio between the side
- * and frontal limits) are measured with the frontal checks and labelled reference-only. Off by default.
+ * oblique-reference-v2: oblique views (shoulder/torso ratio between the side and frontal limits) are
+ * still checked and labelled reference-only: closer to frontal (ratio ≥ OBLIQUE_SPLIT_RATIO) with the
+ * frontal checks, closer to side with the side checks. On by default; the user can turn it off.
  */
 export const OBLIQUE_MIN_SHOULDER_RATIO = LATERAL_POLICY.sideMaxRatio;
+export const OBLIQUE_SPLIT_RATIO = (LATERAL_POLICY.sideMaxRatio + LATERAL_POLICY.frontalMinRatio) / 2;
 export const OFFLINE_CALIBRATION = { version: 'offline-standing-calibration-v1', relaxedMaxKneeFlexionDeg: 35, minSamples: 3 } as const;
 
 export interface FrontalFrame {
@@ -101,6 +103,7 @@ export function frontalTimeline(samples: readonly Sample[], width: number, heigh
   const offline = offlineCalibration(samples, width, height, source, ratio);
   const anchor = createBaselineAnchor();
   const clipView = wholeVideoView(samples, width, height);
+  const clipRatio = clipView === 'oblique' ? uprightMedianRatio(samples, width, height) : null;
   let stableView: ViewKind | null = null;
   let pendingView: { view: ViewKind; since: number } | null = null;
   const tracker = createCueTracker();
@@ -145,7 +148,9 @@ export function frontalTimeline(samples: readonly Sample[], width: number, heigh
     }
     const detected = usable && rawView !== null ? clipView ?? stableView : null;
     const approximate = obliqueAsFrontal && detected === 'oblique';
-    const view = approximate ? 'frontal' : detected;
+    // A fixed-camera oblique clip uses one ratio for the whole clip, so the check type does not flip.
+    const r = approximate ? clipRatio ?? viewRatio(s.landmarks, width, height) : null;
+    const view = approximate ? (r !== null && r < OBLIQUE_SPLIT_RATIO ? 'side' : 'frontal') : detected;
     let lateral: LateralMetrics | null = null;
     if (view === 'side') {
       const m = measureLateral(s.landmarks, width, height);
@@ -203,6 +208,19 @@ function wholeVideoView(samples: readonly Sample[], width: number, height: numbe
   for (const { v } of pool) counts.set(v, (counts.get(v) ?? 0) + 1);
   for (const [v, n] of counts) if (total > 0 && n / total >= WHOLE_VIDEO_VIEW_MIN_SHARE) return v;
   return null;
+}
+
+/** Median shoulder/torso ratio of the upright usable samples (all usable samples if too few are upright). */
+function uprightMedianRatio(samples: readonly Sample[], width: number, height: number): number | null {
+  const usable = samples.flatMap(s => {
+    if ((s.review !== undefined && s.review.label !== 'correct-target') || !s.tracking.accepted) return [];
+    const r = viewRatio(s.landmarks, width, height);
+    const l = flexionProxy(s.left), rt = flexionProxy(s.right);
+    return r === null ? [] : [{ r, upright: l !== null && rt !== null && Math.max(l, rt) <= OFFLINE_CALIBRATION.relaxedMaxKneeFlexionDeg }];
+  });
+  const upright = usable.filter(u => u.upright);
+  const pool = (upright.length >= OFFLINE_CALIBRATION.minSamples ? upright : usable).map(u => u.r).sort((a, b) => a - b);
+  return pool.length ? pool[Math.floor(pool.length / 2)]! : null;
 }
 
 /** Mean standing tilt per metric; a metric without any valid standing value stays uncalibrated. */

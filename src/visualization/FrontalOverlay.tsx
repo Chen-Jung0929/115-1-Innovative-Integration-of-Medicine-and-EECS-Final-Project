@@ -118,10 +118,11 @@ export function FrontalCuePanel({ frame, hasSample, notice }: { frame: FrontalFr
   // Why the person is not tracked, held ≥ 0.5 s so it cannot flicker (src/app/plain.ts trackingNotices).
   else if (notice?.blocking) { body = <p className="cue-muted">{notice.text}</p>; hintUsed = true; }
   else if (!frame.tracked) body = <p className="cue-muted">這一格看不清楚個案，暫不判斷</p>;
-  else if (frame.view === 'oblique') body = <p className="cue-muted">{frame.clipView === 'oblique' ? '斜角拍攝：檢查線只適用正面或側面' : '身體轉得太斜，先不判斷（正面或正側面拍才準）'}</p>;
+  else if (frame.view === 'oblique') body = <p className="cue-muted">{frame.clipView === 'oblique' ? '斜角拍攝：已關閉斜角判斷' : '身體轉得太斜，已關閉斜角判斷'}</p>;
+  else if (frame.view === 'side' && frame.approximate) body = <><p className="cue-muted">斜角拍攝，用側面檢查，僅供參考</p>{frame.cues.length ? cueList(frame.cues) : <p className="cue-ok">✓ 膝蓋與上身在範圍內</p>}</>;
   else if (frame.view === 'side') body = frame.cues.length ? cueList(frame.cues) : SIDE_OK;
   else if (frame.view !== 'frontal') body = <p className="cue-muted">看不清楚軀幹點位，暫不判斷</p>;
-  else if (frame.approximate && frame.baseline.state === 'locked') body = <><p className="cue-muted">斜角拍攝，僅供參考（2D 投影會有誤差）</p>{frame.cues.length ? cueList(frame.cues) : <p className="cue-ok">✓ 姿勢在基準線附近</p>}</>;
+  else if (frame.approximate && frame.baseline.state === 'locked') body = <><p className="cue-muted">斜角拍攝，用正面檢查，僅供參考</p>{frame.cues.length ? cueList(frame.cues) : <p className="cue-ok">✓ 姿勢在基準線附近</p>}</>;
   // Cut-off feet keep the baseline from locking: say that instead of asking to stand still.
   else if (frame.baseline.state !== 'locked' && notice && notice.cause !== 'head-cut') { body = <p className="cue-muted">{notice.text}</p>; hintUsed = true; }
   else if (frame.baseline.state !== 'locked') body = <p className="cue-muted">{frame.relocking ? '個案換了位置：等他再站直約 1 秒會重畫基準線' : '還找不到站直的畫面：請個案先站直、不動約 1 秒，才能畫基準線'}</p>;

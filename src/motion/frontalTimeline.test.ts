@@ -80,8 +80,15 @@ describe('frontal timeline over analysed samples', () => {
     expect(t[5]!.cues).toEqual([]);
   });
 
-  it('opt-in: an oblique clip is checked like a frontal one and marked reference-only', () => {
-    const oblique = () => { const p = pose(); p[11] = v(.45, .2); p[12] = v(.55, .2); return p; };
+  it('oblique closer to side: checked with the side checks and marked reference-only', () => {
+    const oblique = () => { const p = pose(); p[11] = v(.45, .2); p[12] = v(.55, .2); return p; }; // ratio 0.33
+    const on = frontalTimeline([0, 1, 2, 3, 4, 5].map(i => at(i, oblique())), 100, 100, 'standing-trunk', true);
+    expect(on[5]!.view).toBe('side');
+    expect(on[5]!.approximate).toBe(true);
+    expect(on[5]!.lateral).not.toBeNull();
+  });
+  it('opt-in: an oblique clip closer to frontal is checked like a frontal one and marked reference-only', () => {
+    const oblique = () => { const p = pose(); p[11] = v(.42, .2); p[12] = v(.58, .2); return p; };
     const off = frontalTimeline([0, 1, 2, 3, 4, 5].map(i => at(i, oblique())), 100, 100);
     expect(off[5]!.approximate).toBe(false);
     const on = frontalTimeline([0, 1, 2, 3, 4, 5].map(i => at(i, oblique())), 100, 100, 'standing-trunk', true);

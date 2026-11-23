@@ -33,14 +33,20 @@ const ok = (value: number): ScalarValue => Number.isFinite(value) ? { valid: tru
  * visibility gate) because the far shoulder is often low-visibility in a side view; null when the
  * points are missing or non-finite.
  */
-export function classifyView(landmarks: readonly Landmark[], width: number, height: number): ViewKind | null {
+/** Shoulder width / torso length in the image (≈1 facing the camera, ≈0 side-on); null when unusable. */
+export function viewRatio(landmarks: readonly Landmark[], width: number, height: number): number | null {
   const p = [11, 12, 23, 24].map(i => landmarks[i]);
   if (p.some(q => !q || !Number.isFinite(q.x) || !Number.isFinite(q.y))) return null;
   const [ls, rs, lh, rh] = p.map(q => ({ x: q!.x * width, y: q!.y * height })) as [Point, Point, Point, Point];
   const sm = { x: (ls.x + rs.x) / 2, y: (ls.y + rs.y) / 2 }, hm = { x: (lh.x + rh.x) / 2, y: (lh.y + rh.y) / 2 };
   const torso = Math.hypot(sm.x - hm.x, sm.y - hm.y);
   if (!(torso > 1e-6)) return null;
-  const ratio = Math.abs(ls.x - rs.x) / torso;
+  return Math.abs(ls.x - rs.x) / torso;
+}
+
+export function classifyView(landmarks: readonly Landmark[], width: number, height: number): ViewKind | null {
+  const ratio = viewRatio(landmarks, width, height);
+  if (ratio === null) return null;
   return ratio >= LATERAL_POLICY.frontalMinRatio ? 'frontal' : ratio <= LATERAL_POLICY.sideMaxRatio ? 'side' : 'oblique';
 }
 
