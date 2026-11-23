@@ -17,7 +17,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .video-stage { position: relative; line-height: 0; background: #101b1e; }
 video { width: 100%; height: auto; display: block; }
 .overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-.measurements article { background: #f3f7f6; padding: 12px 20px; border-radius: 10px; margin-bottom: 16px; }
+.measurements article, .posture-measurements article { background: #f3f7f6; padding: 12px 20px; border-radius: 10px; margin-bottom: 16px; }
+.posture-measurements { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+.posture-measurements article { margin-bottom: 0; }
 .angle { font-size: 2.3rem; font-weight: 700; margin: 0; color: #0c665b; }
 .error { color: #a22218; background: #fff2ee; padding: 12px; }
 progress { width: 100%; }

@@ -12,7 +12,8 @@ import { checkedKeyframes,roiAt } from '../tracking/keyframes';
 import { checkedRoi, fromCrop } from '../tracking/roi';
 import { createRoiController, FOLLOW_POLICY, type FramePlan } from '../tracking/controller';
 import { TRACKING_POLICY, JOINT_POLICY } from '../tracking/policy';
-import { gateAngle } from '../tracking/gate';
+import { gateAngle, gatePosture } from '../tracking/gate';
+import { measurePosture } from '../biomechanics/posture';
 import pkg from '../../package.json';
 
 export interface AnalysisOptions {pipeline?:PipelineConfig;asset?:Awaited<ReturnType<typeof modelBytes>>;sourceSha256?:string;comparisonId?:string}
@@ -80,7 +81,9 @@ export async function analyze(url: string, filename: string, model: File | null,
       const subjectDecision=fullResult?.decision??{selectedIndex:tracking.accepted?0:null,proposedIndex:candidates.length===1?0:null,reason:'roi-primary-single-candidate'};
       const rawAngles = {left:kneeAngle(landmarks,'left',decoder.videoWidth,decoder.videoHeight),right:kneeAngle(landmarks,'right',decoder.videoWidth,decoder.videoHeight)};
       const automaticAngles = {left:gateAngle(rawAngles.left,tracking,'left'),right:gateAngle(rawAngles.right,tracking,'right')};
-      samples.push({ sampleIndex: samples.length, requestedTimeMs: time * 1000, sourceTimeMs, decode, ...proposal, targetReferenceRoi:reference.roi, subjectDecision, search, landmarks, candidates, tracking, rawAngles, automaticAngles, ...automaticAngles });
+      const rawPosture = measurePosture(landmarks,decoder.videoWidth,decoder.videoHeight);
+      const automaticPosture = gatePosture(rawPosture,tracking);
+      samples.push({ sampleIndex: samples.length, requestedTimeMs: time * 1000, sourceTimeMs, decode, ...proposal, targetReferenceRoi:reference.roi, subjectDecision, search, landmarks, candidates, tracking, rawAngles, automaticAngles, ...automaticAngles, posture:{raw:rawPosture,automatic:automaticPosture,final:automaticPosture} });
       previous = sourceTimeMs;
       progress(index + 1, times.length, '分析中');
       await new Promise(resolve => setTimeout(resolve, 0)); // Allow cancellation / progress paint.
