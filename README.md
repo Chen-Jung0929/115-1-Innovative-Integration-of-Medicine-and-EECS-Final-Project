@@ -2,40 +2,172 @@
 
 國立臺灣大學 115-1 醫學電資創意整合專題 · Real-Time Joint Motion Analysis System
 
-我們希望讓物理治療師用一般攝影機觀察動作，逐步取得關節角度、變化曲線與活動範圍。
-這是**學術概念驗證（PoC）**，僅輔助運動評估與溝通，不提供醫療診斷或治療建議。
-姿態辨識估計值尚未證明等同於臨床量測。
+這是一套讓團隊以瀏覽器觀察人體動作、檢查膝部影像平面角度的學術概念驗證（PoC）。
+**不提供醫療診斷或治療建議，模型估計值不是經驗證的臨床角度。**
 
-## 目前成果
+## 目前成果與驗證狀態
 
-已建立 React + TypeScript + Vite 基礎專案、初始化狀態頁、模組目錄、資料契約與研究文件。
-**目前尚不能分析影片或攝影機**；沒有模型推論、角度計算、曲線、ROM 或匯出功能。
-本次驗證結果見 [Iteration 01](docs/updates/iteration-01.md)。
+v0.6.1 沿用單人主要流程並修正暫態軀幹跳變恢復。v0.6.0 將 Dataset Demo 收斂為**單人完整影格分析**：上傳 MP4 後直接開始，不必框選或比較多種管線。
+適用條件為單一受測者、固定鏡頭、完整人體入鏡的 Squat。ROI、自動跟隨、多姿態與 A/B/C 比較保留在
+預設收合的「實驗性功能」，研究診斷及人工標註另行收合，不再是一般操作的前置步驟。
 
-## 開發路線（以功能完成決定版本）
+目前已完成主要流程與自動回歸驗證；**真實單人 Squat 穩定性待驗收，尚未宣稱 Dataset Demo 的人體驗收完成**。
+本次已取得上傳影片、CSV與研究JSON並完成QC重播；沒有有效官方模型，未重新執行MediaPipe或完成人工準確度驗證。
 
-| 階段 | 預期可操作成果 | 狀態 |
-| --- | --- | --- |
-| Initialization | 可安裝、測試與建置的專案骨架及研究規範 | 本次交付 |
-| V0 Dataset Demo | 側面深蹲影片 → 骨架 → 膝部角度 → 曲線 → CSV | 尚未開始；下一個獨立任務為 V0.1 |
-| V1 Real-Time Demo | 筆電攝影機即時骨架、角度與曲線 | 規劃中 |
-| V2 Clinical Motion Analysis | 上下台階、單腳抬高 90°；依物治定義分析角度與 ROM | 待定義確認 |
-| V3 Validation | 人工參考標註、MAE／RMSE／Bias、視角與追蹤效度分析 | 規劃中 |
-| V4 Final PoC | 操作介面、保存、前後測比較及初步驗證結果 | 規劃中 |
+團隊先前回報 v0.5 三法各只有 4/155 筆自動有效，原因之一是腿段尺度跳變被升級為永久身分鎖定。
+v0.5.1 已分離 QC，本版沿用：局部腿部異常只使受影響側角度暫時無效，連續可靠觀測後才恢復。
+另修正首筆沒有可靠姿態時的鎖定：初始化期間保留 N/A，等待可信觀測，不將未取得姿態視為已換人。
+多人歧義、明顯軀幹跳換及已追蹤目標的長時間遺失仍拒絕，不會無條件接受所有候選。
 
-## 如何啟動（開發者）
+實際檢查：139 個單元測試、typecheck、build 通過；Chromium 31 通過／2 項真實資產測試跳過，見 [本次迭代紀錄](docs/updates/iteration-11-single-subject-demo.md)。
+build 仍有 bundle 大小警告。原始觀測、無效原因、模型 hash、版本與研究 JSON 都保留。
+[單人分析方法與驗收](docs/SINGLE_SUBJECT_DEMO.md) 說明研究邊界；可用率增加不等於準確度改善。
 
-需要 Node.js（本次使用 24.22.1；版本見 `.nvmrc`）與 npm。
-在專案根目錄執行：
+## v0.6.1 實測附件修正
+
+已核對上傳的 `subject_010_squat_good_side.mp4`、CSV 與研究 JSON：影片29.733秒，
+原結果148筆、左膝有效16筆、3.2秒起132筆人工鎖定。來源影片hash與JSON紀錄一致。
+
+只有受控單人預設模式可將短暫torso跳變先記為UNCERTAIN：相對最後可信位置有界、
+1600ms內取得三次連續嚴格確認，再完成原有各側關節確認才恢復。等待期間角度仍無效。
+多候選歧義、超界、逾時與既有人工要求仍鎖定；ROI／多人實驗策略不變。
+
+同一份已保存候選的QC重播：3.2–3.6秒無效，3.8秒身分規則恢復、4.0秒左膝量測恢復；
+左膝143/148、右膝0/148，新增127筆自動放行皆待人工核對。這不是重新執行MediaPipe或accuracy驗證。
+影片抽查有背景人物；numPoses1不能證明現場只有一人，不能據此宣稱完整單人實測驗收通過。
+詳見 [本次修正與實際結果](docs/updates/iteration-12-controlled-recovery.md)。
+
+## 安裝與啟動
+
+先安裝 Node.js（本次使用 24.22.1，見 `.nvmrc`）。本版目前在 `feature/controlled-single-recovery`，尚未合併 main；
+請取得這個分支的檔案。已有 Git checkout 的組員可在專案目錄執行：
+
+```sh
+git fetch origin
+git switch feature/controlled-single-recovery
+```
+
+接著安裝並啟動：
 
 ```sh
 npm ci
 npm run dev
 ```
 
-若雲端預設 npm cache 無法寫入，使用 `npm ci --cache /workspace/.cache/npm`。
-啟動後會看到初始化說明頁；沒有資料上傳或攝影機存取。
-本機開發伺服器預設埠為 5173。完整檢查：
+依終端機提示在本機瀏覽器開啟開發頁面。建議新版 Chrome／Edge，須支援
+`requestVideoFrameCallback`。雲端 npm 快取若無法寫入，改用：
+
+```sh
+npm ci --cache /workspace/.cache/npm
+```
+
+安裝會自動把已鎖定的 `@mediapipe/tasks-vision` 套件內 WASM 複製到
+`public/mediapipe/wasm/`。**不使用外部 WASM CDN**，勿混用其他版本。
+正式建置使用 `npm run build`，`npm run preview` 可在本機檢查建置結果。
+模型與影片準備好後，分析過程不需要把資料傳送到遠端；本版沒有攝影機或後端。
+
+## 在 Mac 準備官方模型
+
+僅使用 Google 官方 Pose Landmarker Lite 模型：
+
+- 模型檔名：`pose_landmarker_lite.task`
+- [官方模型下載](https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task)
+
+將連結下載至 Mac，確認存下的是 `.task` 二進位檔，而不是錯誤網頁或 HTML。
+不要下載非官方替代模型來繞過網路限制。可以用以下任一方式載入：
+
+1. **專案本機路徑（預設）**：把檔案放在
+   `public/models/pose_landmarker_lite.task`。開發伺服器會透過
+   `/models/pose_landmarker_lite.task` 提供檔案；這是網址路徑，不是 Mac 的根目錄。
+2. **直接選取 Mac 檔案**：展開「模型設定與資料隱私」，按「本機 .task 模型」選取
+   已下載檔案。手動選取的檔案優先於專案路徑，不需要複製檔案或上傳到伺服器。
+   按「改用專案本機模型」可取消這個選擇。
+3. **選用官方下載**：明確勾選「本機模型不存在時，允許從 Google 官方下載」。
+   只有專案路徑不存在且已勾選時才連線 Google；預設不自動下載。
+
+每次分析會記錄模型來源、套件版本與實際內容的 SHA-256；這是識別與重現資訊，
+不是模型授權或醫療效度的保證。不同來源的模型不可未經確認就混合比較。
+
+`.task`、產生的 WASM、影片與輸出都排除於 Git；請勿強制加入。
+在確認模型授權與分發方案前，不提交大型模型二進位檔。
+若把模型放進 `public/`，建置會將它複製到 `dist/`；對外部署前仍須檢查再分發授權。
+目前程式庫授權記錄見 [模型與資源說明](docs/MODEL_SETUP.md)。
+
+## 一般組員操作：單人影片分析
+
+1. 準備單人、固定鏡頭、完整人體入鏡的側面 Squat MP4。避免遮蔽與畫面外動作；「單姿態」模型不會替我們確認現場只有一人。
+2. 選取 MP4；畫面會顯示檔名、長度及尺寸。若尚未放好模型，展開「模型設定與資料隱私」，從 Mac 選取官方 `.task`。
+3. 按「開始分析」。不需 ROI；模型收到完整原圖，每秒 5 次目標取樣。進度會更新，也可取消。
+4. 完成後播放、暫停或使用取樣滑桿，檢查骨架、左右膝 2D 內角及下方時間曲線；播放不會重新執行模型。
+5. 無效量測顯示 **N/A**，曲線留斷點，不以 0°、前一角度或插值補上。暫時缺點與恢復確認中的樣本均保留無效。
+6. 按「下載 CSV」匯出角度，或「下載研究 JSON」保存原始 landmarks、候選、QC、時戳與版本。關閉網頁前先下載，沒有自動上傳或保存。
+7. 按「重新分析」重跑同一影片；變更設定後舊結果會標示過期並保留舊 JSON，不會悄悄混入新角度。
+
+定義：髖–膝–踝在膝點的影像平面內角，先按原始影片寬高還原像素；暫定屈曲 proxy 是 180° 減內角。
+左右為人體解剖側，不是畫面左右。角度受視角、遮蔽、模型錯點影響，並非經驗證的臨床屈曲角。
+綠色骨架與自動 QC 通過也不等於人工確認或角度真值，請同時看原片與量測有效狀態。
+
+### 遇到暫時異常
+
+- 膝／踝缺失、低信心、退化幾何或腿段跳變：只拒絕受影響側；可信觀測需連續通過確認，之後才恢復該側角度。
+- 首筆無姿態／軀幹失信：等待可靠初始化，不把整段永久設為無效。
+- 已追蹤後短暫完全缺失：須在既有 650ms 安全窗口內完成軀幹確認，再完成各側關節確認；等待仍為 N/A。
+- 若提示人物一致性無法確認：請檢查影片是否符合單人、固定鏡頭、完整入鏡條件，重新分析或換合適片段。系統不會自動解除真正的身分疑慮。
+
+需要查看原始失敗原因或逐樣本標註時，展開「研究診斷與人工檢查」。人工 Wrong／Mixed／Uncertain 會使最終角度無效，原自動決策另存。
+輸出含人體特徵與來源檔名，請存於受限空間，不要提交 Public GitHub。
+
+### 實驗性功能（非主要流程）
+
+展開「實驗性功能（ROI／多人／A/B/C 比較）」後，仍可使用原 ROI 編輯、Fixed／Manual Keyframes／Adaptive、
+全圖 Multi-Pose（2／3 候選）及同源比較。沒有擴充這些演算法；它們不是本版的穩定性承諾或主要驗收方向。
+目前使用實驗設定時，主要區域會明確顯示；收合實驗區不會偷偷改變管線。
+按「回到單人主要模式」恢復完整影格單姿態並重新分析，舊結果保留為過期存檔。
+收合實驗區會取消未 Apply 的編輯草稿；已完成的分析不因此改變。
+歷史方法參考 [架構比較](docs/PIPELINE_COMPARISON.md) 與 [ROI 規約](docs/ROI_TRACKING.md)。
+
+## 使用既有研究 JSON 離線重播 QC
+
+不需影片或模型，也不會再執行 MediaPipe。先在終端機進入專案並完成 `npm ci`，再執行：
+
+```sh
+npm run qc:replay -- --input "/Users/你的帳號/Downloads/comparison-你的檔案.json" --output outputs/qc-replay-01
+```
+
+把 `--input` 改成自己下載的「研究 JSON」或「A/B/C 比較 JSON」路徑，包含空白時保留引號。
+輸出必須是 `outputs/` 下**尚未存在**的新資料夾；下次改成 `qc-replay-02`，避免覆寫。
+支援原始 schema 7/8/9；缺少候選、時間或來源座標時會拒絕，不會用單一已選骨架猜測其他人物。
+
+工具會同時計算三種策略：凍結 v0.5.0、分離 QC＋兩次確認、分離 QC＋三次確認。
+打開輸出資料夾的 `report.json`，依序查看：
+
+1. `original` 與各 `strategies[].summary`：原始姿態可用數、身分通過數、左右膝有效數及人工鎖定數，分母為 `samples`。
+2. `originalWindow06to14`／`window06to14`：0.6–1.4 秒來源時間、腿段長度、身分狀態、關節 QC、恢復計數與原始角度。
+3. `failureEpisodes`：已恢復、人工重選終止、或到檔案結束仍未恢復的區間；未恢復不自動解釋成永遠無法恢復。
+4. `artificiallyAcceptedSamplesAfterQcChanges`：相較原策略新增自動放行的樣本，逐筆列出時間、側別與人工判讀適用性。
+   人工 Wrong/Mixed、Uncertain、僅確認正確人物、未標註分開列出；**新增放行不是 Accuracy 改善**。
+
+派生 session 另存為 `session-1-separated-2.json` 等檔案，保留模型、原始候選、時戳與 parent session。
+原始 JSON 不修改，報告記錄輸入 JSON 的 hash；這與影片 hash 是不同的識別資訊。
+若重播選到不同候選，不會沿用原候選的人工標籤。原有 Wrong/Mixed/Uncertain 否決仍會阻止最終有效角度。
+
+對 B 的重播固定使用**當時實際裁切區域與候選**，不重跑自動跟隨或搜尋，因此不能直接代表新版重新分析影片的結果。
+三份策略報告只是規則對照；要判斷人物與角度是否更正確，仍需原片與人工標註。
+輸出含人體特徵，只保存在受限空間，勿提交 Public GitHub。本版沒有增加新的畫面功能。
+
+## 常見問題
+
+| 狀況 | 處理方式 |
+| --- | --- |
+| N/A 或曲線斷開 | 該取樣無效／確認中；查看原片、另一側與研究診斷，不能當成 0° |
+| 分析後一直沒有有效角度 | 檢查模型、拍攝條件與失敗原因；若人物一致性鎖定，重新分析或換合適片段，不強制放行 |
+| 模型載入失敗 | 從官方網址下載 `.task`，直接選取本機檔或放到 public/models；不要用錯誤網頁充當模型 |
+| WASM 載入失敗 | 重跑 npm ci 產生本站同版本資源，避免混用 CDN 或其他版本 |
+| 設定變更後顯示 stale | 舊結果仍可下載，先重新分析才顯示新曲線／匯出 |
+| seek-position-estimate | 瀏覽器沒有精確呈現回呼，只能使用尋時估計；不是已知精確 PTS |
+| 影片等待失敗 | 切回分頁、確認編碼並保存診斷；逾時不一定代表不支援編碼 |
+
+## 自動檢查與研究限制
 
 ```sh
 npm run typecheck
@@ -43,12 +175,37 @@ npm test
 npm run build
 ```
 
-`npm run preview` 可檢視建置輸出。`npm test` 目前只有 2 個狀態頁測試，並未驗證量測演算法。
-Python 統計分析尚未實作，故本次沒有 pytest 結果。
+瀏覽器測試另需 FFmpeg 與 Playwright Chromium：
+
+```sh
+npx playwright install chromium
+npm run test:browser
+```
+
+雲端已有 Chromium 時可使用 `CHROMIUM_PATH=/usr/bin/chromium npm run test:browser`。
+真實人體影片測試需要本機核准檔案；指定 `POSE_MODEL_PATH` 與 `POSE_VIDEO_PATH` 才會執行，
+未指定時該測試會明確跳過。測試產生的合成影片只驗證軟體流程，不是資料集實測。
+
+取樣時間網格固定，但實際解碼受瀏覽器、編碼及可變影格率影響；保留目標時間與解碼
+presentation timestamp，去除重複／逆序影格。本版不宣稱分析全部影格或跨平台位元一致。
+詳見 [分析方法](docs/ARCHITECTURE.md) 與 [驗證草案](docs/VALIDATION_PROTOCOL.md)。
+沒有經驗證的 ROM、臨床判讀、三維運動學或前後測功能；Python 統計尚未開始。
+Mendeley 的 Good/Bad Form 標籤不是角度或身份真值；目前已知實測檔名，但授權、hash 與逐樣本人工結果仍待補齊。
+
+## 專案文件
+
+- [長期規格](docs/PROJECT_SPEC.md)、[架構](docs/ARCHITECTURE.md)、[資料集](docs/DATASET.md)。
+- [隱私倫理](docs/PRIVACY_AND_ETHICS.md)、[決策](docs/DECISIONS.md)、[Agent 規範](AGENTS.md)。
+- [初始化紀錄](docs/updates/iteration-01.md)、[Dataset Demo 紀錄](docs/updates/iteration-01-dataset-demo.md)。
+
+## 開發路線（以功能完成決定版本）
+
+後續依功能完成推進：先完成單人 Dataset Demo 的真實影片驗收，再評估共用核心的 V1 即時攝影機、V2 物治確認
+的上下台階／抬腿動作、V3 量測驗證、V4 展示整合。版本不依固定日期決定。
 
 ## GitHub Pages 部署與驗收
 
-[預期網站網址](https://chen-jung0929.github.io/115-1-Innovative-Integration-of-Medicine-and-EECS-Final-Project/)在首次部署成功後供組員直接開啟。第一版部署內容為初始化頁。驗證紀錄與模型整合條件見 [Iteration 02](docs/updates/iteration-02.md)。
+[預期網站網址](https://chen-jung0929.github.io/115-1-Innovative-Integration-of-Medicine-and-EECS-Final-Project/)在首次部署成功後供組員直接開啟。驗證紀錄與模型整合條件見 [Iteration 02](docs/updates/iteration-02.md)。
 
 1. 管理者到 **Settings → Pages → Build and deployment → Source** 選 **GitHub Actions**。如果已限制部署分支，請確認 `github-pages` environment 允許 `main`。
 2. 部署工作流程合併進 `main` 後，每次推送到 `main`（含合併 PR）都會執行 **Deploy to GitHub Pages**。依序安裝鎖定依賴、型別檢查、單元測試及建置。全部成功後才上傳 `dist/` 並發布，同一時間只執行一個正式部署。
@@ -63,16 +220,3 @@ export PAGES_BASE_PATH=/115-1-Innovative-Integration-of-Medicine-and-EECS-Final-
 npm run build
 npm run preview
 ```
-
-## 文件與協作
-
-- [長期規格](docs/PROJECT_SPEC.md)：需求、各版本驗收與待確認事項。
-- [軟體架構](docs/ARCHITECTURE.md)：模組邊界、共用核心與資料流。
-- [資料集紀錄](docs/DATASET.md)：來源、授權查核狀態與影片登錄規則。
-- [驗證計畫](docs/VALIDATION_PROTOCOL.md)：量測誤差、標註一致性及效度研究。
-- [隱私與倫理](docs/PRIVACY_AND_ETHICS.md)：Public repo 的資料界線。
-- [決策紀錄](docs/DECISIONS.md)／[進度紀錄](docs/updates/)／[Agent 規範](AGENTS.md)。
-
-MediaPipe、Recharts、NumPy／pandas／SciPy 將在對應功能實作時加入。
-影片、人體標註、量測輸出與金鑰不能提交到此 Public repo；忽略規則不等於存取控制。
-資料集授權尚未獨立查核；Good/Bad Form 標籤不是角度真值。

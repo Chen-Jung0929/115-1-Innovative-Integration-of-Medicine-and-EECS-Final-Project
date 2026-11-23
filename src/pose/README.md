@@ -1,5 +1,5 @@
 # pose
 
-Planned responsibility: Adapt MediaPipe Pose Landmarker outputs; retain model provenance and confidence.
+mediapipe.ts：VIDEO CPU 模型介接、官方／本機資產選擇與 SHA-256。
 
-No runtime implementation in initialization. See docs/ARCHITECTURE.md.
+研究與實測限制見 docs/ARCHITECTURE.md 及 docs/updates/iteration-01-dataset-demo.md。

@@ -1,5 +1,5 @@
 # visualization
 
-Planned responsibility: Render aligned video overlays, angle values and Recharts time series.
+Overlay.tsx／AngleChart.tsx：來源對齊骨架與保留無效斷點的 Recharts 曲線。
 
-No runtime implementation in initialization. See docs/ARCHITECTURE.md.
+研究與實測限制見 docs/ARCHITECTURE.md 及 docs/updates/iteration-01-dataset-demo.md。
