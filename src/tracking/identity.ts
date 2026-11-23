@@ -4,8 +4,22 @@ import {poseQuality,torsoOf,confident,type Torso} from '../biomechanics/poseQual
 import {selectInitialSubject,type CandidateSelection} from '../selection/subject';
 import {TRACKING_POLICY as POLICY} from './policy';
 import {kneeObservation} from '../biomechanics/jointQuality';
+import {kneeAngle} from '../biomechanics/knee';
 import {createJointQuality} from './jointQuality';
-export const IDENTITY_POLICY='controlled-single-bounded-recovery-v6-feet-chain';
+export const IDENTITY_POLICY='controlled-single-bounded-recovery-v7-still-restart';
+/**
+ * restart-after-still-standing-v1 (ADR-088, controlled single-person mode, uploaded video only: the live
+ * camera already ends the segment on a lock and starts a new one with its ready gate). After an automatic
+ * lock (person lost, jump, cut, or a second person who has left), the analysis restarts as a NEW segment
+ * when exactly one person is detected standing upright (both 2D knee angles ≥ 160° and hips ≥ 1.7 shank lengths above the ankles, because a frontal squat
+ * still looks straight-legged in 2D) and still (torso
+ * centre within 0.15 torso length and feet not jumping) for restartMs (0.5 s, the same still time as the
+ * 3D standing check, ADR-079; user-facing text keeps "about 1 s" as a margin). It does not claim it is the same
+ * person: the frontal baseline and standing reference are rebuilt from scratch, as in live mode.
+ * Locks requested by the user or caused by invalid time never restart. Engineering values.
+ */
+export const RESTART_POLICY={version:'restart-after-still-standing-v1',restartMs:500,minKneeAngleDeg:160,minHipAboveAnkleShank:1.7,maxCenterMoveTorso:.15,maxStepGapMs:300} as const;
+const NO_RESTART=new Set(['invalid-source-time','non-increasing-source-time']);
 export const SINGLE_RECOVERY_POLICY={version:'controlled-single-bounded-v1',windowMs:1600,confirmations:3,maxStepGapMs:300,maxAnchorDistanceTorso:2,maxAnchorScale:1.5} as const;
 /**
  * planted-feet-continuity-v1 (ADR-084, controlled single-person mode only). In a frontal squat the
@@ -77,18 +91,19 @@ export function associateByContinuity(candidates:readonly Landmark[][],previous:
  return {selectedIndex:null,proposedIndex:ranked[0]?.index??(candidates.length===1?0:null),reason:consistent.length>1?'ambiguous-temporal-subject':candidates.length?'target-not-continuous':'no-pose'};
 }
 /** Torso identity history is independent of joint validity. Manual identity locks never auto-clear. */
-export function createFullFrameIdentity(width:number,height:number,options:{crop?:boolean;jointConfirmations?:2|3;controlledSingle?:boolean}={}) {
+export function createFullFrameIdentity(width:number,height:number,options:{crop?:boolean;jointConfirmations?:2|3;controlledSingle?:boolean;restartAfterLock?:boolean}={}) {
  let previous:{body:Torso;time:number}|null=null,state:TrackingState='TRACKING',returns=0,manualReason='';
  let transient:{anchor:Torso;start:number;last:Torso|null;lastTime:number;count:number}|null=null;
  // planted-feet-continuity-v1: landmarks of the last accepted observation, the running planted-feet streak,
  // and whether the current lock may be lifted by it (only automatic temporal locks in controlled mode).
  let lastGood:{points:readonly Landmark[];time:number}|null=null,planted:{since:number;last:number}|null=null;
- let manualRecoverable=false,neverRecover=false;
+ let manualRecoverable=false,neverRecover=false,noRestart=false;
+ let restart:{since:number;last:number;body:Torso;points:readonly Landmark[]}|null=null;
  // Feet chain since the last accepted observation: broken by a teleport (hard cut / swap), kept across frames without reliable feet.
  let feetRef:readonly Landmark[]|null=null,chainBroken=false,teleportPending=false;
  const controlled=options.controlledSingle===true&&!options.crop;
  const joints=createJointQuality(width,height,options.jointConfirmations??2);
- return {requireManual(reason:string){state='MANUAL_REVIEW_REQUIRED';manualReason=reason;neverRecover=true;},observe(candidates:readonly Landmark[][],time:number,reference:Roi){
+ return {requireManual(reason:string){state='MANUAL_REVIEW_REQUIRED';manualReason=reason;neverRecover=true;noRestart=true;},observe(candidates:readonly Landmark[][],time:number,reference:Roi){
   let decision=previous?associateByContinuity(candidates,previous.body,(time-previous.time)/1000,width,height):selectInitialSubject(candidates,reference,width,height);
   if((options.crop||controlled)&&candidates.length>1)decision={selectedIndex:null,proposedIndex:null,reason:'ambiguous-candidates'};
   const points=decision.proposedIndex===null?[]:candidates[decision.proposedIndex]!;
@@ -106,6 +121,7 @@ export function createFullFrameIdentity(width:number,height:number,options:{crop
   const lock=(reason:string)=>{
    state='MANUAL_REVIEW_REQUIRED';manualReason=reason;accepted=false;
    if(controlled&&RECOVERABLE_LOCKS.has(reason))manualRecoverable=true;else neverRecover=true;
+   if(NO_RESTART.has(reason))noRestart=true;
   };
   // A different body cut in (feet jump or new proportions) locks at once; only feet back where they were can lift it (ADR-086).
   if(controlled&&feetRef&&candidates.length===1&&points.length){
@@ -188,6 +204,25 @@ export function createFullFrameIdentity(width:number,height:number,options:{crop
     reasons.length=0;reasons.push('planted-feet-recovery-confirmed');
    }else reasons.push('planted-feet-recovery-pending');
   }else if(!accepted)planted=null;
+  // New segment after an automatic lock: one person, standing upright and still for restartMs (ADR-088).
+  if(controlled&&options.restartAfterLock===true&&!accepted&&state==='MANUAL_REVIEW_REQUIRED'&&!noRestart&&candidates.length===1&&body&&qc.accepted){
+   const rp=RESTART_POLICY;
+   const upright=(['left','right'] as const).every(side=>{const a=kneeAngle(points,side,width,height);return a.valid&&a.rawAngleDeg!==null&&a.rawAngleDeg>=rp.minKneeAngleDeg;});
+   const shank=shankLength(points,width,height);
+   const hipAbove=shank===null||![23,24,27,28].every(i=>confident(points[i]))?0:((points[27]!.y+points[28]!.y)-(points[23]!.y+points[24]!.y))/2*height/shank;
+   const standing=upright&&hipAbove>=rp.minHipAboveAnkleShank;
+   const still=restart!==null&&time>restart.last&&time-restart.last<=rp.maxStepGapMs
+    &&Math.hypot(body.x-restart.body.x,body.y-restart.body.y)/Math.max(body.length,restart.body.length)<=rp.maxCenterMoveTorso
+    &&feetStep(points,restart.points,width,height)!=='teleport';
+   if(!standing)restart=null;
+   else if(!still)restart={since:time,last:time,body,points};
+   else restart={since:restart!.since,last:time,body:restart!.body,points:restart!.points};
+   if(restart&&time-restart.since>=rp.restartMs){
+    accepted=true;state='TRACKING';manualReason='';manualRecoverable=false;neverRecover=false;transient=null;planted=null;recovery=undefined;returns=0;restart=null;
+    decision={...decision,selectedIndex:decision.proposedIndex};
+    reasons.length=0;reasons.push('restart-after-still-standing');
+   }else if(restart)reasons.push('restart-pending-still-standing');
+  }else if(!accepted)restart=null;
   if(state==='MANUAL_REVIEW_REQUIRED')reasons.push(manualReason,'manual-reselection-required');
   if(accepted){previous={body:body!,time};lastGood={points,time};feetRef=points;chainBroken=false;state='TRACKING';returns=0;planted=null;}
   if(reasons.includes('temporal-torso-jump-or-scale-change'))continuity='discontinuous';

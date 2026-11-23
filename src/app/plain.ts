@@ -124,7 +124,9 @@ export function lockedBannerText(cause: TrackingCause, mode: NoticeMode, sinceMs
   const t = TRACKING_TEXT[cause];
   const action = cause === 'confirming' || cause === 'rejected' ? TRACKING_TEXT['lost-track'][mode] : t[mode];
   const since = sinceMs === undefined ? '' : `從 ${(sinceMs / 1000).toFixed(1)} 秒起`;
-  return `${since}無法確定是同一人（${t.problem}），暫停判斷，數字不顯示。${mode === 'video' ? '重拍時' : ''}${action}。`;
+  return mode === 'video'
+    ? `${since}無法確定是同一人（${t.problem}），暫停判斷。個案站直不動約 1 秒後會重新開始一段。重拍時${action}。`
+    : `${since}無法確定是同一人（${t.problem}），暫停判斷，數字不顯示。${action}。`;
 }
 
 /**
@@ -163,7 +165,8 @@ export function createNoticeHold(mode: NoticeMode = 'video', width = 1, height =
       else if (key === shownKey) pending = null;
       else {
         if (pending?.key !== key) pending = { key, since: s.sourceTimeMs };
-        if (s.sourceTimeMs - pending.since >= NOTICE_HOLD_MS || (raw?.locked && !shown.locked)) { shown = raw; pending = null; }
+        // A lock starting or ending (new segment, ADR-088) shows at once: no stale "paused" next to live numbers.
+        if (s.sourceTimeMs - pending.since >= NOTICE_HOLD_MS || (raw?.locked && !shown.locked) || (shown.locked && !locked)) { shown = raw; pending = null; }
       }
       return shown;
     },

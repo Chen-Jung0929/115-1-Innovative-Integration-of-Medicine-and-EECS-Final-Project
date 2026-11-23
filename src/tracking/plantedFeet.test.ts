@@ -102,3 +102,47 @@ describe('a hard cut to another person locks (feet chain, ADR-086)', ()=>{
   expect(feetStep(person(0,{hipWidth:110}),person(0,{hipWidth:50}),W,H)).toBe('teleport');
  });
 });
+
+describe('restart after standing still (restart-after-still-standing-v1, ADR-088)', ()=>{
+ const lockByGap=(t:ReturnType<typeof createFullFrameIdentity>)=>{
+  for(let i=0;i<20;i++)t.observe([person(0)],i*100,ref);
+  for(let i=20;i<30;i++)t.observe([],i*100,ref); // nobody detected for 1 s
+ };
+ it('lost person who comes back elsewhere and stands still 0.5 s starts a new segment', ()=>{
+  const t=createFullFrameIdentity(W,H,{controlledSingle:true,restartAfterLock:true});lockByGap(t);
+  const q=[...Array(15)].map((_,k)=>t.observe([person(0,{dx:200})],(30+k)*100,ref).tracking);
+  expect(q[0]!.state).toBe('MANUAL_REVIEW_REQUIRED');
+  expect(q.slice(0,5).every(x=>!x.accepted)).toBe(true);
+  expect(q[5]!.accepted).toBe(true);expect(q[5]!.reasons).toEqual(['restart-after-still-standing']);
+  // Then normal tracking continues, including squats.
+  for(let k=0;k<10;k++)expect(t.observe([person(k%2?0:.5,{dx:200})],(45+k)*100,ref).tracking.state).not.toBe('MANUAL_REVIEW_REQUIRED');
+ });
+ it('does not restart while squatting, moving, or with two people', ()=>{
+  const squat=createFullFrameIdentity(W,H,{controlledSingle:true,restartAfterLock:true});lockByGap(squat);
+  for(let k=0;k<30;k++)expect(squat.observe([person(1,{dx:200})],(30+k)*100,ref).tracking.accepted).toBe(false);
+  const moving=createFullFrameIdentity(W,H,{controlledSingle:true,restartAfterLock:true});lockByGap(moving);
+  for(let k=0;k<30;k++)expect(moving.observe([person(0,{dx:200+(k%2)*60})],(30+k)*100,ref).tracking.accepted).toBe(false);
+  const two=createFullFrameIdentity(W,H,{controlledSingle:true,restartAfterLock:true});lockByGap(two);
+  for(let k=0;k<30;k++)expect(two.observe([person(0,{dx:200}),person(0,{dx:-200})],(30+k)*100,ref).tracking.accepted).toBe(false);
+ });
+ it('a lock requested by the user never restarts', ()=>{
+  const t=createFullFrameIdentity(W,H,{controlledSingle:true,restartAfterLock:true});
+  for(let i=0;i<20;i++)t.observe([person(0)],i*100,ref);
+  t.requireManual('ambiguous-full-frame-candidates');
+  for(let k=0;k<30;k++)expect(t.observe([person(0)],(20+k)*100,ref).tracking.accepted).toBe(false);
+ });
+ it('uploaded video: after a hard cut, the other person standing still 0.5 s starts a NEW segment', ()=>{
+  const t=createFullFrameIdentity(W,H,{controlledSingle:true,restartAfterLock:true});
+  for(let i=0;i<40;i++)t.observe([person(0,{hipWidth:50})],i*100,ref);
+  const B=()=>person(0,{dx:-40,hipWidth:110,shank:104});
+  const q=[...Array(20)].map((_,k)=>t.observe([B()],(40+k)*100,ref).tracking);
+  const firstOk=q.findIndex(x=>x.accepted);
+  expect(q[1]!.state).toBe('MANUAL_REVIEW_REQUIRED');
+  expect(firstOk).toBeGreaterThanOrEqual(5);
+  expect(q[firstOk]!.reasons).toEqual(['restart-after-still-standing']);
+ });
+ it('without the option (live camera ends the segment instead) a lock never restarts by standing', ()=>{
+  const t=createFullFrameIdentity(W,H,{controlledSingle:true});lockByGap(t);
+  for(let k=0;k<30;k++)expect(t.observe([person(0,{dx:200})],(30+k)*100,ref).tracking.accepted).toBe(false);
+ });
+});

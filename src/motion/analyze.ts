@@ -41,7 +41,7 @@ export async function analyze(url: string, filename: string, model: File | null,
     const roi = checkedRoi(selection.roi, decoder.videoWidth, decoder.videoHeight);
     canvas.width = roi.width; canvas.height = roi.height;
     if(selection.method!=='manual-fixed-roi')checkedKeyframes(selection.keyframes,decoder.videoWidth,decoder.videoHeight,decoder.duration*1000);
-    let identity=createFullFrameIdentity(decoder.videoWidth,decoder.videoHeight,{controlledSingle:pipeline.id==='full-frame-single'&&selection.correctionSource==='controlled-single-default'});
+    let identity=createFullFrameIdentity(decoder.videoWidth,decoder.videoHeight,{controlledSingle:pipeline.id==='full-frame-single'&&selection.correctionSource==='controlled-single-default',restartAfterLock:true});
     let referenceKey:string|null=null;
     let previousTrackingState:TrackingState='TRACKING';
     const controller = createRoiController(selection,decoder.videoWidth,decoder.videoHeight);
@@ -60,7 +60,7 @@ export async function analyze(url: string, filename: string, model: File | null,
       const referenceSelection={...selection,method:'manual-keyframes' as const,keyframes:selection.keyframes.length?selection.keyframes:[{id:selection.id,timeMs:0,roi:selection.roi,source:'manual-target-confirmation' as const}]};
       const reference=roiAt(referenceSelection,time*1000,decoder.videoWidth,decoder.videoHeight);
       const proposal:FramePlan=cropping?controller.propose(time*1000):{roi:{x:0,y:0,width:decoder.videoWidth,height:decoder.videoHeight},roiSource:'full-frame',roiUpdateReason:'original-source-image-no-crop',manualKeyframeId:reference.manualKeyframeId,resetModel:false,searchDue:false,previousState:previousTrackingState};
-      if(!cropping&&reference.manualKeyframeId!==referenceKey){identity=createFullFrameIdentity(decoder.videoWidth,decoder.videoHeight,{controlledSingle:pipeline.id==='full-frame-single'&&selection.correctionSource==='controlled-single-default'});referenceKey=reference.manualKeyframeId;}
+      if(!cropping&&reference.manualKeyframeId!==referenceKey){identity=createFullFrameIdentity(decoder.videoWidth,decoder.videoHeight,{controlledSingle:pipeline.id==='full-frame-single'&&selection.correctionSource==='controlled-single-default',restartAfterLock:true});referenceKey=reference.manualKeyframeId;}
       const usedRoi=proposal.roi;
       if(proposal.resetModel){engine.close();engine=await createPoseEngine(asset.bytes);signal.throwIfAborted();proposal.roiUpdateReason+=':new-model-after-manual-confirmation';}
       canvas.width=usedRoi.width;canvas.height=usedRoi.height;

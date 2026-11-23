@@ -125,7 +125,7 @@ export function FrontalCuePanel({ frame, hasSample, notice }: { frame: FrontalFr
   else if (frame.approximate && frame.baseline.state === 'locked') body = <><p className="cue-muted">斜角拍攝，用正面檢查，僅供參考</p>{frame.cues.length ? cueList(frame.cues) : <p className="cue-ok">✓ 姿勢在基準線附近</p>}</>;
   // Cut-off feet keep the baseline from locking: say that instead of asking to stand still.
   else if (frame.baseline.state !== 'locked' && notice && notice.cause !== 'head-cut') { body = <p className="cue-muted">{notice.text}</p>; hintUsed = true; }
-  else if (frame.baseline.state !== 'locked') body = <p className="cue-muted">{frame.relocking ? '個案換了位置：等他再站直約 1 秒會重畫基準線' : '還找不到站直的畫面：請個案先站直、不動約 1 秒，才能畫基準線'}</p>;
+  else if (frame.baseline.state !== 'locked') body = <p className="cue-muted">{frame.relocking ? '重新畫基準線：等個案站直不動約 1 秒' : '還找不到站直的畫面：請個案先站直、不動約 1 秒，才能畫基準線'}</p>;
   else if (frame.cues.length === 0) body = OK;
   else body = cueList(frame.cues);
   // Framing hint (head or feet cut off) on a tracked frame: shown above the prompts, which still apply.

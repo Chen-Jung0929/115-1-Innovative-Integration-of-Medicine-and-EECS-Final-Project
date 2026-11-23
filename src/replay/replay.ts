@@ -29,13 +29,13 @@ export function replaySession(original:Session,strategy:ReplayStrategy):ReplayRe
   const w=original.metadata.sourceWidthPx,h=original.metadata.sourceHeightPx;
   const controlledSingle=original.run?.pipeline.id==='full-frame-single'&&original.subjectSelection.correctionSource==='controlled-single-default';
   const legacy=strategy==='frozen-v0.5.0',confirmations=strategy==='separated-3'?3:2;
-  let full=legacy?legacyIdentity(w,h):createFullFrameIdentity(w,h,{jointConfirmations:confirmations,controlledSingle});
+  let full=legacy?legacyIdentity(w,h):createFullFrameIdentity(w,h,{jointConfirmations:confirmations,controlledSingle,restartAfterLock:true});
   let target=legacy?legacyTarget(original.subjectSelection.roi,w,h):createTargetTracker(original.subjectSelection.roi,w,h,{jointConfirmations:confirmations});
   let key:string|null|undefined;
   const changes:ReplayChange[]=[];
   const samples=original.samples.map(saved=>{
     if(saved.manualKeyframeId!==key){
-      full=legacy?legacyIdentity(w,h):createFullFrameIdentity(w,h,{jointConfirmations:confirmations,controlledSingle});
+      full=legacy?legacyIdentity(w,h):createFullFrameIdentity(w,h,{jointConfirmations:confirmations,controlledSingle,restartAfterLock:true});
       target=legacy?legacyTarget(saved.roi,w,h):createTargetTracker(saved.roi,w,h,{jointConfirmations:confirmations});
       key=saved.manualKeyframeId;
     }
