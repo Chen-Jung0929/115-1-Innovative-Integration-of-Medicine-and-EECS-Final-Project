@@ -16,8 +16,9 @@ describe('frontal timeline over analysed samples', () => {
   it('locks the baseline after standing, then prompts a sustained left trunk lean', () => {
     const samples = [0, 1, 2, 3, 4, 5].map(i => at(i, pose())).concat([6, 7, 8].map(i => at(i, pose(.08))));
     const t = frontalTimeline(samples, 100, 100);
-    expect(t[3]!.baseline.state).toBe('searching');
+    expect(t[3]!.calibration).toBe('whole-video'); // before the 1 s lock, the whole-video standing calibration is used
     expect(t[4]!.baseline).toMatchObject({ state: 'locked', x: 50 });
+    expect(t[4]!.calibration).toBe('standing-lock');
     expect(t[5]!.cues).toEqual([]);
     expect(t[6]!.cues).toEqual([]); // first leaning sample: still debouncing
     expect(t[7]!.cues.map(c => c.text)).toEqual(['上身往左傾（頭偏離中線）']);
@@ -54,10 +55,23 @@ describe('frontal timeline over analysed samples', () => {
     expect(t[5]!.metrics.kneeToe.left.invalidReasons).toEqual(['unsupported-view']);
     expect(t[5]!.cues).toEqual([]);
   });
+
+  it('opt-in: an oblique clip is checked like a frontal one and marked reference-only', () => {
+    const oblique = () => { const p = pose(); p[11] = v(.45, .2); p[12] = v(.55, .2); return p; };
+    const off = frontalTimeline([0, 1, 2, 3, 4, 5].map(i => at(i, oblique())), 100, 100);
+    expect(off[5]!.approximate).toBe(false);
+    const on = frontalTimeline([0, 1, 2, 3, 4, 5].map(i => at(i, oblique())), 100, 100, 'standing-trunk', true);
+    expect(on[5]!.view).toBe('frontal');
+    expect(on[5]!.approximate).toBe(true);
+    expect(on[5]!.baseline.state).toBe('locked');
+    expect(on[5]!.metrics.trunkSide.valid).toBe(true);
+    expect(on[5]!.metrics.kneeToe.left.valid).toBe(true);
+  });
   it('tilts are relative to the standing calibration (natural shoulder tilt / rolled camera is not a fault)', () => {
     const tilted = (extra: number) => { const p = pose(); p[11] = v(.4, .2 + .2 * Math.tan((6 + extra) * Math.PI / 180)); return p; };
     const t = frontalTimeline([0, 1, 2, 3, 4, 5, 6].map(i => at(i, tilted(0))).concat([7, 8, 9].map(i => at(i, tilted(7)))), 100, 100);
-    expect(t[3]!.metrics.shoulderTilt.invalidReasons).toEqual(['baseline-pending']);
+    expect(t[3]!.calibration).toBe('whole-video');
+    expect(Math.abs(t[3]!.metrics.shoulderTilt.value ?? 99)).toBeLessThan(3); // relative to the standing samples, not to 0°
     expect(t[4]!.neutral!.shoulderTilt).toBeCloseTo(6, 6);
     expect(t[6]!.metrics.shoulderTilt.value).toBeCloseTo(0, 6);
     expect(t[6]!.cues).toEqual([]);
@@ -83,5 +97,33 @@ describe('side view in the timeline', () => {
   it('upright side view gives no prompt', () => {
     const t = frontalTimeline([0, 1, 2].map(i => at(i, sidePose())), 100, 100);
     expect(t[2]!.view).toBe('side'); expect(t[2]!.cues).toEqual([]);
+  });
+  it('a clip that never stands still for 1 s still gets a baseline from its upright moments', () => {
+    const bent = { valid: true as const, rawAngleDeg: 110, invalidReasons: [] as [] };
+    const up = { valid: true as const, rawAngleDeg: 172, invalidReasons: [] as [] };
+    // Alternating squat / brief stand every 200 ms: the live 1 s lock never happens.
+    const t = frontalTimeline([0, 1, 2, 3, 4, 5, 6, 7].map(i => at(i, pose(), i % 2 ? { left: up, right: up } : { left: bent, right: bent })), 100, 100);
+    expect(t.every(f => f.calibration === 'whole-video' && f.baseline.x !== null)).toBe(true);
+    expect(t[0]!.metrics.trunkSide.valid).toBe(true);
+  });
+  it('fixed camera: one view for the clip; mixed clips use a 600 ms hold', () => {
+    const oblique = () => { const p = pose(); p[11] = v(.45, .2); p[12] = v(.55, .2); return p; };
+    const blip = frontalTimeline([0, 1, 2, 3, 4, 5, 6, 7].map(i => at(i, i === 6 ? oblique() : pose())), 100, 100);
+    expect(blip[6]!.view).toBe('frontal');
+    // Half frontal, half oblique: no whole-clip view, so the 600 ms hold decides per sample.
+    const turn = frontalTimeline([0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => at(i, i >= 5 ? oblique() : pose())), 100, 100);
+    expect(turn[6]!.view).toBe('frontal'); // still within the 600 ms hold
+    expect(turn[8]!.view).toBe('oblique');
+    // Mostly frontal clip with a few oblique-looking frames scattered: the whole clip is frontal.
+    const fixedCam = frontalTimeline([0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => at(i, [3, 4, 5].includes(i) ? oblique() : pose())), 100, 100);
+    expect(fixedCam.every(f => f.view === 'frontal')).toBe(true);
+  });
+  it('the clip view is judged while upright, so a deep squat does not make a diagonal camera look frontal', () => {
+    const oblique = () => { const p = pose(); p[11] = v(.45, .2); p[12] = v(.55, .2); return p; };
+    const bent = { valid: true as const, rawAngleDeg: 100, invalidReasons: [] as [] };
+    // 4 upright oblique samples, 6 squatting samples that happen to look frontal.
+    const t = frontalTimeline([0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => i < 4 ? at(i, oblique()) : at(i, pose(), { left: bent, right: bent })), 100, 100);
+    expect(t[0]!.clipView).toBe('oblique');
+    expect(t.every(f => f.view === 'oblique')).toBe(true);
   });
 });
