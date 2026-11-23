@@ -202,3 +202,21 @@ Mendeley 的 Good/Bad Form 標籤不是角度或身份真值；目前已知實�
 
 後續依功能完成推進：先完成單人 Dataset Demo 的真實影片驗收，再評估共用核心的 V1 即時攝影機、V2 物治確認
 的上下台階／抬腿動作、V3 量測驗證、V4 展示整合。版本不依固定日期決定。
+
+## GitHub Pages 部署與驗收
+
+[預期網站網址](https://chen-jung0929.github.io/115-1-Innovative-Integration-of-Medicine-and-EECS-Final-Project/)在首次部署成功後供組員直接開啟。驗證紀錄與模型整合條件見 [Iteration 02](docs/updates/iteration-02.md)。
+
+1. 管理者到 **Settings → Pages → Build and deployment → Source** 選 **GitHub Actions**。如果已限制部署分支，請確認 `github-pages` environment 允許 `main`。
+2. 部署工作流程合併進 `main` 後，每次推送到 `main`（含合併 PR）都會執行 **Deploy to GitHub Pages**。依序安裝鎖定依賴、型別檢查、單元測試及建置。全部成功後才上傳 `dist/` 並發布，同一時間只執行一個正式部署。
+3. 手動部署目前版本時，開啟 **Actions → Deploy to GitHub Pages → Run workflow**，選 `main`。在成功執行的 **deploy** 工作中開啟 environment 網址，確認對應的 commit 與頁面內容。
+4. 若建置失敗，在 **build** 的第一個失敗步驟查看日誌，修正後透過 PR 合併；部署工作會略過失敗的建置。若部署遇到 403 或 Pages 設定錯誤，檢查 Pages 來源、environment 分支規則與 Actions 是否允許工作流程宣告的 Pages 和 OIDC 權限。
+5. 若首頁空白或資源 404，從完整的 repository 子路徑開啟網站，在瀏覽器 Network 確認 JS 與 CSS 請求位於該子路徑的 `assets/`。部署時 `PAGES_BASE_PATH` 由 repository 名稱產生，本機開發預設為 `/`。未來載入 `public/` 的 WASM 時，須從 `import.meta.env.BASE_URL` 組合路徑，並確認回傳 WASM 而非 HTML。
+
+開發者可用以下指令在本機預覽相同的子路徑，開啟終端機顯示的完整網址。
+
+```sh
+export PAGES_BASE_PATH=/115-1-Innovative-Integration-of-Medicine-and-EECS-Final-Project/
+npm run build
+npm run preview
+```
