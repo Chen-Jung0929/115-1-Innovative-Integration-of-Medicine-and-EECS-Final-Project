@@ -489,10 +489,8 @@ function RecordingRow({ r, live, onFullAnalysis }: { r: CameraRecording; live: b
     {r.status === 'done' && !r.raw && !r.skeleton && <span className="muted small">沒有錄到影片。</span>}
     {r.raw && <button className="secondary" onClick={() => downloadBlob(`${name}.${videoExtension(r.raw!.type)}`, r.raw!)}>下載整段影片（原始畫面）</button>}
     {r.skeleton && <button className="secondary" onClick={() => downloadBlob(`${name}-skeleton.${videoExtension(r.skeleton!.type)}`, r.skeleton!)}>下載整段影片（含骨架）</button>}
-    {r.raw && onFullAnalysis && (videoExtension(r.raw.type) !== 'mp4'
-      ? <span className="muted small">這個瀏覽器錄成 WebM，無法直接用完整分析；請下載後轉成 MP4 再上傳。</span>
-      : tooLong ? <span className="muted small">超過 10 分鐘，請下載後剪短再到「上傳影片」分析。</span>
-      : <><button className="primary" disabled={live} onClick={() => onFullAnalysis(new File([r.raw!], `${name}.mp4`, { type: 'video/mp4' }))}>用完整分析畫面看整段</button>
+    {r.raw && onFullAnalysis && (tooLong ? <span className="muted small">超過 10 分鐘，請下載後剪短再到「上傳影片」分析。</span>
+      : <><button className="primary" disabled={live} onClick={() => onFullAnalysis(new File([r.raw!], `${name}.${videoExtension(r.raw!.type)}`, { type: `video/${videoExtension(r.raw!.type)}` }))}>用完整分析畫面看整段</button>
         {live && <span className="muted small">請先按「停止」關閉鏡頭。</span>}</>)}
   </div>;
 }

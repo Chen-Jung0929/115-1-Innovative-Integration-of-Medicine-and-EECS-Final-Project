@@ -6,7 +6,7 @@ import {ComparisonPanel} from '../validation/ComparisonPanel';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { SAMPLING_HZ, samplingHzFrom, type Session } from '../domain/analysis';
 import { MODEL_URL, MODEL_VERSION, MODEL_LOAD_ERROR } from '../pose/mediapipe';
-import { checkFile, loadVideo, seekFrame, observePresentedFrame } from '../input/video';
+import { checkFile, loadVideo, seekFrame, observePresentedFrame, VIDEO_ACCEPT, DECODE_HELP } from '../input/video';
 import { analyze } from '../motion/analyze';
 import { coverage, matchingSample, displayedRoi, nearestSample, smoothedSample } from '../motion/series';
 import { flexionProxy } from '../biomechanics/knee';
@@ -223,7 +223,7 @@ export function App() {
     <div hidden={mode!=='video'}>
     <section className="card setup" aria-labelledby="input-title"><h2 id="input-title">選擇影片</h2>
       <div className="setup-row">
-        <label className="file-pick"><span className="file-btn">選擇影片</span><span className="hint">MP4 影片（最多 500 MB、10 分鐘）</span><input type="file" accept=".mp4,video/mp4" disabled={busy || loading} onChange={e => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; void choose(f); }} /></label>
+        <label className="file-pick"><span className="file-btn">選擇影片</span><span className="hint">影片檔：MP4、MOV（iPhone）、M4V、WebM（最多 500 MB、10 分鐘）</span><input type="file" accept={VIDEO_ACCEPT} disabled={busy || loading} onChange={e => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; void choose(f); }} /></label>
         <div className="actions"><button className="primary" disabled={!info || !selection || selecting || busy || loading} onClick={() => void run()}>{error === MODEL_LOAD_ERROR ? '重試分析' : session ? '重新分析' : '開始分析'}</button>{busy && <button className="secondary" onClick={cancel}>取消分析</button>}</div>
       </div>
       {loading && <p role="status">讀取影片中…</p>}
@@ -262,7 +262,7 @@ export function App() {
         // maps to the decoded frame recorded by the analysis decoder.
         const known = session?.samples.find(s => Math.abs(s.requestedTimeMs - v.currentTime * 1000) <= 1);
         setTimeMs(known?.sourceTimeMs ?? v.currentTime * 1000); setSeeking(false);
-      }} onError={() => { if (info) { setError('影片播放解碼失敗，請改用 H.264 MP4。'); setSession(null); } }} /><Overlay sample={drawn} width={info?.width ?? 640} height={info?.height ?? 360} side={side} diagnostic={diagnostic} muted={frontalView && !!session && !selecting} />
+      }} onError={() => { if (info) { setError(`影片播放解碼失敗：${DECODE_HELP}`); setSession(null); } }} /><Overlay sample={drawn} width={info?.width ?? 640} height={info?.height ?? 360} side={side} diagnostic={diagnostic} muted={frontalView && !!session && !selecting} />
       {frontalView && session && !selecting && <><FrontalOverlay sample={drawn} frame={frontalFrame} width={info?.width ?? 640} height={info?.height ?? 360} /></>}
       {selecting && info && !seeking && <RoiSelector width={info.width} height={info.height} roi={draft} onChange={setDraft} drawNew={drawNew} onDrawEnd={()=>setDrawNew(false)} />}
       {experiments && selection && info && !selecting && <svg className="roi-border" viewBox={`0 0 ${info.width} ${info.height}`} aria-label="受測者 ROI 範圍"><rect {...(pipeline==='roi-crop'?(sample?.roi??displayedRoi(session?.samples??[],timeMs)??roiAt(selection,timeMs,info.width,info.height).roi):(sample?.targetReferenceRoi??selection.roi))} fill="none" stroke="#ffda57" strokeWidth={Math.max(2,info.width/250)} /></svg>}

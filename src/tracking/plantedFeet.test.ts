@@ -117,11 +117,19 @@ describe('restart after standing still (restart-after-still-standing-v1, ADR-088
   // Then normal tracking continues, including squats.
   for(let k=0;k<10;k++)expect(t.observe([person(k%2?0:.5,{dx:200})],(45+k)*100,ref).tracking.state).not.toBe('MANUAL_REVIEW_REQUIRED');
  });
- it('does not restart while squatting, moving, or with two people', ()=>{
+ it('does not restart by standing while squatting, jumping around, or with two people', ()=>{
+  // A squatter followed smoothly restarts by restart-after-steady-single-person after 1 s (ADR-099), not by standing.
   const squat=createFullFrameIdentity(W,H,{controlledSingle:true,restartAfterLock:true});lockByGap(squat);
-  for(let k=0;k<30;k++)expect(squat.observe([person(1,{dx:200})],(30+k)*100,ref).tracking.accepted).toBe(false);
+  const q=[...Array(30)].map((_,k)=>squat.observe([person(1,{dx:200})],(30+k)*100,ref).tracking);
+  expect(q.slice(0,10).every(x=>!x.accepted)).toBe(true);
+  expect(q[10]!.accepted).toBe(true);expect(q[10]!.reasons).toEqual(['restart-after-steady-single-person']);
+  expect(q.some(x=>x.reasons.includes('restart-after-still-standing'))).toBe(false);
+  // Swaying 60 px every 0.1 s is not standing still; the 1 s smooth-person restart may fire, standing never does.
   const moving=createFullFrameIdentity(W,H,{controlledSingle:true,restartAfterLock:true});lockByGap(moving);
-  for(let k=0;k<30;k++)expect(moving.observe([person(0,{dx:200+(k%2)*60})],(30+k)*100,ref).tracking.accepted).toBe(false);
+  for(let k=0;k<30;k++)expect(moving.observe([person(0,{dx:200+(k%2)*60})],(30+k)*100,ref).tracking.reasons).not.toContain('restart-after-still-standing');
+  // Jumping 120 px (0.72 torso length) every 0.1 s never restarts at all.
+  const jumping=createFullFrameIdentity(W,H,{controlledSingle:true,restartAfterLock:true});lockByGap(jumping);
+  for(let k=0;k<30;k++)expect(jumping.observe([person(0,{dx:200+(k%2)*120})],(30+k)*100,ref).tracking.accepted).toBe(false);
   const two=createFullFrameIdentity(W,H,{controlledSingle:true,restartAfterLock:true});lockByGap(two);
   for(let k=0;k<30;k++)expect(two.observe([person(0,{dx:200}),person(0,{dx:-200})],(30+k)*100,ref).tracking.accepted).toBe(false);
  });
@@ -144,5 +152,64 @@ describe('restart after standing still (restart-after-still-standing-v1, ADR-088
  it('without the option (live camera ends the segment instead) a lock never restarts by standing', ()=>{
   const t=createFullFrameIdentity(W,H,{controlledSingle:true});lockByGap(t);
   for(let k=0;k<30;k++)expect(t.observe([person(0,{dx:200})],(30+k)*100,ref).tracking.accepted).toBe(false);
+ });
+});
+
+describe('fast squats and side views do not lose the person (ADR-099)', ()=>{
+ it('a fast move (torso centre 0.45 torso length per 0.1 s) stays tracked as one smooth person', ()=>{
+  const t=createFullFrameIdentity(W,H,{controlledSingle:true,restartAfterLock:true});
+  for(let i=0;i<10;i++)t.observe([person(0)],i*100,ref);
+  // Whole body (feet too) sways 75 px = 0.45 torso length per step: faster than the general 3 torso/s screen.
+  const q=[...Array(10)].map((_,k)=>t.observe([person(0,{dx:[75,150,75,0][k%4]!})],(10+k)*100,ref).tracking);
+  expect(q.every(x=>x.accepted&&x.state==='TRACKING')).toBe(true);
+  expect(q[0]!.reasons).toContain('smooth-single-step');
+ });
+ it('a far foot that is barely visible (side view) is not teleport evidence', ()=>{
+  const a=person(0),b=person(0);
+  for(const i of [28,30]){a[i]={...a[i]!,visibility:.55};b[i]={...b[i]!,y:b[i]!.y-150/H,visibility:.55};}
+  expect(feetStep(b,a,W,H)).toBe('unknown');
+  const clear=person(0);for(const i of [28,30])clear[i]={...clear[i]!,y:clear[i]!.y-150/H};
+  expect(feetStep(clear,person(0),W,H)).toBe('teleport');
+ });
+ it('after a lock, a person who keeps squatting comes back within about 1 s', ()=>{
+  const t=createFullFrameIdentity(W,H,{controlledSingle:true,restartAfterLock:true});
+  for(let i=0;i<20;i++)t.observe([person(0)],i*100,ref);
+  for(let i=20;i<30;i++)t.observe([],i*100,ref);
+  // Shallow squats (torso shrinks ≤ 1.2× per step, like a side view) without standing still 0.5 s.
+  const clip=[...Array(4)].flatMap(()=>[.17,.33,.5,.5,.33,.17,0]);
+  const q=clip.map((d,k)=>t.observe([person(d,{dx:100})],(30+k)*100,ref).tracking);
+  const back=q.findIndex(x=>x.accepted);
+  expect(back).toBeGreaterThanOrEqual(5);expect(back).toBeLessThanOrEqual(10);
+  expect(q.slice(back).every(x=>x.state!=='MANUAL_REVIEW_REQUIRED')).toBe(true);
+ });
+ it('swap_cut with dimly visible feet (0.65, below the 0.7 "sure" bar) still locks', ()=>{
+  const dim=(q:Landmark[])=>{for(const i of [27,28,29,30])q[i]={...q[i]!,visibility:.65};return q;};
+  for(const restartAfterLock of [false,true]){
+   const t=createFullFrameIdentity(W,H,{controlledSingle:true,restartAfterLock});
+   for(let i=0;i<40;i++)t.observe([dim(person(0,{hipWidth:50}))],i*100,ref);
+   const B=()=>dim(person(0,{dx:-40,hipWidth:110,shank:104}));
+   expect(t.observe([B()],4000,ref).tracking.reasons).toContain('feet-teleport-pending');
+   expect(t.observe([B()],4100,ref).tracking.state).toBe('MANUAL_REVIEW_REQUIRED');
+  }
+ });
+ it('a cut from a fully visible person to one with ONE dim foot (0.65) still locks', ()=>{
+  const t=createFullFrameIdentity(W,H,{controlledSingle:true,restartAfterLock:true});
+  for(let i=0;i<40;i++)t.observe([person(0,{hipWidth:50})],i*100,ref);
+  const B=()=>{const q=person(0,{dx:-40,hipWidth:110,shank:104});for(const i of [28,30])q[i]={...q[i]!,visibility:.65};return q;};
+  expect(t.observe([B()],4000,ref).tracking.reasons).toContain('feet-teleport-pending');
+  expect(t.observe([B()],4100,ref).tracking.state).toBe('MANUAL_REVIEW_REQUIRED');
+ });
+ it('after a lock, a passer-by walking across (1.5 torso lengths per second) does not restart the analysis', ()=>{
+  const t=createFullFrameIdentity(W,H,{controlledSingle:true,restartAfterLock:true});
+  for(let i=0;i<20;i++)t.observe([person(0)],i*100,ref);
+  for(let i=20;i<30;i++)t.observe([],i*100,ref);
+  // 25 px per 0.1 s from the left edge to the right; walking legs alternate depth so standing never holds.
+  for(let k=0;k<26;k++)expect(t.observe([person(k%2?.3:0,{dx:-300+25*k})],(30+k)*100,ref).tracking.accepted,`k=${k}`).toBe(false);
+ });
+ it('a person jumping around by more than 0.6 torso length per step never restarts', ()=>{
+  const t=createFullFrameIdentity(W,H,{controlledSingle:true,restartAfterLock:true});
+  for(let i=0;i<20;i++)t.observe([person(0)],i*100,ref);
+  for(let i=20;i<30;i++)t.observe([],i*100,ref);
+  for(let k=0;k<30;k++)expect(t.observe([person(1,{dx:k%2?-50:60})],(30+k)*100,ref).tracking.accepted).toBe(false);
  });
 });
