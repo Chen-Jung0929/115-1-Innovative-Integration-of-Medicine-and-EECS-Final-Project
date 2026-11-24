@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { Sample, Session } from '../domain/analysis';
-import { canRecord, downloadBlob, startRecorder, videoExtension, type SegmentRecorder, type SegmentVideos } from '../input/recorder';
+import { canRecord, downloadBlob, startRecorder, videoExtension, type SegmentRecorder } from '../input/recorder';
 import { cameraErrorMessage, cameraUnavailableReason, listCameras, openCamera, stopCamera, streamDeviceId, type Facing } from '../input/camera';
 import { fullFrameSelection } from '../input/singleSubject';
 import { createPoseEngine, modelBytes, MODEL_LOAD_ERROR, MODEL_VERSION, type PoseEngine } from '../pose/mediapipe';
@@ -53,17 +53,45 @@ export function liveStatus(sample: Sample | undefined, notice?: TrackingNotice |
   return '量測中';
 }
 
-/** Segments whose videos stay downloadable; older segments keep only their angle data (memory on phones and tablets). */
-const MAX_VIDEO_SEGMENTS = 3;
+/** Camera sessions (open → close) whose recordings stay in memory; older ones are released (phones and tablets). */
+const MAX_RECORDINGS = 3;
+/** One recording stops after this long (about 500 MB for both videos); measuring continues. */
+const MAX_RECORDING_MS = 30 * 60 * 1000;
+/** Total size of finished recordings kept in the tab; older ones are released first (the newest is always kept). */
+const RECORDING_BUDGET_BYTES = 600 * 1024 * 1024;
+
+/** Drops the oldest finished recordings until the total fits the budget. Recordings are newest first. */
+export function keepWithinBudget(recordings: CameraRecording[], budget = RECORDING_BUDGET_BYTES): CameraRecording[] {
+  const size = (r: CameraRecording) => (r.raw?.size ?? 0) + (r.skeleton?.size ?? 0);
+  let total = 0;
+  return recordings.filter((r, i) => { total += size(r); return i === 0 || r.status !== 'done' || total <= budget; });
+}
+
+/**
+ * Seeks a recorded video. MediaRecorder files often report an unknown (infinite) duration until the end is
+ * reached once, and then cannot seek; jumping far ahead makes the browser compute it first.
+ */
+function seekRecording(v: HTMLVideoElement, seconds: number) {
+  if (Number.isFinite(v.duration)) { v.currentTime = seconds; return; }
+  let done = false;
+  const back = () => { if (done) return; done = true; v.currentTime = seconds; };
+  v.addEventListener('durationchange', back, { once: true });
+  setTimeout(back, 1500); // Some engines never report the duration: seek anyway.
+  v.currentTime = 1e101;
+}
 
 /** Identifies the open camera by device id, or by its label when the browser gives no id. */
 const cameraKey = (s: MediaStream | null) => streamDeviceId(s) || (s?.getVideoTracks()[0]?.label ?? '');
 
+/** One recording from opening the camera to closing it (ADR-095): raw camera picture and a skeleton copy. */
+export type CameraRecording = { id: string; startedAt: number; endedAt: number | null; status: 'recording' | 'processing' | 'done'; raw: Blob | null; skeleton: Blob | null };
+/** Where a saved segment starts inside its camera recording. */
+export type SegmentLink = { recordingId: string; offsetMs: number };
 /** Saved live results kept by the parent while the camera page is closed (ADR-092). Mutated in place. */
-export type LiveKeep = { results: Session[]; videos: Record<string, SegmentVideos | 'pending'>; released: Set<string>;
-  /** Set by the mounted panel: a recording that finishes after a remount still reaches the visible panel. */
-  onVideo?: ((id: string, videos: SegmentVideos) => void) | undefined };
-export function createLiveKeep(): LiveKeep { return { results: [], videos: {}, released: new Set() }; }
+export type LiveKeep = { results: Session[]; recordings: CameraRecording[]; links: Record<string, SegmentLink>;
+  /** Set by the mounted panel so a recording that finishes later (even after a remount) re-renders it. */
+  notify?: (() => void) | undefined };
+export function createLiveKeep(): LiveKeep { return { results: [], recordings: [], links: {} }; }
 
 export function LivePanel({ keep, model, side, onSide, disabled, onFullAnalysis }: { keep?: LiveKeep; model: File | null; side: Side; onSide: (side: Side) => void; disabled: boolean; onFullAnalysis?: (file: File) => void }) {
   const video = useRef<HTMLVideoElement>(null);
@@ -90,12 +118,13 @@ export function LivePanel({ keep, model, side, onSide, disabled, onFullAnalysis 
   const [mirrored, setMirrored] = useState(true);
   const [cameraCount, setCameraCount] = useState(0);
   const [canSwitch, setCanSwitch] = useState(true);
-  const [released, setReleased] = useState<Set<string>>(() => keep?.released ?? new Set());
-  // Segment videos (ADR-091): kept in memory on this device only, downloaded on request, never uploaded.
+  // Recordings (ADR-091, ADR-095): kept in memory on this device only, downloaded on request, never uploaded.
+  const fallbackKeep = useRef<LiveKeep | null>(null);
+  const store = keep ?? (fallbackKeep.current ??= createLiveKeep());
+  const [, bump] = useState(0);
   const [record, setRecord] = useState(true);
-  const [videos, setVideos] = useState<Record<string, SegmentVideos | 'pending'>>(() => keep?.videos ?? {});
-  const rawRec = useRef<SegmentRecorder | null>(null);
-  const skelRec = useRef<SegmentRecorder | null>(null);
+  const rec = useRef<{ id: string; raw: SegmentRecorder | null; skel: SegmentRecorder | null; mediaStartMs: number | null; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const pendingLink = useRef<SegmentLink | null>(null);
   const composite = useRef<HTMLCanvasElement | null>(null);
   const stage = useRef<HTMLDivElement>(null);
   const latest = useRef<Sample | undefined>(undefined);
@@ -103,7 +132,7 @@ export function LivePanel({ keep, model, side, onSide, disabled, onFullAnalysis 
   const [size, setSize] = useState({ width: 640, height: 360 });
   const [sample, setSample] = useState<Sample | undefined>();
   const [recent, setRecent] = useState<Sample[]>([]);
-  const [results, setResults] = useState<Session[]>(() => keep?.results ?? []);
+  const [results, setResults] = useState<Session[]>(() => store.results);
   const [shown, setShown] = useState(0);
   const [ready, setReady] = useState<Ready | null>(null);
   const [measuring, setMeasuring] = useState(false);
@@ -113,22 +142,7 @@ export function LivePanel({ keep, model, side, onSide, disabled, onFullAnalysis 
 
   // Leaving the camera page mid-segment saves that segment into the parent's keep instead of dropping it.
   useEffect(() => () => { opening.current?.abort(); endSegment(true); halt(); }, []);
-  useEffect(() => {
-    if (!keep) return;
-    keep.onVideo = (id, done) => setVideos(previous => id in previous ? { ...previous, [id]: done } : previous);
-    return () => { keep.onVideo = undefined; };
-  }, [keep]);
-  // Drop videos of segments that fell out of the kept list, so memory does not grow without bound.
-  useEffect(() => {
-    // Videos are large (about 9 MB per minute per video), so only the latest few segments keep them.
-    const kept = new Set(results.slice(0, MAX_VIDEO_SEGMENTS).map(r => r.metadata.sessionId));
-    setVideos(previous => {
-      const dropped = Object.keys(previous).filter(id => !kept.has(id));
-      if (!dropped.length) return previous;
-      setReleased(old => new Set([...old, ...dropped]));
-      return Object.fromEntries(Object.entries(previous).filter(([id]) => kept.has(id)));
-    });
-  }, [results]);
+  useEffect(() => { store.notify = () => bump(n => n + 1); return () => { store.notify = undefined; }; }, [store]);
   useEffect(() => {
     const hidden = () => { if (document.visibilityState === 'hidden' && stream.current) stop('切換到其他分頁或 App 時，鏡頭已自動關閉並結束這一段量測。'); };
     document.addEventListener('visibilitychange', hidden);
@@ -136,6 +150,7 @@ export function LivePanel({ keep, model, side, onSide, disabled, onFullAnalysis 
   });
 
   function halt() {
+    stopRecording();
     const v = video.current;
     if (v && frameId.current) v.cancelVideoFrameCallback(frameId.current);
     frameId.current = 0;
@@ -148,37 +163,45 @@ export function LivePanel({ keep, model, side, onSide, disabled, onFullAnalysis 
     const a = analyzer.current, info = runInfo.current;
     analyzer.current = null;
     setMeasuring(false);
-    const recorders = [rawRec.current, skelRec.current] as const;
-    rawRec.current = null; skelRec.current = null; composite.current = null; latest.current = undefined;
-    const finish = Promise.all(recorders.map(r => r ? r.stop() : Promise.resolve(null)));
+    latest.current = undefined;
+    const link = pendingLink.current; pendingLink.current = null;
     if (a && info && a.samples.length) {
       const session = liveSession(a.samples, { ...info, startedAt: segmentStart.current }, performance.now(), perf.current?.summary(), pitchRec.current.summary());
-      const id = session.metadata.sessionId;
-      if (unmounting && keep) { // State setters do nothing after unmount: write straight into the keep.
-        keep.results = [session, ...keep.results].slice(0, MAX_KEPT_SEGMENTS);
-        if (recorders.some(Boolean)) keep.videos = { ...keep.videos, [id]: 'pending' };
-      } else { setResults(previous => [session, ...previous].slice(0, MAX_KEPT_SEGMENTS)); setShown(0); }
-      if (recorders.some(Boolean)) {
-        if (!unmounting) setVideos(previous => ({ ...previous, [id]: 'pending' }));
-        void finish.then(([raw, skeleton]) => {
-          const done = { raw: raw ?? null, skeleton: skeleton ?? null };
-          // Also into the parent's keep, in case the camera page was closed before the video finished.
-          if (!keep) { setVideos(previous => id in previous ? { ...previous, [id]: done } : previous); return; }
-          if (id in keep.videos) keep.videos = { ...keep.videos, [id]: done };
-          keep.onVideo?.(id, done);
-        });
-      }
+      if (link) store.links = { ...store.links, [session.metadata.sessionId]: link };
+      if (unmounting) store.results = [session, ...store.results].slice(0, MAX_KEPT_SEGMENTS); // State setters do nothing after unmount.
+      else { setResults(previous => [session, ...previous].slice(0, MAX_KEPT_SEGMENTS)); setShown(0); }
     }
+  }
+
+  function updateRecording(id: string, patch: Partial<CameraRecording>) {
+    store.recordings = keepWithinBudget(store.recordings.map(r => r.id === id ? { ...r, ...patch } : r));
+    store.notify?.();
   }
 
   /** Records the raw camera stream and a copy with the skeleton and knee angles drawn on (not mirrored). */
   function startRecording(width: number, height: number) {
     if (!record || !stream.current || !canRecord()) return;
-    rawRec.current = startRecorder(stream.current);
+    const raw = startRecorder(stream.current);
     const c = document.createElement('canvas'); c.width = width; c.height = height;
     composite.current = c; drawComposite();
-    skelRec.current = 'captureStream' in c ? startRecorder(c.captureStream(30), 1_000_000) : null;
-    if (!skelRec.current) composite.current = null;
+    const skel = 'captureStream' in c ? startRecorder(c.captureStream(30), 1_000_000) : null;
+    if (!skel) composite.current = null;
+    if (!raw && !skel) return;
+    const id = crypto.randomUUID();
+    const timer = setTimeout(() => { stopRecording(); setNotice(`整段錄影已達 ${MAX_RECORDING_MS / 60000} 分鐘上限，之後不再錄影（量測照常進行）。`); }, MAX_RECORDING_MS);
+    rec.current = { id, raw, skel, mediaStartMs: null, timer };
+    store.recordings = [{ id, startedAt: Date.now(), endedAt: null, status: 'recording' as const, raw: null, skeleton: null }, ...store.recordings].slice(0, MAX_RECORDINGS);
+    store.notify?.();
+  }
+
+  /** Stops the camera recording; the videos become downloadable when the browser finishes writing them. */
+  function stopRecording() {
+    const r = rec.current;
+    if (!r) return;
+    rec.current = null; clearTimeout(r.timer); composite.current = null;
+    updateRecording(r.id, { status: 'processing', endedAt: Date.now() });
+    void Promise.all([r.raw ? r.raw.stop() : null, r.skel ? r.skel.stop() : null])
+      .then(([raw, skeleton]) => updateRecording(r.id, { status: 'done', raw: raw ?? null, skeleton: skeleton ?? null }));
   }
 
   function drawComposite() {
@@ -212,7 +235,8 @@ export function LivePanel({ keep, model, side, onSide, disabled, onFullAnalysis 
     segmentStart.current = performance.now(); lastSampleMs.current = null; pitchRec.current.reset();
     noticeHold.current = createNoticeHold('live', width, height); setLiveNotice(null);
     setSample(undefined); setRecent([]); setMeasuring(true); setLivePerf(null);
-    startRecording(width, height);
+    const r = rec.current;
+    pendingLink.current = r && r.mediaStartMs !== null ? { recordingId: r.id, offsetMs: Math.max(0, mediaTimeMs - r.mediaStartMs) } : null;
   }
 
   function onFrame(_now: number, meta: VideoFrameCallbackMetadata) {
@@ -224,6 +248,7 @@ export function LivePanel({ keep, model, side, onSide, disabled, onFullAnalysis 
     }
     const t = meta.mediaTime * 1000;
     if (a) perf.current?.frame(t, meta.presentedFrames);
+    if (rec.current && rec.current.mediaStartMs === null) rec.current.mediaStartMs = t; // Recording time 0 ≈ this frame.
     drawComposite(); // Every camera frame, so the skeleton video is as smooth as the camera.
     if (!dueForSample(lastSampleMs.current, t)) return;
     const ctx = c.getContext('2d');
@@ -286,7 +311,7 @@ export function LivePanel({ keep, model, side, onSide, disabled, onFullAnalysis 
       setSize({ width, height });
       runInfo.current = { width, height, selection: fullFrameSelection(width, height), displayMirrored: useMirrored, appVersion: pkg.version, modelPreparationMs,
         model: { packageVersion: MODEL_VERSION, assetId: asset.id, assetSha256: asset.hash, delegate: 'CPU' } };
-      gate.current = createReadyGate(width, height); enterWaiting();
+      gate.current = createReadyGate(width, height); enterWaiting(); startRecording(width, height);
       frameId.current = v.requestVideoFrameCallback(onFrame);
       setState('live');
       return true;
@@ -343,22 +368,31 @@ export function LivePanel({ keep, model, side, onSide, disabled, onFullAnalysis 
   const live = state === 'live';
   const pct = (s: 'left' | 'right') => { const value = analyzer.current ? coverage(analyzer.current.samples, s) : null; return value === null ? 'N/A' : `${(value * 100).toFixed(0)}%`; };
   const result = results[shown] ?? null;
-  const resultVideos = result ? videos[result.metadata.sessionId] : undefined;
-  const hasVideo = !!resultVideos && resultVideos !== 'pending' && !!(resultVideos.raw || resultVideos.skeleton);
+  const recordings = store.recordings;
+  const resultLink = result ? store.links[result.metadata.sessionId] : undefined;
+  const resultRec = resultLink ? recordings.find(r => r.id === resultLink.recordingId) : undefined;
+  const hasVideo = recordings.some(r => r.raw || r.skeleton);
   const resultLift = useMemo(() => result ? liftSession(result.samples, result.metadata.sourceWidthPx, result.metadata.sourceHeightPx, result.cameraPitch?.deg) : null, [result]);
   // Playback of a saved segment's video inside the page (ADR-092): the chart cursor and 3D skeleton follow the video time.
   const [playKind, setPlayKind] = useState<'skeleton' | 'raw'>('skeleton');
   const [playMs, setPlayMs] = useState<number | null>(null);
-  const playBlob = resultVideos && resultVideos !== 'pending' ? (resultVideos[playKind] ?? resultVideos.raw ?? resultVideos.skeleton) : null;
+  const playBlob = resultRec ? (resultRec[playKind] ?? resultRec.raw ?? resultRec.skeleton) : null;
+  const offsetS = (resultLink?.offsetMs ?? 0) / 1000;
+  const player = useRef<HTMLVideoElement>(null);
+  // Ignores the far-ahead jump of seekRecording, which is only there to make the browser compute the duration.
+  const onPlayTime = (v: HTMLVideoElement) => { if (Number.isFinite(v.duration) && v.currentTime <= v.duration) setPlayMs((v.currentTime - offsetS) * 1000); };
+  const outside = playMs !== null && !!result && (playMs < -250 || playMs > (result.samples.at(-1)?.sourceTimeMs ?? 0) + 250);
   const [playUrl, setPlayUrl] = useState<string | null>(null);
   useEffect(() => {
     if (!playBlob) { setPlayUrl(null); return; }
     const url = URL.createObjectURL(playBlob); setPlayUrl(url);
     return () => URL.revokeObjectURL(url);
   }, [playBlob]);
+  // Segments of one camera session share the same video: choosing another segment only seeks it.
+  useEffect(() => { const v = player.current; if (v && v.readyState >= 1) seekRecording(v, offsetS); }, [offsetS, playUrl]);
   useEffect(() => { setPlayMs(null); }, [shown, results, playKind]);
   // Mirror saved results into the parent's keep so they come back when the camera page reopens.
-  useEffect(() => { if (keep) { keep.results = results; keep.videos = videos; keep.released = released; } }, [keep, results, videos, released]);
+  useEffect(() => { store.results = results; }, [store, results]);
   const resultLast = result && resultLift ? (playMs === null
     ? [...result.samples].reverse().find(s => resultLift.poses.has(s.sampleIndex))
     : nearestSample(result.samples.filter(s => resultLift.poses.has(s.sampleIndex)), playMs, Infinity)) : undefined;
@@ -375,7 +409,7 @@ export function LivePanel({ keep, model, side, onSide, disabled, onFullAnalysis 
       <div className="live-options">
         <label className="compact">鏡頭方向<select value={facing} disabled={state !== 'off'} onChange={e => { const f = e.target.value as Facing; setFacing(f); setMirrored(f === 'user'); }}><option value="user">前鏡頭（自拍）</option><option value="environment">後鏡頭（手機或平板架在旁邊）</option></select></label>
         {live && cameraCount > 1 && canSwitch && <button className="secondary" onClick={() => void switchCamera()}>切換到{facing === 'user' ? '後' : '前'}鏡頭</button>}
-        <label className="switch"><input type="checkbox" role="switch" checked={record} disabled={state !== 'off'} onChange={e => setRecord(e.target.checked)} /><span>錄下每一段影片</span></label>
+        <label className="switch"><input type="checkbox" role="switch" checked={record} disabled={state !== 'off'} onChange={e => setRecord(e.target.checked)} /><span>錄下整段影片（開鏡頭到關鏡頭）</span></label>
         <label className="switch"><input type="checkbox" role="switch" checked={mirrored} disabled={state !== 'off'} onChange={e => setMirrored(e.target.checked)} /><span>畫面像照鏡子</span></label>
         {sensor === 'off' && <button className="secondary" onClick={() => void enableSensor()}>使用手機／平板傾斜感測器（鏡頭俯角）</button>}
         {sensor === 'on' && <span className="muted small">{livePitch === null ? '等待手機傾斜感測器…（筆電通常沒有）' : `鏡頭俯角 ${livePitch.toFixed(0)}°（手機感測器）`}</span>}
@@ -385,7 +419,7 @@ export function LivePanel({ keep, model, side, onSide, disabled, onFullAnalysis 
       </div>
       {error === MODEL_LOAD_ERROR && <p>如需選用本機模型，可到「上傳影片」的進階設定。</p>}{error && <p role="alert" className="error">{error}</p>}{notice && <p role="status" className="notice">{notice}</p>}
       <details className="fold"><summary>怎麼拍最準？</summary>
-        <p>開啟鏡頭後，畫面會即時畫出骨架與膝角度（每秒約 {LIVE_SAMPLING_HZ} 次）。影像只在這台裝置上處理，不會上傳。開啟「錄下每一段影片」時，每一段會錄成兩支影片（原始畫面、含骨架與角度）暫存在這台裝置，最近 {MAX_VIDEO_SEGMENTS} 段可下載，關閉網頁就會消失。含骨架影片中的骨架每秒更新約 {LIVE_SAMPLING_HZ} 次，動作快時會略落後身體。</p>
+        <p>開啟鏡頭後，畫面會即時畫出骨架與膝角度（每秒約 {LIVE_SAMPLING_HZ} 次）。影像只在這台裝置上處理，不會上傳。開啟「錄下整段影片」時，從開鏡頭到關鏡頭會錄成兩支影片（原始畫面、含骨架與角度）暫存在這台裝置，保留最近 {MAX_RECORDINGS} 次開鏡頭的錄影，單次最長 {MAX_RECORDING_MS / 60000} 分鐘，關閉網頁就會消失。含骨架影片中的骨架每秒更新約 {LIVE_SAMPLING_HZ} 次，動作快時會略落後身體。</p>
         <p>建議：鏡頭固定不動、從側面拍、頭到腳完整入鏡、畫面中只有一人。開啟後不用再碰裝置：走到畫面中、站穩約 {(READY_POLICY.holdMs / 1000).toFixed(1)} 秒就會自動開始；有人闖入或你離開畫面時，這一段會自動結束保存，回來站好又會開始新的一段。</p>
         <p>「畫面像照鏡子」只影響顯示，左右膝仍以個案身體為準。</p>
       </details>
@@ -411,35 +445,54 @@ export function LivePanel({ keep, model, side, onSide, disabled, onFullAnalysis 
     </section>
     <section className="card" aria-labelledby="live-saved-title"><div className="card-head"><h2 id="live-saved-title">已保存的量測段與匯出</h2>
       {results.length > 1 && <label className="compact">選擇量測段<select value={shown} onChange={e => setShown(Number(e.target.value))}>{results.map((r, i) => <option key={r.metadata.sessionId} value={i}>{i === 0 ? '最新一段' : `前 ${i} 段`} · {(r.durationMs / 1000).toFixed(1)} 秒 · {r.samples.length} 個取樣</option>)}</select></label>}</div>
+      {recordings.length > 0 && <div className="recordings"><h3 className="group-title">整段錄影（開鏡頭到關鏡頭）</h3>
+        {recordings.map(r => <RecordingRow key={r.id} r={r} live={live || state === 'starting'} onFullAnalysis={onFullAnalysis} />)}
+        <p className="muted small">影片只暫存在這個分頁，保留最近 {MAX_RECORDINGS} 次開鏡頭的錄影（合計約 {RECORDING_BUDGET_BYTES / 1024 / 1024} MB 內，超過會先釋放最舊的）；關閉或重新整理網頁就會消失，請先下載。</p></div>}
       {result ? <><p>這一段共 {result.samples.length} 個取樣、{(result.durationMs / 1000).toFixed(1)} 秒。<span className="muted">時間軸為鏡頭影格時間，每段從 0 秒起算；無效取樣保留為斷點。</span></p>
         {result.livePerformance && <p className="live-perf">效能：{perfText(result.livePerformance)}（詳細數字在研究 JSON 的 livePerformance）</p>}
-        {resultVideos && resultVideos !== 'pending' && resultVideos.raw && onFullAnalysis && <div className="full-analysis">
-          {videoExtension(resultVideos.raw.type) === 'mp4'
-            ? <><button className="primary" disabled={live || state === 'starting'} onClick={() => onFullAnalysis(new File([resultVideos.raw!], `live-${result.metadata.sessionId}.mp4`, { type: 'video/mp4' }))}>用完整分析畫面看這一段</button>
-              <span className="muted small">{live ? '請先按「停止」關閉鏡頭。' : '跟「上傳影片」一樣的畫面（骨架、角度、姿勢提醒、3D、播放速度），用這一段的錄影重新分析一次。'}</span></>
-            : <span className="muted small">這個瀏覽器錄成 WebM，無法直接用完整分析；請下載影片後轉成 MP4 再上傳。</span>}
-        </div>}
         {playUrl && <div className="segment-playback">
-          {resultVideos && resultVideos !== 'pending' && resultVideos.raw && resultVideos.skeleton && <div className="actions" role="group" aria-label="播放哪一支影片">
+          {resultRec?.raw && resultRec.skeleton && <div className="actions" role="group" aria-label="播放哪一支影片">
             <button className={playKind === 'skeleton' ? 'primary' : 'secondary'} aria-pressed={playKind === 'skeleton'} onClick={() => setPlayKind('skeleton')}>看含骨架</button>
             <button className={playKind === 'raw' ? 'primary' : 'secondary'} aria-pressed={playKind === 'raw'} onClick={() => setPlayKind('raw')}>看原始畫面</button></div>}
-          <video key={playUrl} src={playUrl} controls playsInline muted aria-label="這一段的錄影"
-            onTimeUpdate={e => setPlayMs(e.currentTarget.currentTime * 1000)} onSeeked={e => setPlayMs(e.currentTarget.currentTime * 1000)} />
-          <p className="muted small">播放或拖動影片時，下方曲線的直線和 3D 骨架會跟著影片時間移動（大約對齊，誤差約 0.1–0.2 秒）。</p>
+          <video ref={player} key={playUrl} src={playUrl} controls playsInline muted aria-label="這一段的錄影"
+            onLoadedMetadata={e => seekRecording(e.currentTarget, offsetS)}
+            onTimeUpdate={e => onPlayTime(e.currentTarget)} onSeeked={e => onPlayTime(e.currentTarget)} />
+          {outside && <p className="muted small">目前播放的位置不在這一段內（等待或其他段的時間），曲線與 3D 骨架停在最接近的取樣。</p>}
+          <p className="muted small">這是整段錄影，已跳到這一段開始的位置（第 {offsetS.toFixed(1)} 秒）。播放或拖動時，下方曲線的直線和 3D 骨架會跟著影片時間移動（大約對齊，誤差約 0.1–0.2 秒）。</p>
         </div>}
-        <AngleChart samples={result.samples} side={side} timeMs={playMs ?? result.samples.at(-1)?.sourceTimeMs ?? 0} />
+        <AngleChart samples={result.samples} side={side} timeMs={playMs === null ? (result.samples.at(-1)?.sourceTimeMs ?? 0) : Math.min(Math.max(playMs, 0), result.samples.at(-1)?.sourceTimeMs ?? 0)} />
         {resultLift && resultLast && <Skeleton3D sample={resultLast} points={resultLift.poses.get(resultLast.sampleIndex)} note={calibrationNote(resultLift.context)} pitchText={pitchLabel(result.cameraPitch)} uprightDeg={resultLift.uprightDeg} />}
         <div className="actions">
           <button className="secondary" onClick={() => downloadFile(`knee-live-${result.metadata.sessionId}.csv`, toCsv(result), 'text/csv;charset=utf-8')}>下載 CSV</button>
           <button className="secondary" onClick={() => downloadFile(`research-live-${result.metadata.sessionId}.json`, JSON.stringify(result, null, 2), 'application/json')}>下載研究 JSON（含 landmarks）</button>
-          {resultVideos === 'pending' && <span className="muted small">影片處理中…</span>}
-          {resultVideos && resultVideos !== 'pending' && !hasVideo && <span className="muted small">這一段太短，沒有錄到影片。</span>}
-          {resultVideos && resultVideos !== 'pending' && resultVideos.raw && <button className="secondary" onClick={() => downloadBlob(`video-live-${result.metadata.sessionId}.${videoExtension(resultVideos.raw!.type)}`, resultVideos.raw!)}>下載影片（原始畫面）</button>}
-          {resultVideos && resultVideos !== 'pending' && resultVideos.skeleton && <button className="secondary" onClick={() => downloadBlob(`video-live-skeleton-${result.metadata.sessionId}.${videoExtension(resultVideos.skeleton!.type)}`, resultVideos.skeleton!)}>下載影片（含骨架）</button>}
-        </div>{!resultVideos && released.has(result.metadata.sessionId) && <p className="muted small">這一段的影片已釋放（只保留最近 {MAX_VIDEO_SEGMENTS} 段的影片），角度資料仍可下載。</p>}
+        </div>
+        {resultLink && !resultRec && <p className="muted small">這一段所屬的錄影已釋放（只保留最近 {MAX_RECORDINGS} 次開鏡頭的錄影），角度資料仍可下載。</p>}
+        {resultRec?.status === 'recording' && <p className="muted small">鏡頭還在錄影，按「停止」關閉鏡頭後就能播放這一段。</p>}
+        {resultRec?.status === 'processing' && <p className="muted small">影片處理中…</p>}
         {record && !canRecord() && <p className="muted small">這個瀏覽器不支援錄影，只能下載角度資料。</p>}
         <p className="muted small">輸出含人體特徵點{hasVideo ? '與影像' : ''}，請保存於受限空間，不要上傳或提交到 Public GitHub。</p></>
         : <p className="muted">每一段結束後（按停止、有人闖入或離開畫面），這裡會顯示該段曲線與匯出按鈕，最多保留最近 {MAX_KEPT_SEGMENTS} 段。關閉網頁前請先下載。</p>}
     </section>
   </>;
+}
+
+const clock = (ms: number) => new Date(ms).toLocaleTimeString('zh-TW', { hour12: false });
+const minutes = (ms: number) => { const sec = Math.round(ms / 1000); return sec >= 60 ? `${Math.floor(sec / 60)} 分 ${sec % 60} 秒` : `${sec} 秒`; };
+
+/** One camera session's recording: status, downloads and the full analysis view (upload page limit: 10 minutes). */
+function RecordingRow({ r, live, onFullAnalysis }: { r: CameraRecording; live: boolean; onFullAnalysis?: ((file: File) => void) | undefined }) {
+  const name = `video-live-${new Date(r.startedAt).toISOString().replace(/[:.]/g, '-')}`;
+  const tooLong = r.endedAt !== null && r.endedAt - r.startedAt > 10 * 60 * 1000;
+  return <div className="recording-row">
+    <span>{clock(r.startedAt)} 開始 · {r.endedAt === null ? '錄影中…' : minutes(r.endedAt - r.startedAt)}</span>
+    {r.status === 'processing' && <span className="muted small">影片處理中…</span>}
+    {r.status === 'done' && !r.raw && !r.skeleton && <span className="muted small">沒有錄到影片。</span>}
+    {r.raw && <button className="secondary" onClick={() => downloadBlob(`${name}.${videoExtension(r.raw!.type)}`, r.raw!)}>下載整段影片（原始畫面）</button>}
+    {r.skeleton && <button className="secondary" onClick={() => downloadBlob(`${name}-skeleton.${videoExtension(r.skeleton!.type)}`, r.skeleton!)}>下載整段影片（含骨架）</button>}
+    {r.raw && onFullAnalysis && (videoExtension(r.raw.type) !== 'mp4'
+      ? <span className="muted small">這個瀏覽器錄成 WebM，無法直接用完整分析；請下載後轉成 MP4 再上傳。</span>
+      : tooLong ? <span className="muted small">超過 10 分鐘，請下載後剪短再到「上傳影片」分析。</span>
+      : <><button className="primary" disabled={live} onClick={() => onFullAnalysis(new File([r.raw!], `${name}.mp4`, { type: 'video/mp4' }))}>用完整分析畫面看整段</button>
+        {live && <span className="muted small">請先按「停止」關閉鏡頭。</span>}</>)}
+  </div>;
 }

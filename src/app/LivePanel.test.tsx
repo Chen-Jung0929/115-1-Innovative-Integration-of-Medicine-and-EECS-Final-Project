@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { LivePanel, liveStatus, perfText, waitStatus } from './LivePanel';
+import { keepWithinBudget, LivePanel, liveStatus, perfText, waitStatus, type CameraRecording } from './LivePanel';
 import { createPerformanceRecorder } from '../motion/livePerformance';
 import { makeSample } from '../test/fixtures';
 describe('live camera panel', () => {
@@ -25,5 +25,13 @@ describe('live camera panel', () => {
     r.frame(0, 1); r.frame(1000, 31); r.sample(0, 25, 50, 'presentation-callback');
     const text = perfText(r.summary());
     expect(text).toContain('（估計）'); expect(text).toContain('掉幀 29'); expect(text).toContain('推論中位數 25 ms');
+  });
+  it('releases the oldest finished recordings over the memory budget, never the newest or one still in progress', () => {
+    const rec = (id: string, mb: number, status: CameraRecording['status'] = 'done'): CameraRecording =>
+      ({ id, startedAt: 0, endedAt: 1, status, raw: new Blob([new Uint8Array(mb * 1024)]), skeleton: null });
+    const kept = (list: CameraRecording[], budgetKb: number) => keepWithinBudget(list, budgetKb * 1024).map(r => r.id);
+    expect(kept([rec('new', 300), rec('mid', 200), rec('old', 200)], 600)).toEqual(['new', 'mid']);
+    expect(kept([rec('huge', 900), rec('old', 10)], 600)).toEqual(['huge']);
+    expect(kept([rec('new', 500), rec('busy', 500, 'processing')], 600)).toEqual(['new', 'busy']);
   });
 });

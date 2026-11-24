@@ -2,7 +2,6 @@
  * Live segment video recording (ADR-091). Videos stay in this browser's memory until the user downloads them;
  * nothing is uploaded. Recording never feeds inference: the model still reads the un-mirrored camera frame.
  */
-export type SegmentVideos = { raw: Blob | null; skeleton: Blob | null };
 
 /** MP4 (H.264) when the browser supports it (Safari, recent Chrome), otherwise WebM. Returns '' when none is supported. */
 export function pickRecorderMime(isSupported: (type: string) => boolean): string {
