@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { statSync } from 'node:fs';
 // Chromium's built-in fake camera (synthetic test pattern, no person or face). Pose output is a
 // synthetic adapter, so this checks wiring only, not MediaPipe accuracy on real people.
 test.use({ permissions: ['camera'], launchOptions: { args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'], ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}) } });
@@ -35,6 +36,18 @@ test('live camera starts hands-free, ends a segment on a second person, restarts
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: '下載 CSV', exact: true }).click();
   expect((await download).suggestedFilename()).toMatch(/^knee-live-.*\.csv$/);
+  // Each segment is recorded twice on this device only: the raw camera picture and a copy with the skeleton drawn on.
+  for (const [name, pattern] of [['下載影片（原始畫面）', /^video-live-[^s].*\.(webm|mp4)$/], ['下載影片（含骨架）', /^video-live-skeleton-.*\.(webm|mp4)$/]] as const) {
+    const button = page.getByRole('button', { name, exact: true });
+    await expect(button).toBeVisible({ timeout: 10000 });
+    const video = page.waitForEvent('download');
+    await button.click();
+    const file = await video;
+    expect(file.suggestedFilename()).toMatch(pattern);
+    const size = statSync(await file.path()).size;
+    if (process.env.SAVE_VIDEOS) await file.saveAs(process.env.SAVE_VIDEOS + '/' + file.suggestedFilename());
+    expect(size).toBeGreaterThan(1000);
+  }
   await page.getByRole('button', { name: '上傳影片', exact: true }).click();
   await expect(page.getByText('MP4 影片（最多 500 MB、10 分鐘）')).toBeVisible();
 });
