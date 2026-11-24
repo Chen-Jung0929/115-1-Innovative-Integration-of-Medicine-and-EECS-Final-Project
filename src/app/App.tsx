@@ -29,7 +29,7 @@ import { kneeToeNote, kneeToeValue, lockedBannerText, plainReason, qcStatus, sho
 import { frontalTimeline, type BaselineSource } from '../motion/frontalTimeline';
 import { FrontalOverlay, FrontalCuePanel, FrontalLegend, linesDrawn } from '../visualization/FrontalOverlay';
 import { CUE_POLICY } from '../motion/frontalCues';
-import { LivePanel } from './LivePanel';
+import { createLiveKeep, LivePanel } from './LivePanel';
 
 export function App() {
   const [pipeline,setPipeline]=useState<PipelineId>(DEFAULT_PIPELINE.id);
@@ -72,6 +72,11 @@ export function App() {
   const [baselineSource,setBaselineSource]=useState<BaselineSource>('standing-trunk');
   const [obliqueRef,setObliqueRef]=useState(true);
   const [mode, setMode] = useState<'video' | 'camera'>('video');
+  // A recorded live segment sent to the upload view (ADR-092) is analyzed as soon as it has loaded.
+  const autoRun=useRef(false);
+  // Saved live segments and recordings outlive the camera page, so a trip to the upload view does not clear them.
+  const liveKeep=useRef(createLiveKeep());
+  useEffect(()=>{ if(!autoRun.current||loading||busy)return; autoRun.current=false; if(info&&selection&&!error)void run(); });
 
   useEffect(() => {
     const v = video.current!;
@@ -214,7 +219,7 @@ export function App() {
       </div>
     </header>
     <main>
-    {mode==='camera' && <LivePanel model={model} side={side} onSide={setSide} disabled={busy||loading} />}
+    {mode==='camera' && <LivePanel keep={liveKeep.current} model={model} side={side} onSide={setSide} disabled={busy||loading} onFullAnalysis={file=>{setMode('video');autoRun.current=true;void choose(file);}} />}
     <div hidden={mode!=='video'}>
     <section className="card setup" aria-labelledby="input-title"><h2 id="input-title">選擇影片</h2>
       <div className="setup-row">
