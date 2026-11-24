@@ -18,7 +18,7 @@ async function mockPose(page:Page) {
   await page.route('**/src/pose/mediapipe.ts', route => route.fulfill({contentType:'application/javascript',body:`
     export const MODEL_URL='https://example.invalid/synthetic';
     export const MODEL_VERSION='synthetic-adapter-test';
-    export const PROJECT_MODEL_URL='/models/pose_landmarker_lite.task';
+    export const MODEL_LOAD_ERROR='模型載入失敗，請確認網路後重試';
     export async function modelBytes(){return {bytes:new Uint8Array(),hash:'synthetic',id:'synthetic'};}
     export async function createPoseEngine(bytes,numPoses=1){
       if(numPoses===3&&new URLSearchParams(location.search).get('case')==='compare-failure')throw new Error('synthetic 3-pose unsupported');
@@ -88,10 +88,8 @@ test('real browser decodes an MP4, seeks deterministically and reports corrupted
 test('model network failure is explicit and does not produce results', async ({ page }) => {
   await page.route('https://storage.googleapis.com/**', route => route.fulfill({ status: 403, body: 'blocked for network failure test' }));
   await page.goto('/?hz=5'); await page.getByLabel('MP4 影片').setInputFiles(synthetic);await openResearchTools(page); await selectRoi(page);
-  await page.getByText('模型設定與資料隱私').click();
-  await page.getByLabel('本機模型不存在時').check();
   await page.getByRole('button', { name: '開始分析' }).click();
-  await expect(page.getByRole('alert')).toContainText('官方模型下載失敗');
+  await expect(page.getByRole('alert')).toContainText('模型載入失敗，請確認網路後重試');
   await expect(page.getByRole('button', { name: '下載 CSV' })).toHaveCount(0);
 });
 
@@ -156,7 +154,7 @@ test('default 10 Hz analysis, and the typed camera pitch for the 3D view (ADR-08
 test('actual MediaPipe on an approved local human MP4 (requires supplied assets)', async ({ page }) => {
   test.skip(!process.env.POSE_MODEL_PATH || !process.env.POSE_VIDEO_PATH, 'No approved model / real-human MP4 provided');
   await page.goto('/'); await page.getByLabel('MP4 影片').setInputFiles(process.env.POSE_VIDEO_PATH!);
-  await page.getByText('模型設定與資料隱私').click();
+  await page.getByText('進階設定：辨識模型').click();
   await page.getByLabel('本機 .task 模型').setInputFiles(process.env.POSE_MODEL_PATH!);
   await page.getByRole('button',{name:'開始分析'}).click();
   await expect(page.getByRole('button',{name:'下載 CSV',exact:true})).toBeVisible({timeout:80000});
@@ -170,26 +168,28 @@ test('actual MediaPipe adapter loads local WASM and rejects an invalid task mode
   const wasm: string[] = [];
   page.on('response', r => { if (r.url().includes('/mediapipe/wasm/') && r.url().endsWith('.wasm') && r.status() === 200) wasm.push(r.url()); });
   await page.goto('/?hz=5'); await page.getByLabel('MP4 影片').setInputFiles(synthetic);await openResearchTools(page); await selectRoi(page);
-  await page.getByText('模型設定與資料隱私').click();
+  await page.getByText('進階設定：辨識模型').click();
   await page.getByLabel('本機 .task 模型').setInputFiles({name:'invalid.task',mimeType:'application/octet-stream',buffer:Buffer.from('invalid task model')});
   await page.getByRole('button',{name:'開始分析'}).click();
   await expect(page.getByRole('alert')).toBeVisible({timeout:30000});
-  await expect(page.getByRole('button',{name:'開始分析'})).toBeEnabled();
+  await expect(page.getByRole('button',{name:'重試分析'})).toBeEnabled();
   expect(wasm.length).toBeGreaterThan(0);
   expect(wasm.every(url => url.startsWith('http://127.0.0.1:5190/'))).toBe(true);
   await expect(page.getByRole('button',{name:'下載 CSV',exact:true})).toHaveCount(0);
 });
 
 
-test('missing local model keeps app usable and never downloads without opt-in', async ({ page }) => {
+test('video loads on demand and retries the official download without setup', async ({ page }) => {
   let remote = 0;
   await page.route('https://storage.googleapis.com/**', route => { remote++; return route.abort(); });
-  await page.goto('/?hz=5'); await page.getByLabel('MP4 影片').setInputFiles(synthetic);await openResearchTools(page); await selectRoi(page);
-  await page.getByRole('button',{name:'開始分析'}).click();
-  await expect(page.getByRole('alert')).toContainText('找不到專案本機模型');
+  await page.goto('/?hz=5'); await page.getByLabel('MP4 影片').setInputFiles(synthetic);
   await expect(page.getByRole('button',{name:'開始分析'})).toBeEnabled();
-  await expect(page.getByLabel('MP4 影片')).toBeEnabled();
   expect(remote).toBe(0);
+  await page.getByRole('button',{name:'開始分析'}).click();
+  await expect(page.getByRole('alert')).toHaveText('模型載入失敗，請確認網路後重試');
+  await page.getByRole('button',{name:'重試分析'}).click();
+  await expect(page.getByRole('alert')).toHaveText('模型載入失敗，請確認網路後重試');
+  expect(remote).toBe(2);
 });
 
 for(const scenario of ['lost','switch']) {
@@ -417,7 +417,7 @@ test('actual A/B/C comparison with approved local assets (mechanism smoke, not i
  await page.getByRole('button',{name:'框選受測者',exact:true}).click();
  if(process.env.POSE_TARGET_ROI){const roi=JSON.parse(process.env.POSE_TARGET_ROI);for(const key of ['width','height','x','y'])await page.getByLabel(`ROI ${key}`,{exact:true}).fill(String(roi[key]));}
  await page.getByRole('button',{name:'確認 ROI（Apply）',exact:true}).click();
- await page.getByText('模型設定與資料隱私',{exact:true}).click();await page.getByLabel('本機 .task 模型').setInputFiles(process.env.POSE_MODEL_PATH!);
+ await page.getByText('進階設定：辨識模型',{exact:true}).click();await page.getByLabel('本機 .task 模型').setInputFiles(process.env.POSE_MODEL_PATH!);
  await page.getByRole('button',{name:'依序比較 A / B / C',exact:true}).click();await expect(page.getByText('同源比較完成。',{exact:false})).toBeVisible({timeout:240000});
  const pending=page.waitForEvent('download');await page.getByRole('button',{name:'下載 A/B/C 比較 JSON（含原始三次結果）',exact:true}).click();
  const result=JSON.parse(readFileSync((await(await pending).path())!,'utf8'));

@@ -5,7 +5,7 @@ import { createPerformanceRecorder } from '../motion/livePerformance';
 import { makeSample } from '../test/fixtures';
 describe('live camera panel', () => {
   it('starts with the camera off and states that frames stay on the device', () => {
-    const html = renderToStaticMarkup(<LivePanel model={null} allowDownload={false} side="both" onSide={() => {}} disabled={false} />);
+    const html = renderToStaticMarkup(<LivePanel model={null} side="both" onSide={() => {}} disabled={false} />);
     expect(html).toContain('開啟鏡頭'); expect(html).toContain('不會上傳'); expect(html).toContain('N/A');
     expect(html).not.toContain('<button>停止</button>');
   });

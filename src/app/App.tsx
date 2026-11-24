@@ -5,7 +5,7 @@ import type {ComparisonBundle} from '../validation/comparison';
 import {ComparisonPanel} from '../validation/ComparisonPanel';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { SAMPLING_HZ, samplingHzFrom, type Session } from '../domain/analysis';
-import { MODEL_URL, PROJECT_MODEL_URL } from '../pose/mediapipe';
+import { MODEL_URL, MODEL_VERSION, MODEL_LOAD_ERROR } from '../pose/mediapipe';
 import { checkFile, loadVideo, seekFrame, observePresentedFrame } from '../input/video';
 import { analyze } from '../motion/analyze';
 import { coverage, matchingSample, displayedRoi, nearestSample, smoothedSample } from '../motion/series';
@@ -43,7 +43,6 @@ export function App() {
   const task = useRef<AbortController | null>(null);
   const [info, setInfo] = useState<{ name: string; duration: number; width: number; height: number } | null>(null);
   const [model, setModel] = useState<File | null>(null);
-  const [allowDownload, setAllowDownload] = useState(false);
   const [storedSession, setSession] = useState<Session | null>(null);
   const [stale,setStale]=useState(false);
   const [history,setHistory]=useState<Session[]>([]);
@@ -113,16 +112,16 @@ export function App() {
     if (!url.current || !info || !selection) return;
     task.current?.abort(); uiSeek.current?.abort();
     const controller = new AbortController(); task.current = controller;
-    video.current?.pause(); setError(''); setNotice(''); setBusy(true); setSampleIndex(0);
+    video.current?.pause(); setError(''); setNotice(''); setBusy(true); setProgress({ done: 0, total: 0, phase: '正在準備姿態辨識功能' }); setSampleIndex(0);
     try {
       const sourceSha256=sourceFile.current?await sha256File(sourceFile.current):undefined;controller.signal.throwIfAborted();
-      const result = await analyze(url.current, info.name, model, allowDownload, structuredClone(selection), controller.signal, (done, total, phase) => {
+      const result = await analyze(url.current, info.name, model, true, structuredClone(selection), controller.signal, (done, total, phase) => {
         if (!controller.signal.aborted) setProgress({ done, total, phase });
       },{pipeline:{id:pipeline,numPoses:pipeline==='full-frame-multi'?multiPoses:1},samplingHz:samplingHzFrom(location.search),...(sourceSha256?{sourceSha256}:{})});
       controller.signal.throwIfAborted(); if(storedSession)setHistory(h=>[...h,storedSession]);setSession({...result,analysisRevision:{...result.analysisRevision,parentSessionId:storedSession?.metadata.sessionId??null}});setStale(false);
       if (video.current && result.samples[0]) video.current.currentTime = result.samples[0].requestedTimeMs / 1000;
       setNotice('分析完成；播放不會再次推論。可用取樣滑桿檢查每個已分析影格。');
-    } catch (e) { if (!controller.signal.aborted) setError(`${message(e)} 若模型下載受阻，可下載官方模型後選取本機 .task 檔。`); }
+    } catch (e) { if (!controller.signal.aborted) setError(message(e)); }
     finally { if (!controller.signal.aborted) setBusy(false); }
   }
   async function runComparison(){
@@ -130,7 +129,7 @@ export function App() {
     task.current?.abort();uiSeek.current?.abort();const controller=new AbortController();task.current=controller;
     video.current?.pause();setBusy(true);setError('');setNotice('');
     try{
-      const bundle=await comparePipelines(url.current,sourceFile.current,model,allowDownload,selection,multiPoses,controller.signal,(done,total,phase)=>{if(!controller.signal.aborted)setProgress({done,total,phase});},undefined,samplingHzFrom(location.search));
+      const bundle=await comparePipelines(url.current,sourceFile.current,model,true,selection,multiPoses,controller.signal,(done,total,phase)=>{if(!controller.signal.aborted)setProgress({done,total,phase});},undefined,samplingHzFrom(location.search));
       controller.signal.throwIfAborted();setComparison(bundle);
       const first=bundle.entries.find(e=>e.session)?.session;
       if(first){if(storedSession)setHistory(h=>[...h,storedSession]);setSession(first);setPipeline(first.run!.pipeline.id);setStale(false);setSampleIndex(0);void seekPlayback(0);}
@@ -215,12 +214,12 @@ export function App() {
       </div>
     </header>
     <main>
-    {mode==='camera' && <LivePanel model={model} allowDownload={allowDownload} side={side} onSide={setSide} disabled={busy||loading} />}
+    {mode==='camera' && <LivePanel model={model} side={side} onSide={setSide} disabled={busy||loading} />}
     <div hidden={mode!=='video'}>
     <section className="card setup" aria-labelledby="input-title"><h2 id="input-title">選擇影片</h2>
       <div className="setup-row">
         <label className="file-pick"><span className="file-btn">選擇影片</span><span className="hint">MP4 影片（最多 500 MB、10 分鐘）</span><input type="file" accept=".mp4,video/mp4" disabled={busy || loading} onChange={e => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; void choose(f); }} /></label>
-        <div className="actions"><button className="primary" disabled={!info || !selection || selecting || busy || loading} onClick={() => void run()}>{session ? '重新分析' : '開始分析'}</button>{busy && <button className="secondary" onClick={cancel}>取消分析</button>}</div>
+        <div className="actions"><button className="primary" disabled={!info || !selection || selecting || busy || loading} onClick={() => void run()}>{error === MODEL_LOAD_ERROR ? '重試分析' : session ? '重新分析' : '開始分析'}</button>{busy && <button className="secondary" onClick={cancel}>取消分析</button>}</div>
       </div>
       {loading && <p role="status">讀取影片中…</p>}
       {info && <p className="file-info">{info.name} · {info.duration.toFixed(2)} 秒 · {info.width} × {info.height} 像素</p>}
@@ -228,13 +227,13 @@ export function App() {
       {error && <p role="alert" className="error">{error}</p>}{notice && <p role="status" className="notice">{notice}</p>}
       <p className="muted">適用：單人、鏡頭固定、頭到腳完整入鏡，不需框選。目前模式：{pipeline===DEFAULT_PIPELINE.id&&selection?.correctionSource==='controlled-single-default'?'單人完整影格（主要模式）':info?`${PIPELINE_NAMES[pipeline]}（實驗設定）`:'單人完整影格（主要模式）'}。</p>
       {info&&(pipeline!==DEFAULT_PIPELINE.id||selection?.correctionSource!=='controlled-single-default')&&<button className="secondary" disabled={busy||loading} onClick={restoreMainMode}>回到單人主要模式</button>}
-      <details className="fold"><summary>模型設定與資料隱私</summary><p>影片不會上傳。預設先讀取專案本機模型；手動選取的 .task 檔優先。WASM 與已安裝 npm 版本一致，從本站載入，不使用外部 CDN。沒有模型時可改選本機檔案，其他介面仍可操作。</p>
-        <p><a href={MODEL_URL} target="_blank" rel="noreferrer">官方 Lite 模型下載</a>（模型來源與 SHA-256 會記錄於研究 JSON）。</p>
+      <details className="fold"><summary>進階設定：辨識模型</summary>
+        <p>影片與鏡頭共用此設定。影像與分析結果只在此瀏覽器處理。</p>
+        <p>預設使用 <a href={MODEL_URL} target="_blank" rel="noreferrer">Google Pose Landmarker Lite（float16，第 1 版）</a>。辨識套件版本 {MODEL_VERSION}。</p>
         <label>本機 .task 模型<input type="file" accept=".task" disabled={busy} onChange={e => { setModel(e.target.files?.[0] ?? null); e.target.value = ''; if(storedSession)setStale(true); }} /></label>
-        <button className="secondary" disabled={busy || !model} onClick={() => { setModel(null); if(storedSession)setStale(true); }}>改用專案本機模型</button>
-        <label className="check"><input type="checkbox" checked={allowDownload} disabled={busy} onChange={e => setAllowDownload(e.target.checked)} />本機模型不存在時，允許從 Google 官方下載（選用）</label>
-        <p>放置方式：將官方模型存成 public/models/pose_landmarker_lite.task，或直接從 Mac 選取檔案，不需上傳伺服器。</p>
-        <p>目前模型：{model ? model.name : `專案本機路徑 ${PROJECT_MODEL_URL}`} 。本機模型須由使用者核對來源與授權。</p>
+        {model && <p>{model.name} <button className="secondary" disabled={busy} onClick={() => { setModel(null); if(storedSession)setStale(true); }}>恢復預設模型</button></p>}
+        <p>研究 JSON 會記錄實際模型來源、套件版本與 SHA-256。</p>
+        {storedSession && <p>上次影片分析來源：{storedSession.metadata.model.assetId}<br />SHA-256：{storedSession.metadata.model.assetSha256}</p>}
       </details>
     </section>
     {stale && storedSession && <aside className="banner" role="status">舊分析已過期（stale），請重新分析。舊設定的角度、圖表及一般匯出已隱藏。

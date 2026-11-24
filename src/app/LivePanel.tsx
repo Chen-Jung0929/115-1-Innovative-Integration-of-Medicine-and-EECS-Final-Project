@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Sample, Session } from '../domain/analysis';
 import { cameraErrorMessage, cameraUnavailableReason, openCamera, stopCamera, type Facing } from '../input/camera';
 import { fullFrameSelection } from '../input/singleSubject';
-import { createPoseEngine, modelBytes, MODEL_VERSION, type PoseEngine } from '../pose/mediapipe';
+import { createPoseEngine, modelBytes, MODEL_LOAD_ERROR, MODEL_VERSION, type PoseEngine } from '../pose/mediapipe';
 import { createLiveAnalyzer, createReadyGate, dueForSample, liveSession, LIVE_SAMPLING_HZ, READY_POLICY, type LiveRunInfo } from '../motion/live';
 import { coverage } from '../motion/series';
 import { createPerformanceRecorder } from '../motion/livePerformance';
@@ -52,7 +52,7 @@ export function liveStatus(sample: Sample | undefined, notice?: TrackingNotice |
   return '量測中';
 }
 
-export function LivePanel({ model, allowDownload, side, onSide, disabled }: { model: File | null; allowDownload: boolean; side: Side; onSide: (side: Side) => void; disabled: boolean }) {
+export function LivePanel({ model, side, onSide, disabled }: { model: File | null; side: Side; onSide: (side: Side) => void; disabled: boolean }) {
   const video = useRef<HTMLVideoElement>(null);
   const stream = useRef<MediaStream | null>(null);
   const engine = useRef<PoseEngine | null>(null);
@@ -186,7 +186,7 @@ export function LivePanel({ model, allowDownload, side, onSide, disabled }: { mo
     setState('starting');
     try {
       const prepareStart = performance.now();
-      const asset = await modelBytes(model, controller.signal, allowDownload);
+      const asset = await modelBytes(model, controller.signal);
       const modelPreparationMs = performance.now() - prepareStart;
       stream.current = await openCamera(v, facing, controller.signal);
       engine.current = await createPoseEngine(asset.bytes, 1);
@@ -241,7 +241,7 @@ export function LivePanel({ model, allowDownload, side, onSide, disabled }: { mo
     <section className="card" aria-labelledby="live-title">
       <div className="card-head"><h2 id="live-title">即時鏡頭</h2>
         <div className="actions">
-          {!live && <button className="primary" disabled={disabled || state === 'starting'} onClick={() => void start()}>{state === 'starting' ? '開啟中…' : '開啟鏡頭'}</button>}
+          {!live && <button className="primary" disabled={disabled || state === 'starting'} onClick={() => void start()}>{state === 'starting' ? '正在準備姿態辨識功能…' : error === MODEL_LOAD_ERROR ? '重試開啟鏡頭' : '開啟鏡頭'}</button>}
           {live && measuring && <button className="secondary" onClick={restart}>結束這一段</button>}
           {live && <button className="secondary" onClick={() => stop()}>停止</button>}
         </div>
@@ -255,10 +255,10 @@ export function LivePanel({ model, allowDownload, side, onSide, disabled }: { mo
         {sensor === 'unsupported' && <span className="muted small">這個瀏覽器沒有傾斜感測器。</span>}
         <label className="compact">顯示側別<select value={side} onChange={e => onSide(e.target.value as Side)}><option value="both">左右都看</option><option value="left">只看左邊</option><option value="right">只看右邊</option></select></label>
       </div>
-      {error && <p role="alert" className="error">{error}</p>}{notice && <p role="status" className="notice">{notice}</p>}
+      {error === MODEL_LOAD_ERROR && <p>如需選用本機模型，可到「上傳影片」的進階設定。</p>}{error && <p role="alert" className="error">{error}</p>}{notice && <p role="status" className="notice">{notice}</p>}
       <details className="fold"><summary>怎麼拍最準？</summary>
         <p>開啟鏡頭後，畫面會即時畫出骨架與膝角度（每秒約 {LIVE_SAMPLING_HZ} 次）。影像只在這台裝置上處理，不會上傳或錄影。</p>
-        <p>建議：鏡頭固定不動、從側面拍、頭到腳完整入鏡、畫面中只有一人。開啟後不用再碰裝置：走到畫面中、站穩約 {(READY_POLICY.holdMs / 1000).toFixed(1)} 秒就會自動開始；有人闖入或你離開畫面時，這一段會自動結束保存，回來站好又會開始新的一段。模型沿用「上傳影片」頁的模型設定。</p>
+        <p>建議：鏡頭固定不動、從側面拍、頭到腳完整入鏡、畫面中只有一人。開啟後不用再碰裝置：走到畫面中、站穩約 {(READY_POLICY.holdMs / 1000).toFixed(1)} 秒就會自動開始；有人闖入或你離開畫面時，這一段會自動結束保存，回來站好又會開始新的一段。</p>
         <p>「畫面像照鏡子」只影響顯示，左右膝仍以個案身體為準。</p>
       </details>
     </section>

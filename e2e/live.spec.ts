@@ -6,7 +6,7 @@ test('live camera starts hands-free, ends a segment on a second person, restarts
   await page.route('**/src/pose/mediapipe.ts', route => route.fulfill({ contentType: 'application/javascript', body: `
     export const MODEL_URL='https://example.invalid/synthetic';
     export const MODEL_VERSION='synthetic-adapter-test';
-    export const PROJECT_MODEL_URL='/models/pose_landmarker_lite.task';
+    export const MODEL_LOAD_ERROR='模型載入失敗，請確認網路後重試';
     export async function modelBytes(){return {bytes:new Uint8Array(),hash:'synthetic',id:'synthetic'};}
     export async function createPoseEngine(){let previous=-1;return {close(){},detect(canvas,time){
       if(time<=previous)throw new Error('non-monotonic timestamp');previous=time;
@@ -37,4 +37,17 @@ test('live camera starts hands-free, ends a segment on a second person, restarts
   expect((await download).suggestedFilename()).toMatch(/^knee-live-.*\.csv$/);
   await page.getByRole('button', { name: '上傳影片', exact: true }).click();
   await expect(page.getByText('MP4 影片（最多 500 MB、10 分鐘）')).toBeVisible();
+});
+
+test('camera downloads only on start and retries a failed model request', async ({ page }) => {
+  let requests = 0;
+  await page.route('https://storage.googleapis.com/**', route => { requests++; return route.abort(); });
+  await page.goto('/');
+  await page.getByRole('button', { name: '即時鏡頭', exact: true }).click();
+  expect(requests).toBe(0);
+  await page.getByRole('button', { name: '開啟鏡頭' }).click();
+  await expect(page.getByRole('alert')).toHaveText('模型載入失敗，請確認網路後重試');
+  await page.getByRole('button', { name: '重試開啟鏡頭' }).click();
+  await expect(page.getByRole('alert')).toHaveText('模型載入失敗，請確認網路後重試');
+  expect(requests).toBe(2);
 });
