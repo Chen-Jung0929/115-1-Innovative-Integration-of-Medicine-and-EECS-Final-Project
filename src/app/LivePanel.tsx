@@ -56,6 +56,9 @@ export function liveStatus(sample: Sample | undefined, notice?: TrackingNotice |
 /** Segments whose videos stay downloadable; older segments keep only their angle data (memory on phones and tablets). */
 const MAX_VIDEO_SEGMENTS = 3;
 
+/** Identifies the open camera by device id, or by its label when the browser gives no id. */
+const cameraKey = (s: MediaStream | null) => streamDeviceId(s) || (s?.getVideoTracks()[0]?.label ?? '');
+
 export function LivePanel({ model, side, onSide, disabled }: { model: File | null; side: Side; onSide: (side: Side) => void; disabled: boolean }) {
   const video = useRef<HTMLVideoElement>(null);
   const stream = useRef<MediaStream | null>(null);
@@ -81,6 +84,7 @@ export function LivePanel({ model, side, onSide, disabled }: { model: File | nul
   const [mirrored, setMirrored] = useState(true);
   const [cameraCount, setCameraCount] = useState(0);
   const [canSwitch, setCanSwitch] = useState(true);
+  const [released, setReleased] = useState<Set<string>>(() => new Set());
   // Segment videos (ADR-091): kept in memory on this device only, downloaded on request, never uploaded.
   const [record, setRecord] = useState(true);
   const [videos, setVideos] = useState<Record<string, SegmentVideos | 'pending'>>({});
@@ -106,7 +110,12 @@ export function LivePanel({ model, side, onSide, disabled }: { model: File | nul
   useEffect(() => {
     // Videos are large (about 9 MB per minute per video), so only the latest few segments keep them.
     const kept = new Set(results.slice(0, MAX_VIDEO_SEGMENTS).map(r => r.metadata.sessionId));
-    setVideos(previous => Object.keys(previous).every(id => kept.has(id)) ? previous : Object.fromEntries(Object.entries(previous).filter(([id]) => kept.has(id))));
+    setVideos(previous => {
+      const dropped = Object.keys(previous).filter(id => !kept.has(id));
+      if (!dropped.length) return previous;
+      setReleased(old => new Set([...old, ...dropped]));
+      return Object.fromEntries(Object.entries(previous).filter(([id]) => kept.has(id)));
+    });
   }, [results]);
   useEffect(() => {
     const hidden = () => { if (document.visibilityState === 'hidden' && stream.current) stop('切換到其他分頁或 App 時，鏡頭已自動關閉並結束這一段量測。'); };
@@ -269,12 +278,12 @@ export function LivePanel({ model, side, onSide, disabled }: { model: File | nul
 
   /** Front/rear switch while live: saves the current segment, then reopens the other camera. Mirror only the front one. */
   async function switchCamera() {
-    const previousFacing = facing, previousMirrored = mirrored, previousId = streamDeviceId(stream.current);
+    const previousFacing = facing, previousMirrored = mirrored, previousId = cameraKey(stream.current);
     const next: Facing = facing === 'user' ? 'environment' : 'user';
     setFacing(next); setMirrored(next === 'user');
     stop();
     if (!await start(next, next === 'user')) return;
-    const nowId = streamDeviceId(stream.current);
+    const nowId = cameraKey(stream.current);
     if (previousId && nowId === previousId) {
       // Two cameras, but neither says which way it faces (e.g. webcam + virtual camera): the browser reopened the same one.
       setFacing(previousFacing); setMirrored(previousMirrored); setCanSwitch(false);
@@ -375,7 +384,7 @@ export function LivePanel({ model, side, onSide, disabled }: { model: File | nul
           {resultVideos === 'pending' && <span className="muted small">影片處理中…</span>}
           {resultVideos && resultVideos !== 'pending' && resultVideos.raw && <button className="secondary" onClick={() => downloadBlob(`video-live-${result.metadata.sessionId}.${videoExtension(resultVideos.raw!.type)}`, resultVideos.raw!)}>下載影片（原始畫面）</button>}
           {resultVideos && resultVideos !== 'pending' && resultVideos.skeleton && <button className="secondary" onClick={() => downloadBlob(`video-live-skeleton-${result.metadata.sessionId}.${videoExtension(resultVideos.skeleton!.type)}`, resultVideos.skeleton!)}>下載影片（含骨架）</button>}
-        </div>{!resultVideos && shown >= MAX_VIDEO_SEGMENTS && <p className="muted small">這一段的影片已釋放（只保留最近 {MAX_VIDEO_SEGMENTS} 段的影片），角度資料仍可下載。</p>}
+        </div>{!resultVideos && released.has(result.metadata.sessionId) && <p className="muted small">這一段的影片已釋放（只保留最近 {MAX_VIDEO_SEGMENTS} 段的影片），角度資料仍可下載。</p>}
         {record && !canRecord() && <p className="muted small">這個瀏覽器不支援錄影，只能下載角度資料。</p>}
         <p className="muted small">輸出含人體特徵點{resultVideos ? '與影像' : ''}，請保存於受限空間，不要上傳或提交到 Public GitHub。</p></>
         : <p className="muted">每一段結束後（按停止、有人闖入或離開畫面），這裡會顯示該段曲線與匯出按鈕，最多保留最近 {MAX_KEPT_SEGMENTS} 段。關閉網頁前請先下載。</p>}
