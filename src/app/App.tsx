@@ -3,7 +3,7 @@ import {DEFAULT_PIPELINE,PIPELINE_NAMES,type PipelineId} from '../domain/pipelin
 import {comparePipelines,sha256File} from '../motion/compare';
 import type {ComparisonBundle} from '../validation/comparison';
 import {ComparisonPanel} from '../validation/ComparisonPanel';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { SAMPLING_HZ, samplingHzFrom, type Session } from '../domain/analysis';
 import { MODEL_URL, MODEL_VERSION, MODEL_LOAD_ERROR } from '../pose/mediapipe';
 import { checkFile, loadVideo, seekFrame, observePresentedFrame } from '../input/video';
@@ -249,7 +249,8 @@ export function App() {
         </div>
       </div>
       {sample?.tracking.state==='MANUAL_REVIEW_REQUIRED'&&<aside className="banner warn">{lockedBannerText(trackNotice?.cause ?? 'lost-track', 'video', trackNotice?.sinceMs)}</aside>}
-      <div className="workspace"><div className="stage-col"><div className="video-stage"><video ref={video} controls={!selecting} playsInline onPlay={()=>{if(selecting)video.current?.pause();}} onLoadedMetadata={e=>{e.currentTarget.defaultPlaybackRate=speed;e.currentTarget.playbackRate=speed;}} onSeeking={() => setSeeking(true)} onSeeked={() => {
+      <div className="workspace"><div className="stage-col"><div className="video-stage"
+        style={info ? { '--source-ratio': info.width / info.height } as CSSProperties : undefined}><video ref={video} controls={!selecting} playsInline onPlay={()=>{if(selecting)video.current?.pause();}} onLoadedMetadata={e=>{e.currentTarget.defaultPlaybackRate=speed;e.currentTarget.playbackRate=speed;}} onSeeking={() => setSeeking(true)} onSeeked={() => {
         const v = video.current;
         if (!v) return;
         // Paused/off-screen videos may throttle rVFC. The same completed seek target

@@ -494,3 +494,26 @@ test('experimental methods are explicit and returning to main preserves old resu
  expect(r.run.pipeline.id).toBe('full-frame-single');expect(r.analysisRevision.parentSessionId).toBe(old.metadata.sessionId);
  expect(r.subjectSelection.correctionSource).toBe('controlled-single-default');
 });
+
+test('the playback picture and skeleton share one rectangle at phone, tablet and desktop widths', async ({ page }) => {
+  const portrait = join(folder, 'portrait-no-human.mp4');
+  execFileSync('ffmpeg', ['-v','error','-i',synthetic,'-vf','transpose=1','-c:v','libx264',portrait]);
+  await page.goto('/');
+  for (const file of [synthetic, portrait]) {
+    await page.getByLabel('MP4 影片').setInputFiles(file);
+    await expect(page.locator('.file-info')).toContainText(file === portrait ? '180 × 320' : '320 × 180');
+    for (const [width, height] of [[390,844], [768,1024], [1024,768], [1440,900], [1920,1080]] as const) {
+      await page.setViewportSize({ width, height });
+      const picture = await page.locator('.video-stage video').boundingBox();
+      const skeleton = await page.locator('.video-stage .overlay').boundingBox();
+      expect(picture).not.toBeNull();
+      expect(skeleton).not.toBeNull();
+      for (const key of ['x','y','width','height'] as const) {
+        expect(Math.abs(skeleton![key] - picture![key])).toBeLessThan(1);
+      }
+      const aspect = file === portrait ? 180 / 320 : 320 / 180;
+      expect(Math.abs(picture!.width - picture!.height * aspect)).toBeLessThan(1);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
+    }
+  }
+});

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { Sample, Session } from '../domain/analysis';
 import { cameraErrorMessage, cameraUnavailableReason, openCamera, stopCamera, type Facing } from '../input/camera';
 import { fullFrameSelection } from '../input/singleSubject';
@@ -265,7 +265,8 @@ export function LivePanel({ model, side, onSide, disabled }: { model: File | nul
     <section className="card" aria-labelledby="live-view-title"><h2 id="live-view-title">即時畫面與角度</h2>
       {live && <p role="status" className={measuring ? 'live-status' : 'live-status wait'}>{measuring ? liveStatus(sample, liveNotice) : waitStatus(ready)}</p>}
       <div className="workspace"><div className="stage-col">
-        <div className={mirrored ? 'video-stage mirrored' : 'video-stage'} hidden={state === 'off'}>
+        <div className={mirrored ? 'video-stage mirrored' : 'video-stage'}
+          style={{ '--source-ratio': size.width / size.height } as CSSProperties} hidden={state === 'off'}>
           <video ref={video} playsInline muted aria-label="即時鏡頭畫面" />
           <Overlay sample={sample} width={size.width} height={size.height} side={side} />
         </div>
