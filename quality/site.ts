@@ -26,7 +26,10 @@ export async function verifySite(page: Page, site: string) {
   for (const stem of ['vision_wasm_internal', 'vision_wasm_module_internal']) {
     for (const extension of ['js', 'wasm']) {
       const url = new URL(`mediapipe/wasm/${stem}.${extension}`, home).href;
-      const asset = await page.request.get(url, { headers: { Range: 'bytes=0-7' } });
+      const asset = await page.request.get(url, {
+        // Pages gzips the wasm and applies Range to the gzip bytes; ask for the raw file so the magic bytes are readable.
+        headers: { Range: 'bytes=0-7', 'Accept-Encoding': 'identity' },
+      });
       expect([200, 206], url).toContain(asset.status());
       expect(asset.headers()['content-type'], url).toMatch(extension === 'js' ? /javascript/ : /application\/wasm/);
       if (extension === 'wasm') expect((await asset.body()).subarray(0, 4)).toEqual(Buffer.from([0,97,115,109]));
