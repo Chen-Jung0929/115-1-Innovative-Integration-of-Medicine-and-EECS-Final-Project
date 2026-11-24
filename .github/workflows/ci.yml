@@ -26,10 +26,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
-      - name: Prepare Chromium and synthetic video encoder
-        run: |
-          npx playwright install --with-deps chromium
-          command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+      - run: npx playwright install --only-shell chromium
       - run: npm run test:smoke
       - name: Save failed browser checks
         if: failure()

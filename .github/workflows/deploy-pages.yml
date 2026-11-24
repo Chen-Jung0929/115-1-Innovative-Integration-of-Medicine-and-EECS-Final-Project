@@ -47,7 +47,7 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --only-shell chromium
       - name: Verify the deployed HTTPS URL
         env:
           DEPLOYED_URL: ${{ needs.deploy.outputs.page_url }}

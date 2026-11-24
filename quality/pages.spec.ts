@@ -1,19 +1,12 @@
 import { test, expect, type Page } from '@playwright/test';
-import { readFile, mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { expectAlignedPicture, makeSyntheticVideo, syntheticPose } from '../e2e/fixtures';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { expectAlignedPicture, syntheticPose } from '../e2e/fixtures';
 import { verifySite } from './site';
 
 const official = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
-let folder: string;
-let video: string;
-test.beforeAll(async () => {
-  folder = await mkdtemp(join(tmpdir(), 'pages-smoke-'));
-  video = join(folder, 'synthetic.mp4');
-  makeSyntheticVideo(video);
-});
-test.afterAll(async () => { if (folder) await rm(folder, { recursive: true, force: true }); });
+// Generated with makeSyntheticVideo in e2e/fixtures.ts. Contains only two colour bars.
+const video = resolve('quality/fixtures/color-bars.mp4');
 
 // Patch only the SDK factory in this browser context. All production application code,
 // including asset resolution, HTTP, retry, hashing and exports, runs normally.

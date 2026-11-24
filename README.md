@@ -262,7 +262,7 @@ Mendeley 的 Good/Bad Form 標籤不是角度或身份真值；目前已知實�
 - **排查失敗**時，開啟失敗的 job 日誌，下載該次 run 的診斷 artifact（保留 7 天），用 `npx playwright show-trace <trace.zip>` 檢查操作與網路請求。若部署本身遇到 403，請檢查 Pages 來源、environment 分支限制與工作流程權限。
 - **Google 官方服務**可由 **Check official model availability → Run workflow** 獨立驗證。此工作真的下載模型並對合成影片推論；例行部署關卡使用受控回應與合成姿態。
 
-本機重跑需要 FFmpeg、Node（見 `.nvmrc`）與 Playwright Chromium：
+本機重跑部署關卡需要 Node（見 `.nvmrc`）與 Playwright Chromium。關卡使用隨測試提供的一秒純色 MP4：
 
 ```sh
 npm ci

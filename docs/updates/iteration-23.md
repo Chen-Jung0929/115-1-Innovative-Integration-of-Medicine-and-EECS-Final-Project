@@ -9,7 +9,7 @@
 3. 使用 Chromium 模擬攝影機與合成姿態啟動量測，停止後驗證實際 MediaStreamTrack 進入 ended 狀態。
 4. 使用正式 MediaPipe SDK 及本站 WASM，提供無效模型內容，驗證啟動取用正確子路徑的 WASM，並顯示可重試的錯誤。
 
-既有合成 MP4 產生器、攝影機姿態資料與疊圖幾何斷言抽成測試共用檔。完整開發站 E2E 仍可另行執行。正式 bundle 將 SDK 分成獨立 chunk，測試替身只存在於 Playwright 的頁面環境。
+攝影機姿態資料與疊圖幾何斷言由兩套測試共用。部署測試的 quality/fixtures/color-bars.mp4 由既有 FFmpeg 測試配方產生，只有一秒紅藍色塊、沒有音軌。完整開發站 E2E 仍可另行執行。正式 bundle 將 SDK 分成獨立 chunk，測試替身只存在於 Playwright 的頁面環境。
 
 ## 實測結果
 
@@ -32,6 +32,8 @@ npx playwright test -c playwright.quality.config.ts --grep @smoke
 ```
 
 Google 服務的連線檢查可手動獨立執行。部署必要測試使用的 MP4、姿態、模型回應及攝影機都是測試素材。真實推論測試使用無人的色塊影片，兩類結果均無法評估人體辨識準確度。
+
+第一次分支 CI 成功，但另一台 PR runner 下載 Ubuntu 字型及 FFmpeg 套件時達 15 分鐘上限。改為直接使用受版控的純色 fixture，GitHub Ubuntu runner 僅安裝 lockfile 指定的 Chromium headless shell。另以本機 HTTPS 站台執行發布後檢查，正確 commit 與資源驗證通過（2.0 秒）。
 
 ## 公開網站與人工驗收
 
