@@ -212,7 +212,7 @@ export function App() {
   const sides = (['left','right'] as const).filter(s => side === 'both' || side === s);
 
   return <div className="app">
-    <header className="topbar"><div className="brand"><h1>關節動作分析</h1><p>深蹲 · 影像只在這台裝置上處理，不會上傳</p></div>
+    <header className="topbar"><div className="brand"><p className="eyebrow">臺大 115-1 醫學電資創意整合專題</p><h1>關節動作分析研究工作台</h1><p>影像只在這台裝置上處理，不會上傳</p></div>
       <div className="segmented" role="group" aria-label="輸入來源">
         <button aria-pressed={mode==='video'} onClick={()=>setMode('video')}>上傳影片</button>
         <button aria-pressed={mode==='camera'} disabled={busy||loading||selecting} onClick={()=>{video.current?.pause();setMode('camera');}}>即時鏡頭</button>
