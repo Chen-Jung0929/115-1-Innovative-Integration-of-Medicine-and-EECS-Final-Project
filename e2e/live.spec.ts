@@ -57,6 +57,10 @@ test('live camera starts hands-free, ends a segment on a second person, restarts
   await expect(page.getByText('MP4 影片（最多 500 MB、10 分鐘）')).toBeVisible();
   await expect(page.getByText(/^live-.*\.mp4 · /)).toBeVisible({ timeout: 15000 });
   await expect(page.getByText(/分析完成/)).toBeVisible({ timeout: 60000 });
+  // Saved live segments survive the trip to the upload view.
+  await page.getByRole('button', { name: '即時鏡頭', exact: true }).click();
+  await expect(page.getByLabel('選擇量測段')).toBeVisible();
+  await expect(page.getByRole('button', { name: '下載影片（原始畫面）', exact: true })).toBeVisible();
 });
 
 test('camera downloads only on start and retries a failed model request', async ({ page }) => {

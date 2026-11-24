@@ -59,7 +59,11 @@ const MAX_VIDEO_SEGMENTS = 3;
 /** Identifies the open camera by device id, or by its label when the browser gives no id. */
 const cameraKey = (s: MediaStream | null) => streamDeviceId(s) || (s?.getVideoTracks()[0]?.label ?? '');
 
-export function LivePanel({ model, side, onSide, disabled, onFullAnalysis }: { model: File | null; side: Side; onSide: (side: Side) => void; disabled: boolean; onFullAnalysis?: (file: File) => void }) {
+/** Saved live results kept by the parent while the camera page is closed (ADR-092). Mutated in place. */
+export type LiveKeep = { results: Session[]; videos: Record<string, SegmentVideos | 'pending'>; released: Set<string> };
+export function createLiveKeep(): LiveKeep { return { results: [], videos: {}, released: new Set() }; }
+
+export function LivePanel({ keep, model, side, onSide, disabled, onFullAnalysis }: { keep?: LiveKeep; model: File | null; side: Side; onSide: (side: Side) => void; disabled: boolean; onFullAnalysis?: (file: File) => void }) {
   const video = useRef<HTMLVideoElement>(null);
   const stream = useRef<MediaStream | null>(null);
   const engine = useRef<PoseEngine | null>(null);
@@ -84,10 +88,10 @@ export function LivePanel({ model, side, onSide, disabled, onFullAnalysis }: { m
   const [mirrored, setMirrored] = useState(true);
   const [cameraCount, setCameraCount] = useState(0);
   const [canSwitch, setCanSwitch] = useState(true);
-  const [released, setReleased] = useState<Set<string>>(() => new Set());
+  const [released, setReleased] = useState<Set<string>>(() => keep?.released ?? new Set());
   // Segment videos (ADR-091): kept in memory on this device only, downloaded on request, never uploaded.
   const [record, setRecord] = useState(true);
-  const [videos, setVideos] = useState<Record<string, SegmentVideos | 'pending'>>({});
+  const [videos, setVideos] = useState<Record<string, SegmentVideos | 'pending'>>(() => keep?.videos ?? {});
   const rawRec = useRef<SegmentRecorder | null>(null);
   const skelRec = useRef<SegmentRecorder | null>(null);
   const composite = useRef<HTMLCanvasElement | null>(null);
@@ -97,7 +101,7 @@ export function LivePanel({ model, side, onSide, disabled, onFullAnalysis }: { m
   const [size, setSize] = useState({ width: 640, height: 360 });
   const [sample, setSample] = useState<Sample | undefined>();
   const [recent, setRecent] = useState<Sample[]>([]);
-  const [results, setResults] = useState<Session[]>([]);
+  const [results, setResults] = useState<Session[]>(() => keep?.results ?? []);
   const [shown, setShown] = useState(0);
   const [ready, setReady] = useState<Ready | null>(null);
   const [measuring, setMeasuring] = useState(false);
@@ -145,7 +149,12 @@ export function LivePanel({ model, side, onSide, disabled, onFullAnalysis }: { m
       const id = session.metadata.sessionId;
       if (recorders.some(Boolean)) {
         setVideos(previous => ({ ...previous, [id]: 'pending' }));
-        void finish.then(([raw, skeleton]) => setVideos(previous => id in previous ? { ...previous, [id]: { raw: raw ?? null, skeleton: skeleton ?? null } } : previous));
+        void finish.then(([raw, skeleton]) => {
+          const done = { raw: raw ?? null, skeleton: skeleton ?? null };
+          // Also into the parent's keep, in case the camera page was closed before the video finished.
+          if (keep && id in keep.videos) keep.videos = { ...keep.videos, [id]: done };
+          setVideos(previous => id in previous ? { ...previous, [id]: done } : previous);
+        });
       }
     }
   }
@@ -329,9 +338,15 @@ export function LivePanel({ model, side, onSide, disabled, onFullAnalysis }: { m
   const [playKind, setPlayKind] = useState<'skeleton' | 'raw'>('skeleton');
   const [playMs, setPlayMs] = useState<number | null>(null);
   const playBlob = resultVideos && resultVideos !== 'pending' ? (resultVideos[playKind] ?? resultVideos.raw ?? resultVideos.skeleton) : null;
-  const playUrl = useMemo(() => playBlob ? URL.createObjectURL(playBlob) : null, [playBlob]);
-  useEffect(() => () => { if (playUrl) URL.revokeObjectURL(playUrl); }, [playUrl]);
-  useEffect(() => { setPlayMs(null); }, [shown, results]);
+  const [playUrl, setPlayUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!playBlob) { setPlayUrl(null); return; }
+    const url = URL.createObjectURL(playBlob); setPlayUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [playBlob]);
+  useEffect(() => { setPlayMs(null); }, [shown, results, playKind]);
+  // Mirror saved results into the parent's keep so they come back when the camera page reopens.
+  useEffect(() => { if (keep) { keep.results = results; keep.videos = videos; keep.released = released; } }, [keep, results, videos, released]);
   const resultLast = result && resultLift ? (playMs === null
     ? [...result.samples].reverse().find(s => resultLift.poses.has(s.sampleIndex))
     : nearestSample(result.samples.filter(s => resultLift.poses.has(s.sampleIndex)), playMs, Infinity)) : undefined;
