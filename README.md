@@ -255,18 +255,21 @@ Mendeley 的 Good/Bad Form 標籤不是角度或身份真值；目前已知實�
 
 ## GitHub Pages 部署與驗收
 
-[預期網站網址](https://chen-jung0929.github.io/115-1-Innovative-Integration-of-Medicine-and-EECS-Final-Project/)在首次部署成功後供組員直接開啟。驗證紀錄與模型整合條件見 [Iteration 02](docs/updates/iteration-02.md)。
+[正式網站](https://chen-jung0929.github.io/115-1-Innovative-Integration-of-Medicine-and-EECS-Final-Project/)由 GitHub Actions 發布。管理者在 **Settings → Pages → Source** 選擇 **GitHub Actions**，並讓 `github-pages` environment 接受 `main`。
 
-1. 管理者到 **Settings → Pages → Build and deployment → Source** 選 **GitHub Actions**。如果已限制部署分支，請確認 `github-pages` environment 允許 `main`。
-2. 部署工作流程合併進 `main` 後，每次推送到 `main`（含合併 PR）都會執行 **Deploy to GitHub Pages**。依序安裝鎖定依賴、型別檢查、單元測試及建置。全部成功後才上傳 `dist/` 並發布，同一時間只執行一個正式部署。
-3. 手動部署目前版本時，開啟 **Actions → Deploy to GitHub Pages → Run workflow**，選 `main`。在成功執行的 **deploy** 工作中開啟 environment 網址，確認對應的 commit 與頁面內容。
-4. 若建置失敗，在 **build** 的第一個失敗步驟查看日誌，修正後透過 PR 合併；部署工作會略過失敗的建置。若部署遇到 403 或 Pages 設定錯誤，檢查 Pages 來源、environment 分支規則與 Actions 是否允許工作流程宣告的 Pages 和 OIDC 權限。
-5. 若首頁空白或資源 404，從完整的 repository 子路徑開啟網站，在瀏覽器 Network 確認 JS 與 CSS 請求位於該子路徑的 `assets/`。部署時 `PAGES_BASE_PATH` 由 repository 名稱產生，本機開發預設為 `/`。未來載入 `public/` 的 WASM 時，須從 `import.meta.env.BASE_URL` 組合路徑，並確認回傳 WASM 而非 HTML。
+- **PR 與部署前檢查**共用 Frontend checks，依序安裝鎖定版本、執行型別檢查、單元測試、Pages 子路徑建置，再以 Chromium 驗證這份 `dist/` 的核心操作。推送至 main 或在 **Deploy to GitHub Pages → Run workflow** 選 main，只有全部通過才會上傳該份產物並發布。檢查失敗時，正式站繼續提供上一版。
+- **部署後檢查**會開啟 deploy 回報的 HTTPS 網址，比對首頁的 `meta[name="build-revision"]` 與 Git commit，確認 React 首頁、JS、CSS 與 WASM 資源可用。此步驟失敗時，Actions 會顯示錯誤並保留已部署版本，供管理者決定下一步。
+- **排查失敗**時，開啟失敗的 job 日誌，下載該次 run 的診斷 artifact（保留 7 天），用 `npx playwright show-trace <trace.zip>` 檢查操作與網路請求。若部署本身遇到 403，請檢查 Pages 來源、environment 分支限制與工作流程權限。
+- **Google 官方服務**可由 **Check official model availability → Run workflow** 獨立驗證。此工作真的下載模型並對合成影片推論；例行部署關卡使用受控回應與合成姿態。
 
-開發者可用以下指令在本機預覽相同的子路徑，開啟終端機顯示的完整網址。
+本機重跑需要 FFmpeg、Node（見 `.nvmrc`）與 Playwright Chromium：
 
 ```sh
+npm ci
+npx playwright install chromium
 export PAGES_BASE_PATH=/115-1-Innovative-Integration-of-Medicine-and-EECS-Final-Project/
-npm run build
-npm run preview
+npm run check
+npm run test:smoke
 ```
+
+`npm run test:official` 可單獨測試真實模型；`npm run preview` 可開啟相同建置。跨瀏覽器指令、實測時間與人工驗收步驟見[第 23 輪驗證紀錄](docs/updates/iteration-23.md)。

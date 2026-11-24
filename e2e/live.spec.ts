@@ -1,3 +1,4 @@
+import { syntheticPose } from './fixtures';
 import { test, expect } from '@playwright/test';
 import { statSync } from 'node:fs';
 // Chromium's built-in fake camera (synthetic test pattern, no person or face). Pose output is a
@@ -11,8 +12,7 @@ test('live camera starts hands-free, ends a segment on a second person, restarts
     export async function modelBytes(){return {bytes:new Uint8Array(),hash:'synthetic',id:'synthetic'};}
     export async function createPoseEngine(){let previous=-1;return {close(){},detect(canvas,time){
       if(time<=previous)throw new Error('non-monotonic timestamp');previous=time;
-      const pose=Array.from({length:33},()=>({x:.5,y:.4,visibility:1}));
-      for(const [i,x,y] of [[11,.4,.2],[12,.6,.2],[23,.4,.5],[24,.6,.5],[25,.45,.7],[26,.6,.7],[27,.4,.9],[28,.6,.9]])pose[i]={x,y,visibility:1};
+      const pose=${JSON.stringify(syntheticPose())};
       const crowd=window.__crowd===true;return crowd?[pose,pose.map(p=>({...p,x:p.x-.3}))]:[pose];
     }};}` }));
   await page.goto('/');

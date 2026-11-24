@@ -1,0 +1,32 @@
+name: Check official model availability
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  official-model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      PAGES_BASE_PATH: /${{ github.event.repository.name }}/
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: |
+          npx playwright install --with-deps chromium
+          command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+      - run: npm run test:official
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: official-model-diagnostics
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore
