@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { humanPose, makeSample } from '../test/fixtures';
-import { calibrationNote, groundForDisplay, liftSession, poseAt, sessionFlexion } from './world3d';
+import { calibrationNote, groundForDisplay, liftSession, poseAt, sessionFlexion, uprightRotation } from './world3d';
 import { flexion3D, type LiftContext, type Vec3 } from '../biomechanics/lift3d';
 
 const withWorld = (dx = 0) => humanPose(dx).map(p => ({ ...p, world: [p.x - .5 - dx, p.y - .5, 0] as [number, number, number] }));
@@ -49,5 +49,25 @@ describe('session 3D poses', () => {
     expect(shown[30]![1]).toBeCloseTo(shown[32]![1], 9);
     expect(groundForDisplay(undefined)).toBeUndefined();
     expect(floating[27]![1]).toBeCloseTo(pose[27]![1] - 0.4, 9); // input untouched
+  });
+
+  it('turns a clip upright from its standing frames with one rigid rotation (ADR-091)', () => {
+    const pose = liftSession([at(0)], 640, 480).poses.get(0)!;
+    const r = 20 * Math.PI / 180, c = Math.cos(r), sn = Math.sin(r);
+    const tilted = pose.map(p => [p[0], c * p[1] - sn * p[2], sn * p[1] + c * p[2]] as Vec3); // lean 20° toward the camera
+    // Squat frames (ankle→shoulder shorter) mixed in must not count as standing.
+    const squat = tilted.map((p, i) => (i <= 24 ? [p[0], p[1] * 0.7, p[2] + 0.3] : p) as Vec3);
+    const len = (P: Vec3[]) => Math.hypot(...[0, 1, 2].map(k => (P[11]![k]! + P[12]![k]!) / 2 - (P[27]![k]! + P[28]![k]!) / 2));
+    expect(len(squat)).toBeLessThan(0.97 * len(tilted));
+    const up = uprightRotation([squat, tilted, squat, tilted, squat, tilted, squat])!; // squat frames are the majority
+    expect(up.deg).toBeCloseTo(20, 1);
+    const m = up.rotation, fixed = tilted.map(p => [m[0]! * p[0] + m[1]! * p[1] + m[2]! * p[2], m[3]! * p[0] + m[4]! * p[1] + m[5]! * p[2], m[6]! * p[0] + m[7]! * p[1] + m[8]! * p[2]] as Vec3);
+    const mid = (P: Vec3[], a: number, b: number) => [0, 1, 2].map(k => (P[a]![k]! + P[b]![k]!) / 2);
+    const a = mid(fixed, 27, 28), sh = mid(fixed, 11, 12);
+    expect(Math.hypot(sh[0]! - a[0]!, sh[2]! - a[2]!)).toBeLessThan(1e-6); // shoulders straight above the ankles
+    for (const joint of ['knee', 'hip'] as const) for (const side of ['left', 'right'] as const) expect(flexion3D(fixed, joint, side)).toBeCloseTo(flexion3D(tilted, joint, side)!, 6);
+    expect(uprightRotation([tilted, tilted])).toBeNull(); // too few frames
+    const flat = pose.map(p => [p[0], p[2], -p[1]] as Vec3); // lying down: not a camera error
+    expect(uprightRotation([flat, flat, flat])).toBeNull();
   });
 });

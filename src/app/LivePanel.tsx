@@ -286,7 +286,7 @@ export function LivePanel({ model, side, onSide, disabled }: { model: File | nul
       {result ? <><p>這一段共 {result.samples.length} 個取樣、{(result.durationMs / 1000).toFixed(1)} 秒。<span className="muted">時間軸為鏡頭影格時間，每段從 0 秒起算；無效取樣保留為斷點。</span></p>
         {result.livePerformance && <p className="live-perf">效能：{perfText(result.livePerformance)}（詳細數字在研究 JSON 的 livePerformance）</p>}
         <AngleChart samples={result.samples} side={side} timeMs={result.samples.at(-1)?.sourceTimeMs ?? 0} />
-        {resultLift && resultLast && <Skeleton3D sample={resultLast} points={resultLift.poses.get(resultLast.sampleIndex)} note={calibrationNote(resultLift.context)} pitchText={pitchLabel(result.cameraPitch)} />}
+        {resultLift && resultLast && <Skeleton3D sample={resultLast} points={resultLift.poses.get(resultLast.sampleIndex)} note={calibrationNote(resultLift.context)} pitchText={pitchLabel(result.cameraPitch)} uprightDeg={resultLift.uprightDeg} />}
         <div className="actions">
           <button className="secondary" onClick={() => downloadFile(`knee-live-${result.metadata.sessionId}.csv`, toCsv(result), 'text/csv;charset=utf-8')}>下載 CSV</button>
           <button className="secondary" onClick={() => downloadFile(`research-live-${result.metadata.sessionId}.json`, JSON.stringify(result, null, 2), 'application/json')}>下載研究 JSON（含 landmarks）</button>

@@ -29,7 +29,7 @@ function footShadow(pts: readonly Vec3[], side: 'left' | 'right') {
   return { cx, cz, angle: Math.atan2(dz, dx), half: Math.max(0.08, len / 2 + 0.04), width: 0.07 };
 }
 
-export function Skeleton3D({ sample, points: rawPoints, note, pitchText, children }: { sample: Sample | undefined; points: Vec3[] | undefined; note?: string | null; pitchText?: string | null; children?: ReactNode }) {
+export function Skeleton3D({ sample, points: rawPoints, note, pitchText, uprightDeg, children }: { sample: Sample | undefined; points: Vec3[] | undefined; note?: string | null; pitchText?: string | null; uprightDeg?: number | null; children?: ReactNode }) {
   // Feet on the grid, body at the grid centre every frame (ADR-090); angles are translation-free.
   const points = useMemo(() => groundForDisplay(rawPoints), [rawPoints]);
   const ref = useRef<HTMLCanvasElement>(null);
@@ -157,7 +157,8 @@ export function Skeleton3D({ sample, points: rawPoints, note, pitchText, childre
     </div>
     {children}
     {pitchText && <p className="muted small">{pitchText}，已用來把骨架轉正。</p>}
+    {uprightDeg !== null && uprightDeg !== undefined && <p className="muted small">已用站直的畫面把骨架轉正（修正 {Math.round(uprightDeg)}°），角度數字不受影響。如果個案站直時本來就駝背或前傾，這裡會被畫成直立。</p>}
     {note && <p className="muted small">{note}</p>}
-    <p className="muted small">拖曳可旋轉。藍色 = 個案左側、橘色 = 右側。骨頭模型取自 OpenSim（只用來顯示，長度依個案縮放）。骨架的左右上下位置跟著影片，前後深度是模型估計的，腳踩在地板格線上；要做站直校正，請在開始或結束時站穩約 1 秒。{pitchText ? '' : '沒有鏡頭俯角時，手機若上下傾斜，整副骨架會跟著前後傾。'}僅供參考。</p>
+    <p className="muted small">拖曳可旋轉。藍色 = 個案左側、橘色 = 右側。骨頭模型取自 OpenSim（只用來顯示，長度依個案縮放）。骨架的左右上下位置跟著影片，前後深度是模型估計的，腳踩在地板格線上；要做站直校正，請在開始或結束時站穩約 1 秒。{pitchText || (uprightDeg !== null && uprightDeg !== undefined) ? '' : '沒有鏡頭俯角時，手機若上下傾斜，整副骨架會跟著前後傾。'}僅供參考。</p>
   </div>;
 }

@@ -204,7 +204,7 @@ function applyKnee(P: Vec3[], ctx: LiftContext, fadeFrom: number): void {
   }
 }
 /** Minimal rotation taking unit vector `from` onto (0, −1, 0) (camera "up", y down). */
-function rotationToUp(from: Vec3): number[] {
+export function rotationToUp(from: Vec3): number[] {
   const f = from.map(v => v / (norm(from) || 1)) as Vec3, to: Vec3 = [0, -1, 0];
   const v = cross(f, to), c = dot(f, to), s2 = dot(v, v);
   if (s2 < 1e-12) return c > 0 ? IDENTITY : [1, 0, 0, 0, -1, 0, 0, 0, -1];
