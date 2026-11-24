@@ -2,7 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import type { Sample } from '../domain/analysis';
 import { FRONTAL_LANDMARKS as L, frontalFrame, headPoint } from '../biomechanics/frontal';
 import { sourcePoint, type Point } from '../biomechanics/knee';
-import { LATERAL_INDICES } from '../biomechanics/lateral';
+import { LATERAL_INDICES, SIDE_PLUMB_INDICES } from '../biomechanics/lateral';
 import type { BodyPart } from '../motion/frontalCues';
 import { OBLIQUE_MIN_SHOULDER_RATIO, type FrontalFrame } from '../motion/frontalTimeline';
 import type { TrackingNotice } from '../app/plain';
@@ -45,6 +45,21 @@ export function FrontalOverlay({ sample, frame, width, height }: { sample: Sampl
       const lat = frame.lateral;
       const [S, H, K, A, E, T] = LATERAL_INDICES[lat.side].map(i => pt(i));
       const kc = hot.has('side-knee') ? ALERT : TOE, tc = hot.has('side-trunk') ? ALERT : TRUNK;
+      // Side baseline: locked vertical through the near ankle (≈ lateral malleolus), drawn first so the body lines sit on top.
+      const sb = frame.sideBaseline;
+      if (sb.state === 'locked') {
+        const bc = hot.has('side-plumb') ? ALERT : BASE;
+        // Prompted: thicker, so the alert reads even though the alert red is close to the line red.
+        line({ x: sb.x, y: 0 }, { x: sb.x, y: Math.min(height, sb.heelY + unit * 8) }, bc, hot.has('side-plumb') ? unit * 2 : unit * 1.1);
+        label('基準線（外踝）', { x: sb.x + unit * 3, y: unit * 6 }, bc);
+        const ear = pt(SIDE_PLUMB_INDICES[lat.side].ear);
+        if (ear) dot(ear, '#fff', unit * 1.6);
+        const sh = frame.sidePlumb?.shoulder;
+        if (S && sh?.valid) {
+          line({ x: sb.x, y: S.y }, S, bc, unit * 0.7, [unit * 1.5, unit * 1.5]);
+          label(`肩${sh.value >= 0 ? '在線前' : '在線後'} ${Math.round(Math.abs(sh.value) * 100)}%小腿長`, { x: S.x, y: S.y - unit * 7 }, bc, 'center');
+        }
+      }
       if (T && K) {
         line({ x: T.x, y: T.y }, { x: T.x, y: K.y - unit * 14 }, kc, unit, [unit * 2.5, unit * 1.8]);
         label('腳尖線', { x: T.x + unit * 3, y: T.y - unit * 6 }, kc);
@@ -114,12 +129,17 @@ export function FrontalCuePanel({ frame, hasSample, notice }: { frame: FrontalFr
   let body: ReactNode;
   let hintUsed = false;
   const OK = <p className="cue-ok">✓ 姿勢在基準線附近</p>, SIDE_OK = <p className="cue-ok">✓ 側面：膝蓋與上身在範圍內</p>;
+  // Side baseline not drawn yet: say so, the knee and trunk checks still apply without it.
+  const sideMoved = frame?.view === 'side' && frame.tracked && frame.sideBaseline.state === 'locked' && !!frame.sidePlumb && !frame.sidePlumb.shoulder.valid && frame.sidePlumb.shoulder.invalidReasons.some(r => r === 'baseline-pending');
+  const sidePending = frame?.view === 'side' && frame.tracked && frame.sideBaseline.state !== 'locked' ? <p className="cue-muted">側面基準線：等個案站直、不動約 1 秒</p>
+    : sideMoved ? <p className="cue-muted">腳不在基準線的位置：等個案重新站直、不動約 1 秒</p> : null;
   if (!hasSample || !frame) body = <p className="cue-muted">此影格沒有分析結果</p>;
   // Why the person is not tracked, held ≥ 0.5 s so it cannot flicker (src/app/plain.ts trackingNotices).
   else if (notice?.blocking) { body = <p className="cue-muted">{notice.text}</p>; hintUsed = true; }
   else if (!frame.tracked) body = <p className="cue-muted">這一格看不清楚個案，暫不判斷</p>;
   else if (frame.view === 'oblique') body = <p className="cue-muted">{frame.clipView === 'oblique' ? '斜角拍攝：已關閉斜角判斷' : '身體轉得太斜，已關閉斜角判斷'}</p>;
-  else if (frame.view === 'side' && frame.approximate) body = <><p className="cue-muted">斜角拍攝，用側面檢查，僅供參考</p>{frame.cues.length ? cueList(frame.cues) : <p className="cue-ok">✓ 膝蓋與上身在範圍內</p>}</>;
+  else if (frame.view === 'side' && frame.approximate) body = <><p className="cue-muted">斜角拍攝，用側面檢查，僅供參考</p>{sidePending}{frame.cues.length ? cueList(frame.cues) : <p className="cue-ok">✓ 膝蓋與上身在範圍內</p>}</>;
+  else if (frame.view === 'side' && sidePending) body = <>{sidePending}{frame.cues.length ? cueList(frame.cues) : <p className="cue-ok">✓ 膝蓋與上身在範圍內</p>}</>;
   else if (frame.view === 'side') body = frame.cues.length ? cueList(frame.cues) : SIDE_OK;
   else if (frame.view !== 'frontal') body = <p className="cue-muted">看不清楚軀幹點位，暫不判斷</p>;
   else if (frame.approximate && frame.baseline.state === 'locked') body = <><p className="cue-muted">斜角拍攝，用正面檢查，僅供參考</p>{frame.cues.length ? cueList(frame.cues) : <p className="cue-ok">✓ 姿勢在基準線附近</p>}</>;
@@ -143,7 +163,7 @@ export function linesDrawn(frame: FrontalFrame | undefined): boolean {
 /** Colour key for the frontal overlay. */
 export function FrontalLegend({ view }: { view: FrontalFrame['view'] | undefined }) {
   const items: [string, string, boolean][] = view === 'side' ? [
-    ['腳尖鉛垂線（看膝蓋有沒有超過）', TOE, true], ['軀幹（髖→肩）', TRUNK, false], ['垂直參考線／小腿', '#ffffff', true], ['超過門檻（看提示）', ALERT, false],
+    ['基準線（過外踝，站直時鎖定）', BASE, false], ['腳尖鉛垂線（看膝蓋有沒有超過）', TOE, true], ['軀幹（髖→肩）', TRUNK, false], ['垂直參考線／小腿', '#ffffff', true], ['超過門檻（看提示）', ALERT, false],
   ] : [
     ['基準線（站直時的身體中線）', BASE, false], ['肩線／骨盆線', LINE, false], ['站直時的肩線／骨盆線', '#ffffff', true],
     ['軀幹', TRUNK, true], ['腳尖鉛垂線', TOE, true], ['偏離（看提示）', ALERT, false],

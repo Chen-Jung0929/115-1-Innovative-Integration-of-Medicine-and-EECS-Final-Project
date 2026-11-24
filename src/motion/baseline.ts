@@ -25,6 +25,9 @@ export const BASELINE_POLICY = {
   lostTimeoutMs: 2000,
 } as const;
 
+/** Same shape as BASELINE_POLICY with any version name (e.g. the side-view ankle lock in frontalTimeline.ts). */
+export type BaselinePolicy = { [K in keyof typeof BASELINE_POLICY]: K extends 'version' ? string : number };
+
 export interface BaselineObservation {
   timeMs: number;
   /** Heel midpoint: decides whether the feet are still / have moved. */
@@ -43,7 +46,7 @@ export type BaselineState =
 const SEARCHING: BaselineState = { state: 'searching', x: null, heelY: null, lockedAtMs: null };
 interface Obs { timeMs: number; x: number; cx: number; y: number; scale: number }
 
-export function createBaselineAnchor(policy: typeof BASELINE_POLICY = BASELINE_POLICY) {
+export function createBaselineAnchor(policy: BaselinePolicy = BASELINE_POLICY) {
   let window: Obs[] = [];
   let current: BaselineState = SEARCHING;
   let lastSeenMs: number | null = null;
