@@ -5,7 +5,7 @@ import { cameraErrorMessage, cameraUnavailableReason, listCameras, openCamera, s
 import { fullFrameSelection } from '../input/singleSubject';
 import { createPoseEngine, modelBytes, MODEL_LOAD_ERROR, MODEL_VERSION, type PoseEngine } from '../pose/mediapipe';
 import { createLiveAnalyzer, createReadyGate, dueForSample, liveSession, LIVE_SAMPLING_HZ, READY_POLICY, type LiveRunInfo } from '../motion/live';
-import { coverage } from '../motion/series';
+import { coverage, nearestSample } from '../motion/series';
 import { createPerformanceRecorder } from '../motion/livePerformance';
 import type { LivePerformance } from '../domain/performance';
 import { flexionProxy } from '../biomechanics/knee';
@@ -59,7 +59,7 @@ const MAX_VIDEO_SEGMENTS = 3;
 /** Identifies the open camera by device id, or by its label when the browser gives no id. */
 const cameraKey = (s: MediaStream | null) => streamDeviceId(s) || (s?.getVideoTracks()[0]?.label ?? '');
 
-export function LivePanel({ model, side, onSide, disabled }: { model: File | null; side: Side; onSide: (side: Side) => void; disabled: boolean }) {
+export function LivePanel({ model, side, onSide, disabled, onFullAnalysis }: { model: File | null; side: Side; onSide: (side: Side) => void; disabled: boolean; onFullAnalysis?: (file: File) => void }) {
   const video = useRef<HTMLVideoElement>(null);
   const stream = useRef<MediaStream | null>(null);
   const engine = useRef<PoseEngine | null>(null);
@@ -323,8 +323,18 @@ export function LivePanel({ model, side, onSide, disabled }: { model: File | nul
   const pct = (s: 'left' | 'right') => { const value = analyzer.current ? coverage(analyzer.current.samples, s) : null; return value === null ? 'N/A' : `${(value * 100).toFixed(0)}%`; };
   const result = results[shown] ?? null;
   const resultVideos = result ? videos[result.metadata.sessionId] : undefined;
+  const hasVideo = !!resultVideos && resultVideos !== 'pending' && !!(resultVideos.raw || resultVideos.skeleton);
   const resultLift = useMemo(() => result ? liftSession(result.samples, result.metadata.sourceWidthPx, result.metadata.sourceHeightPx, result.cameraPitch?.deg) : null, [result]);
-  const resultLast = result && resultLift ? [...result.samples].reverse().find(s => resultLift.poses.has(s.sampleIndex)) : undefined;
+  // Playback of a saved segment's video inside the page (ADR-092): the chart cursor and 3D skeleton follow the video time.
+  const [playKind, setPlayKind] = useState<'skeleton' | 'raw'>('skeleton');
+  const [playMs, setPlayMs] = useState<number | null>(null);
+  const playBlob = resultVideos && resultVideos !== 'pending' ? (resultVideos[playKind] ?? resultVideos.raw ?? resultVideos.skeleton) : null;
+  const playUrl = useMemo(() => playBlob ? URL.createObjectURL(playBlob) : null, [playBlob]);
+  useEffect(() => () => { if (playUrl) URL.revokeObjectURL(playUrl); }, [playUrl]);
+  useEffect(() => { setPlayMs(null); }, [shown, results]);
+  const resultLast = result && resultLift ? (playMs === null
+    ? [...result.samples].reverse().find(s => resultLift.poses.has(s.sampleIndex))
+    : nearestSample(result.samples.filter(s => resultLift.poses.has(s.sampleIndex)), playMs, Infinity)) : undefined;
 
   return <>
     <section className="card" aria-labelledby="live-title">
@@ -376,17 +386,32 @@ export function LivePanel({ model, side, onSide, disabled }: { model: File | nul
       {results.length > 1 && <label className="compact">選擇量測段<select value={shown} onChange={e => setShown(Number(e.target.value))}>{results.map((r, i) => <option key={r.metadata.sessionId} value={i}>{i === 0 ? '最新一段' : `前 ${i} 段`} · {(r.durationMs / 1000).toFixed(1)} 秒 · {r.samples.length} 個取樣</option>)}</select></label>}</div>
       {result ? <><p>這一段共 {result.samples.length} 個取樣、{(result.durationMs / 1000).toFixed(1)} 秒。<span className="muted">時間軸為鏡頭影格時間，每段從 0 秒起算；無效取樣保留為斷點。</span></p>
         {result.livePerformance && <p className="live-perf">效能：{perfText(result.livePerformance)}（詳細數字在研究 JSON 的 livePerformance）</p>}
-        <AngleChart samples={result.samples} side={side} timeMs={result.samples.at(-1)?.sourceTimeMs ?? 0} />
+        {resultVideos && resultVideos !== 'pending' && resultVideos.raw && onFullAnalysis && <div className="full-analysis">
+          {videoExtension(resultVideos.raw.type) === 'mp4'
+            ? <><button className="primary" disabled={live || state === 'starting'} onClick={() => onFullAnalysis(new File([resultVideos.raw!], `live-${result.metadata.sessionId}.mp4`, { type: 'video/mp4' }))}>用完整分析畫面看這一段</button>
+              <span className="muted small">{live ? '請先按「停止」關閉鏡頭。' : '跟「上傳影片」一樣的畫面（骨架、角度、姿勢提醒、3D、播放速度），用這一段的錄影重新分析一次。'}</span></>
+            : <span className="muted small">這個瀏覽器錄成 WebM，無法直接用完整分析；請下載影片後轉成 MP4 再上傳。</span>}
+        </div>}
+        {playUrl && <div className="segment-playback">
+          {resultVideos && resultVideos !== 'pending' && resultVideos.raw && resultVideos.skeleton && <div className="actions" role="group" aria-label="播放哪一支影片">
+            <button className={playKind === 'skeleton' ? 'primary' : 'secondary'} aria-pressed={playKind === 'skeleton'} onClick={() => setPlayKind('skeleton')}>看含骨架</button>
+            <button className={playKind === 'raw' ? 'primary' : 'secondary'} aria-pressed={playKind === 'raw'} onClick={() => setPlayKind('raw')}>看原始畫面</button></div>}
+          <video key={playUrl} src={playUrl} controls playsInline muted aria-label="這一段的錄影"
+            onTimeUpdate={e => setPlayMs(e.currentTarget.currentTime * 1000)} onSeeked={e => setPlayMs(e.currentTarget.currentTime * 1000)} />
+          <p className="muted small">播放或拖動影片時，下方曲線的直線和 3D 骨架會跟著影片時間移動（大約對齊，誤差約 0.1–0.2 秒）。</p>
+        </div>}
+        <AngleChart samples={result.samples} side={side} timeMs={playMs ?? result.samples.at(-1)?.sourceTimeMs ?? 0} />
         {resultLift && resultLast && <Skeleton3D sample={resultLast} points={resultLift.poses.get(resultLast.sampleIndex)} note={calibrationNote(resultLift.context)} pitchText={pitchLabel(result.cameraPitch)} />}
         <div className="actions">
           <button className="secondary" onClick={() => downloadFile(`knee-live-${result.metadata.sessionId}.csv`, toCsv(result), 'text/csv;charset=utf-8')}>下載 CSV</button>
           <button className="secondary" onClick={() => downloadFile(`research-live-${result.metadata.sessionId}.json`, JSON.stringify(result, null, 2), 'application/json')}>下載研究 JSON（含 landmarks）</button>
           {resultVideos === 'pending' && <span className="muted small">影片處理中…</span>}
+          {resultVideos && resultVideos !== 'pending' && !hasVideo && <span className="muted small">這一段太短，沒有錄到影片。</span>}
           {resultVideos && resultVideos !== 'pending' && resultVideos.raw && <button className="secondary" onClick={() => downloadBlob(`video-live-${result.metadata.sessionId}.${videoExtension(resultVideos.raw!.type)}`, resultVideos.raw!)}>下載影片（原始畫面）</button>}
           {resultVideos && resultVideos !== 'pending' && resultVideos.skeleton && <button className="secondary" onClick={() => downloadBlob(`video-live-skeleton-${result.metadata.sessionId}.${videoExtension(resultVideos.skeleton!.type)}`, resultVideos.skeleton!)}>下載影片（含骨架）</button>}
         </div>{!resultVideos && released.has(result.metadata.sessionId) && <p className="muted small">這一段的影片已釋放（只保留最近 {MAX_VIDEO_SEGMENTS} 段的影片），角度資料仍可下載。</p>}
         {record && !canRecord() && <p className="muted small">這個瀏覽器不支援錄影，只能下載角度資料。</p>}
-        <p className="muted small">輸出含人體特徵點{resultVideos ? '與影像' : ''}，請保存於受限空間，不要上傳或提交到 Public GitHub。</p></>
+        <p className="muted small">輸出含人體特徵點{hasVideo ? '與影像' : ''}，請保存於受限空間，不要上傳或提交到 Public GitHub。</p></>
         : <p className="muted">每一段結束後（按停止、有人闖入或離開畫面），這裡會顯示該段曲線與匯出按鈕，最多保留最近 {MAX_KEPT_SEGMENTS} 段。關閉網頁前請先下載。</p>}
     </section>
   </>;

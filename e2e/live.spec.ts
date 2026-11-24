@@ -31,6 +31,7 @@ test('live camera starts hands-free, ends a segment on a second person, restarts
   await expect(page.getByText(/這一段共 \d+ 個取樣/)).toBeVisible(); // locked segment saved, never unlocked
   await page.evaluate(() => { (window as unknown as { __crowd: boolean }).__crowd = false; });
   await expect(page.getByText('量測中', { exact: true })).toBeVisible({ timeout: 10000 }); // new segment starts hands-free
+  await page.waitForTimeout(1500); // let this segment record at least a second of video
   await page.getByRole('button', { name: '停止', exact: true }).click();
   await expect(page.getByLabel('選擇量測段')).toBeVisible();
   const download = page.waitForEvent('download');
@@ -48,8 +49,14 @@ test('live camera starts hands-free, ends a segment on a second person, restarts
     if (process.env.SAVE_VIDEOS) await file.saveAs(process.env.SAVE_VIDEOS + '/' + file.suggestedFilename());
     expect(size).toBeGreaterThan(1000);
   }
-  await page.getByRole('button', { name: '上傳影片', exact: true }).click();
+  // In-page playback of the recording, then the same full analysis view as an uploaded video.
+  await expect(page.getByLabel('這一段的錄影')).toBeVisible();
+  await page.getByRole('button', { name: '看原始畫面', exact: true }).click();
+  await expect(page.getByRole('button', { name: '看原始畫面', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: '用完整分析畫面看這一段', exact: true }).click();
   await expect(page.getByText('MP4 影片（最多 500 MB、10 分鐘）')).toBeVisible();
+  await expect(page.getByText(/^live-.*\.mp4 · /)).toBeVisible({ timeout: 15000 });
+  await expect(page.getByText(/分析完成/)).toBeVisible({ timeout: 60000 });
 });
 
 test('camera downloads only on start and retries a failed model request', async ({ page }) => {
