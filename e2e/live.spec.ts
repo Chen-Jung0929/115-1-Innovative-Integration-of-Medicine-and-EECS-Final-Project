@@ -51,3 +51,51 @@ test('camera downloads only on start and retries a failed model request', async 
   await expect(page.getByRole('alert')).toHaveText('模型載入失敗，請確認網路後重試');
   expect(requests).toBe(2);
 });
+
+// iPadOS reports itself as a Mac, and some tablets ignore an ideal facingMode and always return the front camera.
+// The switch must depend only on the number of cameras, never on phone detection.
+test.describe('tablet with front and rear cameras', () => {
+  test.use({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15', viewport: { width: 1024, height: 1366 } });
+  test('opens the rear camera even when facingMode is ignored, and switches front/rear while live', async ({ page }) => {
+    await page.addInitScript(() => {
+      const md = navigator.mediaDevices, real = md.getUserMedia.bind(md);
+      const log: MediaStreamConstraints[] = []; (window as unknown as { __constraints: MediaStreamConstraints[] }).__constraints = log;
+      md.enumerateDevices = async () => [{ deviceId: 'front', kind: 'videoinput', label: 'Front Camera', groupId: '1' }, { deviceId: 'back', kind: 'videoinput', label: 'Back Camera', groupId: '2' }] as MediaDeviceInfo[];
+      md.getUserMedia = async (c?: MediaStreamConstraints) => {
+        log.push(c!);
+        const v = c?.video as MediaTrackConstraints, id = (v.deviceId as ConstrainDOMStringParameters | undefined)?.exact === 'back' ? 'back' : 'front';
+        const stream = await real({ video: true });
+        const track = stream.getVideoTracks()[0]!, settings = track.getSettings.bind(track);
+        track.getSettings = () => ({ ...settings(), deviceId: id, facingMode: id === 'back' ? 'environment' : 'user' });
+        return stream;
+      };
+    });
+    await page.route('**/src/pose/mediapipe.ts', route => route.fulfill({ contentType: 'application/javascript', body: `
+      export const MODEL_URL='https://example.invalid/synthetic';
+      export const MODEL_VERSION='synthetic-adapter-test';
+      export const MODEL_LOAD_ERROR='模型載入失敗，請確認網路後重試';
+      export async function modelBytes(){return {bytes:new Uint8Array(),hash:'synthetic',id:'synthetic'};}
+      export async function createPoseEngine(){let previous=-1;return {close(){},detect(canvas,time){
+        if(time<=previous)throw new Error('non-monotonic timestamp');previous=time;
+        const pose=Array.from({length:33},()=>({x:.5,y:.4,visibility:1}));
+        for(const [i,x,y] of [[11,.4,.2],[12,.6,.2],[23,.4,.5],[24,.6,.5],[25,.45,.7],[26,.6,.7],[27,.4,.9],[28,.6,.9]])pose[i]={x,y,visibility:1};
+        const crowd=window.__crowd===true;return crowd?[pose,pose.map(p=>({...p,x:p.x-.3}))]:[pose];
+      }};}` }));
+    await page.goto('/');
+    await page.getByRole('button', { name: '即時鏡頭', exact: true }).click();
+    await page.getByLabel('鏡頭方向').selectOption('environment');
+    await page.getByRole('button', { name: '開啟鏡頭', exact: true }).click();
+    const toFront = page.getByRole('button', { name: '切換到前鏡頭', exact: true });
+    await expect(toFront).toBeVisible({ timeout: 15000 });
+    const last = () => page.evaluate(() => { const l = (window as unknown as { __constraints: MediaStreamConstraints[] }).__constraints; return l[l.length - 1]!.video as MediaTrackConstraints; });
+    expect((await last()).deviceId).toEqual({ exact: 'back' }); // retried with the rear camera's id
+    await expect(page.locator('.video-stage:visible')).not.toHaveClass(/mirrored/); // rear camera is not mirrored
+    await toFront.click();
+    await expect(page.getByText('已切換到前鏡頭。前一段（如果有）已保存在下方。')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('.video-stage:visible')).toHaveClass(/mirrored/);
+    expect((await last()).facingMode).toEqual({ ideal: 'user' });
+    await page.getByRole('button', { name: '切換到後鏡頭', exact: true }).click();
+    await expect(page.getByText('已切換到後鏡頭。前一段（如果有）已保存在下方。')).toBeVisible({ timeout: 15000 });
+    expect((await last()).deviceId).toEqual({ exact: 'back' });
+  });
+});

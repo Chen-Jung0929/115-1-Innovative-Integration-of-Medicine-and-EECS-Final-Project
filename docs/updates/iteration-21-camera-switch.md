@@ -1,0 +1,15 @@
+# 第 21 輪：平板也能切換前後鏡頭
+
+使用者回饋平板無法切到後鏡頭。原因有兩個：開鏡頭時只用 `facingMode: ideal` 要求方向，部分平板會忽略這個要求而一律給前鏡頭；另外鏡頭方向只能在開啟前選，開啟後沒有切換按鈕，選項文字也只寫「手機」。
+
+## 改動
+
+- `src/input/camera.ts`：開鏡頭後檢查實際方向（`getSettings().facingMode`，沒有時看鏡頭名稱）。方向不對且裝置有 2 個以上鏡頭時，依名稱挑出正確鏡頭，以 `deviceId: exact` 重開。新增 `listCameras`、`facingFromLabel`、`pickCamera`。不判斷裝置類型（ADR-090）。
+- `src/app/LivePanel.tsx`：開啟鏡頭後計算鏡頭數；有 2 個以上時顯示「切換到前／後鏡頭」，切換前先保存這一段。只有前鏡頭鏡像。選項改為「前鏡頭（自拍）」「後鏡頭（手機或平板架在旁邊）」，傾斜感測器按鈕改為「手機／平板」。
+- README 使用步驟同步說明。
+
+## 檢查與限制
+
+- `npm run typecheck`、`npm test`（289 個測試）、`npm run build` 通過。
+- `npm run test:browser` 通過 36 個、略過 2 個既有條件測試。新增的 e2e 模擬 iPad（Mac UA）、前後兩顆鏡頭、且忽略 facingMode 的平板：選後鏡頭會改用後鏡頭的 deviceId 重開，開啟後可前後來回切換，前鏡頭鏡像、後鏡頭不鏡像。
+- 實體 iPad、Android 平板尚未驗收；鏡頭名稱依瀏覽器與語系而異，名稱完全看不出方向時仍沿用瀏覽器的選擇。

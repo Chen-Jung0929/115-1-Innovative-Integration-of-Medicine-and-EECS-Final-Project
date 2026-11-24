@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { Sample, Session } from '../domain/analysis';
-import { cameraErrorMessage, cameraUnavailableReason, openCamera, stopCamera, type Facing } from '../input/camera';
+import { cameraErrorMessage, cameraUnavailableReason, listCameras, openCamera, stopCamera, type Facing } from '../input/camera';
 import { fullFrameSelection } from '../input/singleSubject';
 import { createPoseEngine, modelBytes, MODEL_LOAD_ERROR, MODEL_VERSION, type PoseEngine } from '../pose/mediapipe';
 import { createLiveAnalyzer, createReadyGate, dueForSample, liveSession, LIVE_SAMPLING_HZ, READY_POLICY, type LiveRunInfo } from '../motion/live';
@@ -75,6 +75,7 @@ export function LivePanel({ model, side, onSide, disabled }: { model: File | nul
   const [livePitch, setLivePitch] = useState<number | null>(null);
   const [facing, setFacing] = useState<Facing>('user');
   const [mirrored, setMirrored] = useState(true);
+  const [cameraCount, setCameraCount] = useState(0);
   const [state, setState] = useState<'off' | 'starting' | 'live'>('off');
   const [size, setSize] = useState({ width: 640, height: 360 });
   const [sample, setSample] = useState<Sample | undefined>();
@@ -175,12 +176,13 @@ export function LivePanel({ model, side, onSide, disabled }: { model: File | nul
     setRecent(previous => [...previous.filter(s => next.sourceTimeMs - s.sourceTimeMs <= CHART_WINDOW_MS), next]);
   }
 
-  async function start() {
+  /** Opens the camera; facing/mirror can be passed directly when switching, before React state updates land. */
+  async function start(useFacing: Facing = facing, useMirrored: boolean = mirrored): Promise<boolean> {
     setError(''); setNotice('');
     const v = video.current;
-    if (!v) return;
+    if (!v) return false;
     const reason = cameraUnavailableReason({ isSecureContext: window.isSecureContext, hasMediaDevices: !!navigator.mediaDevices?.getUserMedia, hasFrameCallback: 'requestVideoFrameCallback' in HTMLVideoElement.prototype });
-    if (reason) { setError(reason); return; }
+    if (reason) { setError(reason); return false; }
     opening.current?.abort();
     const controller = new AbortController(); opening.current = controller;
     setState('starting');
@@ -188,22 +190,34 @@ export function LivePanel({ model, side, onSide, disabled }: { model: File | nul
       const prepareStart = performance.now();
       const asset = await modelBytes(model, controller.signal);
       const modelPreparationMs = performance.now() - prepareStart;
-      stream.current = await openCamera(v, facing, controller.signal);
+      stream.current = await openCamera(v, useFacing, controller.signal);
+      // Count cameras after permission (labels and ids are filled then). Any device with 2+ cameras may switch.
+      void listCameras().then(c => setCameraCount(c.length)).catch(() => undefined);
       engine.current = await createPoseEngine(asset.bytes, 1);
       controller.signal.throwIfAborted();
       warmUpMs.current = performance.now() - prepareStart;
       const width = v.videoWidth, height = v.videoHeight;
       const c = document.createElement('canvas'); c.width = width; c.height = height; canvas.current = c;
       setSize({ width, height });
-      runInfo.current = { width, height, selection: fullFrameSelection(width, height), displayMirrored: mirrored, appVersion: pkg.version, modelPreparationMs,
+      runInfo.current = { width, height, selection: fullFrameSelection(width, height), displayMirrored: useMirrored, appVersion: pkg.version, modelPreparationMs,
         model: { packageVersion: MODEL_VERSION, assetId: asset.id, assetSha256: asset.hash, delegate: 'CPU' } };
       gate.current = createReadyGate(width, height); enterWaiting();
       frameId.current = v.requestVideoFrameCallback(onFrame);
       setState('live');
+      return true;
     } catch (e) {
       halt();
       if (!controller.signal.aborted) { setState('off'); setError(e instanceof DOMException ? cameraErrorMessage(e) : e instanceof Error ? e.message : String(e)); }
+      return false;
     }
+  }
+
+  /** Front/rear switch while live: saves the current segment, then reopens the other camera. Mirror only the front one. */
+  async function switchCamera() {
+    const next: Facing = facing === 'user' ? 'environment' : 'user';
+    setFacing(next); setMirrored(next === 'user');
+    stop();
+    if (await start(next, next === 'user')) setNotice(`已切換到${next === 'user' ? '前' : '後'}鏡頭。前一段（如果有）已保存在下方。`);
   }
 
   function stop(message = '已停止鏡頭。這一段的曲線與匯出在下方。') {
@@ -247,9 +261,10 @@ export function LivePanel({ model, side, onSide, disabled }: { model: File | nul
         </div>
       </div>
       <div className="live-options">
-        <label className="compact">鏡頭方向<select value={facing} disabled={state !== 'off'} onChange={e => { const f = e.target.value as Facing; setFacing(f); setMirrored(f === 'user'); }}><option value="user">前鏡頭（筆電、自拍）</option><option value="environment">後鏡頭（手機架在旁邊）</option></select></label>
+        <label className="compact">鏡頭方向<select value={facing} disabled={state !== 'off'} onChange={e => { const f = e.target.value as Facing; setFacing(f); setMirrored(f === 'user'); }}><option value="user">前鏡頭（自拍）</option><option value="environment">後鏡頭（手機或平板架在旁邊）</option></select></label>
+        {live && cameraCount > 1 && <button className="secondary" onClick={() => void switchCamera()}>切換到{facing === 'user' ? '後' : '前'}鏡頭</button>}
         <label className="switch"><input type="checkbox" role="switch" checked={mirrored} disabled={state !== 'off'} onChange={e => setMirrored(e.target.checked)} /><span>畫面像照鏡子</span></label>
-        {sensor === 'off' && <button className="secondary" onClick={() => void enableSensor()}>使用手機傾斜感測器（鏡頭俯角）</button>}
+        {sensor === 'off' && <button className="secondary" onClick={() => void enableSensor()}>使用手機／平板傾斜感測器（鏡頭俯角）</button>}
         {sensor === 'on' && <span className="muted small">{livePitch === null ? '等待手機傾斜感測器…（筆電通常沒有）' : `鏡頭俯角 ${livePitch.toFixed(0)}°（手機感測器）`}</span>}
         {sensor === 'denied' && <span className="muted small">未取得傾斜感測器權限（iPhone 需在 https 網址按按鈕允許）。</span>}
         {sensor === 'unsupported' && <span className="muted small">這個瀏覽器沒有傾斜感測器。</span>}
