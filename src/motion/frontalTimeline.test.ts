@@ -125,6 +125,22 @@ describe('side view in the timeline', () => {
     expect(t[0]!.lateral!.trunkLean.value).toBeGreaterThan(45);
     expect(t[1]!.cues.map(c => c.text)).toEqual(['上身前傾太多']);
   });
+  it('side baseline: locks through the ankle after ~1 s standing still, stays put, prompts shoulder far forward', () => {
+    const bent = { valid: true as const, rawAngleDeg: 110, invalidReasons: [] as [] };
+    const samples = [0, 1, 2, 3, 4, 5].map(i => at(i, sidePose())).concat([6, 7, 8].map(i => at(i, sidePose(.1), { left: bent, right: bent })));
+    const t = frontalTimeline(samples, 100, 100);
+    expect(t[0]!.sideCalibration).toBe('whole-video'); // before the live lock, the upright moments of the clip
+    expect(t[4]!.sideBaseline).toMatchObject({ state: 'locked', x: 50 });
+    expect(t[4]!.sideCalibration).toBe('standing-lock');
+    expect(t[4]!.sidePlumb!.shoulder.value).toBeCloseTo(0, 8);
+    expect(t[8]!.sideBaseline.x).toBe(50);
+    expect(t[8]!.sidePlumb!.shoulder.value).toBeCloseTo(10 / 15, 8);
+    expect(t[7]!.cues.map(c => c.text)).toEqual(['重心偏前（肩膀超過外踝基準線太多）']);
+  });
+  it('a frontal clip never draws a side baseline', () => {
+    const t = frontalTimeline([0, 1, 2, 3, 4, 5].map(i => at(i, pose())), 100, 100);
+    expect(t.every(f => f.sideBaseline.state === 'searching' && f.sidePlumb === null && f.sideCalibration === null)).toBe(true);
+  });
   it('upright side view gives no prompt', () => {
     const t = frontalTimeline([0, 1, 2].map(i => at(i, sidePose())), 100, 100);
     expect(t[2]!.view).toBe('side'); expect(t[2]!.cues).toEqual([]);

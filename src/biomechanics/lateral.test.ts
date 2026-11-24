@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { classifyView, measureLateral, nearSide, LATERAL_INDICES } from './lateral';
+import { classifyView, measureLateral, measureSidePlumb, nearSide, sideAnchor, LATERAL_INDICES, type SidePlumb } from './lateral';
+import type { ScalarValue } from '../domain/measurement';
 import { humanPose } from '../test/fixtures';
 import { lateralCues } from '../motion/frontalCues';
 import type { Landmark } from '../domain/analysis';
@@ -58,3 +59,38 @@ describe('side-view metrics (handout p.12)', () => {
     expect(lateralCues(measureLateral(side(), 100, 100), 80)).toEqual([]);
   });
 });
+
+describe('side baseline through the ankle (lateral malleolus)', () => {
+  it('anchor = near ankle, shank length and heel→toe direction', () => {
+    expect(sideAnchor(side(), 100, 100, 'left')).toEqual({ ankle: { x: 50, y: 90 }, shank: 15, forward: 1 });
+    const p = side(); p[27] = v(.5, .9, .2);
+    expect(sideAnchor(p, 100, 100, 'left')).toBe('low-confidence');
+  });
+  it('ear / shoulder / hip offsets from the line in shank lengths, + = toward the toes, mirror-safe', () => {
+    const p = side(); p[7] = v(.53, .15); p[11] = v(.56, .3); p[23] = v(.47, .6);
+    const m = measureSidePlumb(p, 100, 100, 'left', 50);
+    expect(m.ear.value).toBeCloseTo(3 / 15, 8);
+    expect(m.shoulder.value).toBeCloseTo(6 / 15, 8);
+    expect(m.hip.value).toBeCloseTo(-3 / 15, 8);
+    const mirrored = measureSidePlumb(p.map(q => ({ ...q, x: 1 - q.x })), 100, 100, 'left', 50);
+    expect(mirrored.shoulder.value).toBeCloseTo(6 / 15, 8);
+  });
+  it('N/A before the line is locked, and per point when only that point is unreliable', () => {
+    expect(measureSidePlumb(side(), 100, 100, 'left', null).shoulder.invalidReasons).toEqual(['baseline-pending']);
+    const p = side(); p[7] = v(.53, .15, .1);
+    const m = measureSidePlumb(p, 100, 100, 'left', 50);
+    expect(m.ear.invalidReasons).toEqual(['low-confidence']);
+    expect(m.shoulder.valid).toBe(true);
+  });
+  it('prompt: shoulder past the line > 0.4 shank while squatting; merged into the trunk prompt when both apply', () => {
+    const val = (value: number): ScalarValue => ({ valid: true, value, invalidReasons: [] });
+    const plumb = (sh: number): SidePlumb => ({ ear: val(sh), shoulder: val(sh), hip: val(0) });
+    const upright = measureLateral(side(), 100, 100);
+    expect(lateralCues(upright, 80, plumb(.5)).map(c => c.text)).toEqual(['重心偏前（肩膀超過外踝基準線太多）']);
+    expect(lateralCues(upright, 10, plumb(.5))).toEqual([]); // standing: not judged
+    expect(lateralCues(upright, 80, plumb(.3))).toEqual([]);
+    const p = side(); p[11] = v(.8, .4);
+    expect(lateralCues(measureLateral(p, 100, 100), 80, plumb(.6)).map(c => c.text)).toEqual(['上身前傾太多（肩膀超過基準線，重心偏前）']);
+  });
+});
+
