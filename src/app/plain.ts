@@ -125,7 +125,7 @@ export function lockedBannerText(cause: TrackingCause, mode: NoticeMode, sinceMs
   const action = cause === 'confirming' || cause === 'rejected' ? TRACKING_TEXT['lost-track'][mode] : t[mode];
   const since = sinceMs === undefined ? '' : `從 ${(sinceMs / 1000).toFixed(1)} 秒起`;
   return mode === 'video'
-    ? `${since}無法確定是同一人（${t.problem}），暫停判斷。個案站直不動約 1 秒後會重新開始一段。重拍時${action}。`
+    ? `${since}無法確定是同一人（${t.problem}），暫停判斷。畫面上只剩一個人、連續看清楚約 1 秒（或站直不動）後會自動重新開始一段。重拍時${action}。`
     : `${since}無法確定是同一人（${t.problem}），暫停判斷，數字不顯示。${action}。`;
 }
 

@@ -1,7 +1,10 @@
-import { expect, it, vi } from 'vitest';
-import { checkFile, seekFrame, observePresentedFrame } from './video';
+import { describe, expect, it, vi } from 'vitest';
+import { checkFile, seekFrame, observePresentedFrame, resolveDuration } from './video';
 it('rejects empty, unsupported and oversized files', () => {
-  expect(()=>checkFile(new File(['x'],'a.mov',{type:'video/quicktime'}))).toThrow('僅支援 MP4');
+  expect(()=>checkFile(new File(['x'],'a.avi',{type:'video/x-msvideo'}))).toThrow('目前支援 MP4、MOV');
+  expect(()=>checkFile(new File(['x'],'IMG_0001.HEIC',{type:'image/heic'}))).toThrow('這是照片');
+  expect(()=>checkFile(new File(['x'],'a.mp4',{type:'image/png'}))).toThrow('目前支援');
+  for(const [name,type] of <[string,string][]>[['IMG_0001.MOV','video/quicktime'],['a.m4v','video/x-m4v'],['rec.webm','video/webm;codecs=vp9'],['a.mov','']])expect(()=>checkFile(new File(['x'],name,{type}))).not.toThrow();
   expect(()=>checkFile(new File([],'a.mp4',{type:'video/mp4'}))).toThrow('空的');
   expect(()=>checkFile({name:'a.mp4',type:'video/mp4',size:501*1024*1024} as File)).toThrow('500 MB');
   expect(()=>checkFile(new File(['x'],'a.MP4',{type:'video/mp4'}))).not.toThrow();
@@ -38,4 +41,24 @@ it('zero no-op and throttled paused decoder use explicit timestamp estimates',as
 });
 it('settled seek can finish without a seeked event, retaining approximate provenance',async()=>{
  vi.useFakeTimers();try{const v=decoder();const pending=seekFrame(v,.4,new AbortController().signal);await vi.advanceTimersByTimeAsync(175);expect((await pending).sourceTimeMs).toBe(400);}finally{vi.useRealTimers();}
+});
+
+describe('MediaRecorder files with an unknown duration (ADR-099)', ()=>{
+ function recorded(){
+  const t=new EventTarget();let duration=Infinity,time=0;
+  const v=Object.defineProperties(t,{duration:{get:()=>duration},currentTime:{get:()=>time,set:(x:number)=>{time=x;}}}) as unknown as HTMLVideoElement;
+  return {v,setDuration(d:number){duration=d;t.dispatchEvent(new Event('durationchange'));},seeked(){t.dispatchEvent(new Event('seeked'));},get time(){return time;}};
+ }
+ it('waits past an early durationchange that still says Infinity, then returns to the start', async()=>{
+  const r=recorded();const p=resolveDuration(r.v,new AbortController().signal);
+  expect(r.time).toBe(1e101);r.setDuration(Infinity);r.setDuration(4.2);
+  await Promise.resolve();expect(r.time).toBe(0);r.seeked();await p;expect(r.v.duration).toBe(4.2);
+ });
+ it('gives up after the timeout without hanging, and honours cancellation', async()=>{
+  vi.useFakeTimers();
+  try{const r=recorded();const p=resolveDuration(r.v,new AbortController().signal,100);await vi.advanceTimersByTimeAsync(250);await p;expect(r.v.duration).toBe(Infinity);}
+  finally{vi.useRealTimers();}
+  const r=recorded(),abort=new AbortController();const p=resolveDuration(r.v,abort.signal);abort.abort();
+  await expect(p).rejects.toMatchObject({name:'AbortError'});
+ });
 });

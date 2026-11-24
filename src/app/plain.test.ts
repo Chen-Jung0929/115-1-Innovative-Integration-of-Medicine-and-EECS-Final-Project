@@ -48,7 +48,7 @@ describe('why the person was not tracked (tracking-notice-v1)', () => {
     expect(noticeText('others', false, 'live')).toBe('畫面有其他人：只留個案一人入鏡');
     expect(noticeText('head-cut', true, 'video')).toBe('頭沒有完整入鏡，暫停判斷');
     expect(noticeText('confirming', false, 'video')).toBe('無法確認是同一人：這一格暫不判斷');
-    expect(lockedBannerText('head-cut', 'video', 2200)).toBe('從 2.2 秒起無法確定是同一人（頭沒有完整入鏡），暫停判斷。個案站直不動約 1 秒後會重新開始一段。重拍時手機往後移，讓頭入鏡。');
+    expect(lockedBannerText('head-cut', 'video', 2200)).toBe('從 2.2 秒起無法確定是同一人（頭沒有完整入鏡），暫停判斷。畫面上只剩一個人、連續看清楚約 1 秒（或站直不動）後會自動重新開始一段。重拍時手機往後移，讓頭入鏡。');
   });
   it('never blames other people or blocking unless that is what happened, and shows no codes', () => {
     for (const c of Object.keys(TRACKING_TEXT) as TrackingCause[]) {

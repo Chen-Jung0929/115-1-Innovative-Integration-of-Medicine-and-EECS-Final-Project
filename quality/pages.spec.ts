@@ -38,7 +38,7 @@ test('@smoke production HTML, bundles, local WASM and mode switch', async ({ pag
   await page.getByRole('button', { name: '即時鏡頭', exact: true }).click();
   await expect(page.getByRole('button', { name: '開啟鏡頭' })).toBeVisible();
   await page.getByRole('button', { name: '上傳影片', exact: true }).click();
-  await expect(page.getByLabel('MP4 影片')).toBeAttached();
+  await expect(page.getByLabel('影片檔：')).toBeAttached();
 });
 
 test('@smoke synthetic video retries download, renders and exports (mock inference)', async ({ page }) => {
@@ -47,7 +47,7 @@ test('@smoke synthetic video retries download, renders and exports (mock inferen
     route.fulfill({ contentType: 'application/octet-stream', body: 'synthetic-model' }));
   await page.goto('./');
   await mockInference(page);
-  await page.getByLabel('MP4 影片').setInputFiles(video);
+  await page.getByLabel('影片檔：').setInputFiles(video);
   expect(requests).toBe(0);
   await page.getByRole('button', { name: '開始分析', exact: true }).click();
   await expect(page.getByRole('alert')).toHaveText('模型載入失敗，請確認網路後重試');
@@ -89,7 +89,7 @@ test('@smoke fake Chromium camera starts and releases its track (mock inference)
 test('@smoke real SDK loads local WASM and rejects invalid model bytes', async ({ page, baseURL }) => {
   await page.route(official, route => route.fulfill({ body: 'invalid model' }));
   await page.goto('./');
-  await page.getByLabel('MP4 影片').setInputFiles(video);
+  await page.getByLabel('影片檔：').setInputFiles(video);
   const wasm = page.waitForResponse(r =>
     r.url().startsWith(new URL('mediapipe/wasm/', baseURL).href) && r.url().endsWith('.wasm') && r.ok());
   await page.getByRole('button', { name: '開始分析', exact: true }).click();
@@ -100,7 +100,7 @@ test('@smoke real SDK loads local WASM and rejects invalid model bytes', async (
 
 test('@official real Google Lite download and MediaPipe inference on synthetic MP4', async ({ page }) => {
   await page.goto('./');
-  await page.getByLabel('MP4 影片').setInputFiles(video);
+  await page.getByLabel('影片檔：').setInputFiles(video);
   const downloaded = page.waitForResponse(r => r.url() === official && r.ok());
   await page.getByRole('button', { name: '開始分析', exact: true }).click();
   await downloaded;

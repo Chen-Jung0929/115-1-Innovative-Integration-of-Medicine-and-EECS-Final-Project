@@ -6,7 +6,7 @@ import {TRACKING_POLICY as POLICY} from './policy';
 import {kneeObservation} from '../biomechanics/jointQuality';
 import {kneeAngle} from '../biomechanics/knee';
 import {createJointQuality} from './jointQuality';
-export const IDENTITY_POLICY='controlled-single-bounded-recovery-v7-still-restart';
+export const IDENTITY_POLICY='controlled-single-bounded-recovery-v8-steady-restart';
 /**
  * restart-after-still-standing-v1 (ADR-088, controlled single-person mode, uploaded video only: the live
  * camera already ends the segment on a lock and starts a new one with its ready gate). After an automatic
@@ -19,6 +19,32 @@ export const IDENTITY_POLICY='controlled-single-bounded-recovery-v7-still-restar
  * Locks requested by the user or caused by invalid time never restart. Engineering values.
  */
 export const RESTART_POLICY={version:'restart-after-still-standing-v1',restartMs:500,minKneeAngleDeg:160,minHipAboveAnkleShank:1.7,maxCenterMoveTorso:.15,maxStepGapMs:300} as const;
+/**
+ * restart-after-steady-single-person-v1 (ADR-099, same scope as ADR-088: controlled single-person mode,
+ * uploaded video only). Users reported that after one jump the whole rest of a video stayed "not found":
+ * a person who keeps squatting never stands still 0.5 s with BOTH knees visible (the far knee is hidden in a
+ * side view), so ADR-088 never fired (dataset subject_001 good side: locked at 0.8 s, 2% of 30 s usable).
+ * After an automatic lock, a new segment also starts when exactly one person has been followed smoothly
+ * for steadyMs (1 s): see smoothStep; in addition the torso centre stays within 0.75 torso length sideways of
+ * where the window started (a passer-by walking across does not restart). The torso must be reliable and at
+ * least one knee measurable. Like
+ * ADR-088 it does not claim it is the same person: baselines are rebuilt. Engineering values.
+ *
+ * smooth-single-step-v1 (ADR-099): the general continuity screen allows 3 torso lengths per second, but a
+ * real squat at 10 Hz moves the torso centre up to 0.36 torso length per step (99th percentile, dataset
+ * squat videos), so a fast squat looked like a jump, then the short recovery window ran out and locked.
+ * In controlled single-person mode one candidate whose torso centre moved ≤ 5 torso lengths per second
+ * (0.5 per 10 Hz step) and never more than 0.6 torso length in one step, whose torso size changed ≤ 1.5×, within 300 ms, and whose feet did not teleport, is continuous.
+ */
+export const STEADY_RESTART_POLICY={version:'restart-after-steady-single-person-v1',steadyMs:1000,maxCenterTorsoPerSecond:5,maxStepCenterTorso:.6,maxNetSideShiftTorso:.75,maxStepScale:1.5,maxStepGapMs:300} as const;
+/** One smooth step of a single candidate (smooth-single-step-v1, ADR-099). */
+function smoothStep(body:Torso,points:readonly Landmark[],time:number,last:{body:Torso;points:readonly Landmark[];time:number},width:number,height:number):boolean {
+ const sp=STEADY_RESTART_POLICY,dt=time-last.time;
+ return dt>0&&dt<=sp.maxStepGapMs
+  &&Math.hypot(body.x-last.body.x,body.y-last.body.y)/Math.max(body.length,last.body.length)<=Math.min(sp.maxCenterTorsoPerSecond*dt/1000,sp.maxStepCenterTorso)
+  &&Math.max(body.length/last.body.length,last.body.length/body.length)<=sp.maxStepScale
+  &&feetStep(points,last.points,width,height)!=='teleport';
+}
 const NO_RESTART=new Set(['invalid-source-time','non-increasing-source-time']);
 export const SINGLE_RECOVERY_POLICY={version:'controlled-single-bounded-v1',windowMs:1600,confirmations:3,maxStepGapMs:300,maxAnchorDistanceTorso:2,maxAnchorScale:1.5} as const;
 /**
@@ -30,7 +56,7 @@ export const SINGLE_RECOVERY_POLICY={version:'controlled-single-bounded-v1',wind
  * that evidence holds for sustainMs. Different feet position or shank length (a swap) never qualifies.
  * Engineering values, not calibrated identity probabilities.
  */
-export const PLANTED_FEET_POLICY={version:'planted-feet-continuity-v2',maxStepXShank:.6,maxStepYShank:.6,maxHeelSpacingChangeShank:.4,maxFootMoveXShank:.25,maxFootMoveYShank:.6,maxShankScale:1.4,maxHipWidthScale:1.25,minHipWidthShank:.3,maxHipShiftShank:1,sustainMs:500,maxStepGapMs:300} as const;
+export const PLANTED_FEET_POLICY={version:'planted-feet-continuity-v3',teleportMinVisibility:.7,maxStepXShank:.6,maxStepYShank:.6,maxHeelSpacingChangeShank:.4,maxFootMoveXShank:.25,maxFootMoveYShank:.6,maxShankScale:1.4,maxHipWidthScale:1.25,minHipWidthShank:.3,maxHipShiftShank:1,sustainMs:500,maxStepGapMs:300} as const;
 const FEET=[27,28,29,30] as const;
 /** Mean knee–ankle length (px) over legs whose knee and ankle are confident, or null. */
 export function shankLength(points:readonly Landmark[],width:number,height:number):number|null {
@@ -60,23 +86,32 @@ export function plantedContinuity(points:readonly Landmark[],reference:readonly 
 }
 const RECOVERABLE_LOCKS=new Set(['feet-teleport','controlled-recovery-window-exceeded','controlled-recovery-outside-anchor','identity-observation-gap-exceeded','recovery-not-identity-consistent','temporal-torso-jump-or-scale-change']);
 /**
- * Feet continuity between two observations (planted-feet-continuity-v2, ADR-086): 'teleport' when the
+ * Feet continuity between two observations (planted-feet-continuity-v3, ADR-086/099): 'teleport' when the
  * feet are reliable in both but jumped more than 0.6 shank in one step (either left/right labelling), or the horizontal heel spacing (stance width)
  * changed by more than 0.4 shank (a different body); 'unknown' when the feet are not reliable. The 2D shank length is
  * not used here: it shortens by up to 1.33× at the bottom of a frontal squat (lab_front 8.4 s).
  */
 export function feetStep(points:readonly Landmark[],reference:readonly Landmark[],width:number,height:number):'continuous'|'teleport'|'unknown' {
  const p=PLANTED_FEET_POLICY;
- const ok=(q:readonly Landmark[])=>FEET.every(i=>confident(q[i])&&q[i]!.x>=0&&q[i]!.x<=1&&q[i]!.y>=0&&q[i]!.y<=1);
+ const inside=(q:Landmark|undefined)=>confident(q)&&q.x>=0&&q.x<=1&&q.y>=0&&q.y<=1;
  const shank=shankLength(reference,width,height),now=shankLength(points,width,height);
- if(!ok(points)||!ok(reference)||shank===null||now===null)return 'unknown';
+ if(shank===null||now===null)return 'unknown';
+ // ADR-099: in a side view the far foot sits at visibility 0.4–0.6 and jumps by up to ~1 shank between
+ // frames (dataset subject_001 good side 0.6 s), which read as a teleport; even the near foot is swapped with
+ // the far one at the bottom of a squat (subject_003 good side 7.2 s), so one foot alone is no evidence.
+ // A foot is "sure" when its ankle AND heel are ≥ teleportMinVisibility. Exactly one sure foot in BOTH frames
+ // (the side-view signature) gives 'unknown', as a hidden far foot always did. Otherwise (e.g. a front view
+ // cut to a person with one dim foot, or a dim frontal view) all four confident points keep the full check.
+ const sure=(q:Landmark|undefined)=>inside(q)&&q!.visibility>=p.teleportMinVisibility&&(q!.presence??1)>=p.teleportMinVisibility;
+ const sureFeet=(q:readonly Landmark[])=>([[27,29],[28,30]] as const).filter(f=>f.every(i=>sure(q[i]))).length;
+ const sideView=sureFeet(points)===1&&sureFeet(reference)===1;
+ const allConfident=FEET.every(i=>inside(points[i])&&inside(reference[i]));
+ if(sideView||!allConfident)return 'unknown';
  // MediaPipe sometimes swaps the left/right labels for one frame: accept either assignment.
  const MIRROR:Record<number,number>={27:28,28:27,29:30,30:29};
- const within=(map:(i:number)=>number)=>FEET.every(i=>{
-  const q=points[map(i)]!,r=reference[i]!;
-  return Math.abs(q.x-r.x)*width<=p.maxStepXShank*shank&&Math.abs(q.y-r.y)*height<=p.maxStepYShank*shank;
- });
- if(!within(i=>i)&&!within(i=>MIRROR[i]!))return 'teleport';
+ const near=(q:Landmark,r:Landmark)=>Math.abs(q.x-r.x)*width<=p.maxStepXShank*shank&&Math.abs(q.y-r.y)*height<=p.maxStepYShank*shank;
+ const within=(mirror:boolean)=>FEET.every(i=>near(points[i]!,reference[mirror?MIRROR[i]!:i]!));
+ if(!within(false)&&!within(true))return 'teleport';
  // Horizontal heel spacing (stance width): vertical heel jitter must not count.
  const spacing=(q:readonly Landmark[])=>Math.abs(q[29]!.x-q[30]!.x)*width;
  const a=spacing(points),b=spacing(reference);
@@ -99,6 +134,7 @@ export function createFullFrameIdentity(width:number,height:number,options:{crop
  let lastGood:{points:readonly Landmark[];time:number}|null=null,planted:{since:number;last:number}|null=null;
  let manualRecoverable=false,neverRecover=false,noRestart=false;
  let restart:{since:number;last:number;body:Torso;points:readonly Landmark[]}|null=null;
+ let steady:{since:number;start:Torso;time:number;body:Torso;points:readonly Landmark[]}|null=null;
  // Feet chain since the last accepted observation: broken by a teleport (hard cut / swap), kept across frames without reliable feet.
  let feetRef:readonly Landmark[]|null=null,chainBroken=false,teleportPending=false;
  const controlled=options.controlledSingle===true&&!options.crop;
@@ -115,6 +151,12 @@ export function createFullFrameIdentity(width:number,height:number,options:{crop
    &&time-previous.time<=POLICY.recoveryGapMs&&plantedContinuity(points,lastGood.points,width,height)){
    decision={selectedIndex:decision.proposedIndex,proposedIndex:decision.proposedIndex,reason:'planted-feet-continuity'};
    reasons.push('planted-feet-continuity');
+  }
+  // A fast squat is not a jump: one smooth step of the single candidate keeps continuity (ADR-099).
+  if(controlled&&previous&&lastGood&&!transient&&state!=='MANUAL_REVIEW_REQUIRED'&&candidates.length===1&&body&&decision.reason==='target-not-continuous'
+   &&smoothStep(body,points,time,{body:previous.body,points:lastGood.points,time:previous.time},width,height)){
+   decision={selectedIndex:decision.proposedIndex,proposedIndex:decision.proposedIndex,reason:'smooth-single-step'};
+   reasons.push('smooth-single-step');
   }
   let accepted=decision.selectedIndex!==null&&body!==null;
   let continuity:TrackingQuality['continuity']=!previous?'initial':accepted?'continuous':'discontinuous';
@@ -187,7 +229,9 @@ export function createFullFrameIdentity(width:number,height:number,options:{crop
    const b=body!;
    const close=Math.hypot(b.x-previous.body.x,b.y-previous.body.y)/Math.max(b.length,previous.body.length)<=POLICY.recoveryCenterTorso;
    const stable=Math.max(b.length/previous.body.length,previous.body.length/b.length)<=POLICY.recoveryScaleChange;
-   if(!close||!stable)lock('recovery-not-identity-consistent');
+   // A squat moves fast: one smooth step from the last accepted observation is consistent (ADR-099).
+   const smooth=controlled&&!!lastGood&&smoothStep(b,points,time,{body:previous.body,points:lastGood.points,time:previous.time},width,height);
+   if((!close||!stable)&&!smooth)lock('recovery-not-identity-consistent');
    else if(++returns<POLICY.recoveryConfirmations){state='UNCERTAIN';accepted=false;reasons.push('identity-recovery-confirmation-pending');}
   }
   }
@@ -204,6 +248,19 @@ export function createFullFrameIdentity(width:number,height:number,options:{crop
     reasons.length=0;reasons.push('planted-feet-recovery-confirmed');
    }else reasons.push('planted-feet-recovery-pending');
   }else if(!accepted)planted=null;
+  // New segment after an automatic lock: one person followed smoothly for steadyMs (ADR-099).
+  if(controlled&&options.restartAfterLock===true&&!accepted&&state==='MANUAL_REVIEW_REQUIRED'&&!noRestart&&candidates.length===1&&body&&qc.accepted
+   &&(['left','right'] as const).some(side=>kneeObservation(points,side,width,height).reasons.length===0)){
+   const sp=STEADY_RESTART_POLICY,last=steady;
+   // Squats move mostly up and down; someone walking across the picture drifts sideways (passer-by guard).
+   const smooth=last!==null&&smoothStep(body,points,time,last,width,height)&&Math.abs(body.x-last.start.x)<=sp.maxNetSideShiftTorso*Math.max(body.length,last.start.length);
+   steady={since:smooth?last!.since:time,start:smooth?last!.start:body,time,body,points};
+   if(time-steady.since>=sp.steadyMs){
+    accepted=true;state='TRACKING';manualReason='';manualRecoverable=false;neverRecover=false;transient=null;planted=null;recovery=undefined;returns=0;restart=null;steady=null;
+    decision={...decision,selectedIndex:decision.proposedIndex};
+    reasons.length=0;reasons.push('restart-after-steady-single-person');
+   }else reasons.push('restart-pending-steady-single-person');
+  }else if(!accepted)steady=null;
   // New segment after an automatic lock: one person, standing upright and still for restartMs (ADR-088).
   if(controlled&&options.restartAfterLock===true&&!accepted&&state==='MANUAL_REVIEW_REQUIRED'&&!noRestart&&candidates.length===1&&body&&qc.accepted){
    const rp=RESTART_POLICY;
@@ -224,7 +281,7 @@ export function createFullFrameIdentity(width:number,height:number,options:{crop
    }else if(restart)reasons.push('restart-pending-still-standing');
   }else if(!accepted)restart=null;
   if(state==='MANUAL_REVIEW_REQUIRED')reasons.push(manualReason,'manual-reselection-required');
-  if(accepted){previous={body:body!,time};lastGood={points,time};feetRef=points;chainBroken=false;state='TRACKING';returns=0;planted=null;}
+  if(accepted){steady=null;previous={body:body!,time};lastGood={points,time};feetRef=points;chainBroken=false;state='TRACKING';returns=0;planted=null;}
   if(reasons.includes('temporal-torso-jump-or-scale-change'))continuity='discontinuous';
   const jointQuality=joints.observe(points,time,accepted,options.crop?reference:undefined);
   const tracking:TrackingQuality={...(recovery?{recovery}:{}),state,accepted,identity:accepted?'consistent-unverified':!candidates.length?'target-lost':'identity-uncertain',landmarkConfidence:qc.landmarkConfidence,plausibility:qc.plausibility,continuity,reasons:[...new Set(reasons)],joints:jointQuality};

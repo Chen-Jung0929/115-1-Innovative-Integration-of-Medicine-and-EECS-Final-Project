@@ -1,9 +1,32 @@
 import type { FrameRead } from '../domain/video';
 import { MAX_DURATION_SECONDS } from '../domain/analysis';
+/** Upload formats (ADR-099): MP4 / M4V, iPhone MOV and WebM; decoding still depends on the browser. */
+export const VIDEO_ACCEPT='.mp4,.m4v,.mov,.webm,video/mp4,video/x-m4v,video/quicktime,video/webm';
+const VIDEO_EXTENSION=/\.(mp4|m4v|mov|webm)$/i;
+const VIDEO_TYPES=new Set(['video/mp4','video/x-m4v','video/quicktime','video/webm','application/octet-stream']);
+/** Shown whenever the browser cannot decode the picture (often iPhone HEVC "High Efficiency" video on Windows). */
+export const DECODE_HELP='這台裝置的瀏覽器播不了這支影片的畫面（可能是編碼不支援，或檔案損壞）。iPhone 影片請到「設定 > 相機 > 格式」改成「最相容」後重錄，或用轉檔 App 轉成一般 MP4（H.264）再上傳。';
 export function checkFile(file: File): void {
-  if (!/\.mp4$/i.test(file.name) || (file.type && file.type !== 'video/mp4')) throw new Error('僅支援 MP4 影片；請選擇 .mp4 檔案。');
+  const type=file.type.split(';')[0]!.trim().toLowerCase();
+  if (/\.(heic|heif|jpe?g|png)$/i.test(file.name)) throw new Error('這是照片，不是影片；動作分析需要影片（MP4、MOV、M4V 或 WebM）。');
+  if (!VIDEO_EXTENSION.test(file.name) || (type && !VIDEO_TYPES.has(type))) throw new Error('目前支援 MP4、MOV、M4V、WebM 影片；請選擇這些格式的檔案。');
   if (file.size === 0) throw new Error('影片檔案是空的。');
   if (file.size > 500 * 1024 * 1024) throw new Error('V0 最多支援 500 MB，請先在本機裁短影片。');
+}
+/**
+ * MediaRecorder files (WebM, some MP4) report an unknown duration until the end has been reached once;
+ * jumping far ahead makes the browser compute it, then the decoder returns to the start.
+ */
+export async function resolveDuration(video: HTMLVideoElement, signal: AbortSignal, timeoutMs = 3000): Promise<void> {
+  if (Number.isFinite(video.duration)) return;
+  const wait=(event:string,ms:number,until:()=>boolean)=>new Promise<void>(resolve=>{
+    const check=()=>{if(until()||signal.aborted)done();};
+    const done=()=>{clearTimeout(timer);video.removeEventListener(event,check);signal.removeEventListener('abort',done);resolve();};
+    const timer=setTimeout(done,ms);video.addEventListener(event,check);signal.addEventListener('abort',done,{once:true});
+  });
+  // Some engines fire durationchange before the real value: keep waiting until the duration is finite.
+  const found=wait('durationchange',timeoutMs,()=>Number.isFinite(video.duration));video.currentTime=1e101;await found;signal.throwIfAborted();
+  const back=wait('seeked',timeoutMs,()=>Math.abs(video.currentTime)<1e-6);video.currentTime=0;await back;signal.throwIfAborted();
 }
 export async function loadVideo(video: HTMLVideoElement, url: string, signal: AbortSignal): Promise<void> {
   frames.delete(video);
@@ -14,13 +37,16 @@ export async function loadVideo(video: HTMLVideoElement, url: string, signal: Ab
       if (error) reject(error); else resolve();
     };
     const ready = () => finish();
-    const fail = () => finish(new Error('無法解碼影片：檔案可能損壞，或此瀏覽器不支援其編碼。建議使用 H.264 MP4。'));
+    const fail = () => finish(new Error(`無法解碼影片：${DECODE_HELP}`));
     const abort = () => finish(new DOMException('已取消', 'AbortError'));
     video.addEventListener('loadeddata', ready, { once: true }); video.addEventListener('error', fail, { once: true }); signal.addEventListener('abort', abort, { once: true });
     if (signal.aborted) { abort(); return; }
     video.preload = 'auto'; video.muted = true; video.src = url; video.load();
   });
-  if (!Number.isFinite(video.duration) || video.duration <= 0 || !video.videoWidth || !video.videoHeight) throw new Error('無法取得有效影片長度或尺寸。');
+  // An undecodable video track (e.g. HEVC without hardware support) may still load the audio: width 0.
+  if (!video.videoWidth || !video.videoHeight) throw new Error(DECODE_HELP);
+  await resolveDuration(video, signal);
+  if (!Number.isFinite(video.duration) || video.duration <= 0) throw new Error('無法取得有效影片長度。');
   if (video.duration > MAX_DURATION_SECONDS) throw new Error('V0 最多分析 10 分鐘，請先在本機裁短影片。');
   if (!video.requestVideoFrameCallback) throw new Error('此瀏覽器不支援精確的影格回呼，請使用新版 Chrome 或 Edge。');
 }

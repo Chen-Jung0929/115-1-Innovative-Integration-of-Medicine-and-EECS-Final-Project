@@ -4,7 +4,7 @@ import { App } from './App';
 describe('dataset demo screen', () => {
   it('offers MP4 input but disables analysis until a video is decoded', () => {
     const html=renderToStaticMarkup(<App />);
-    expect(html).toContain('accept=".mp4,video/mp4"'); expect(html).toContain('disabled=""');
+    expect(html).toContain('accept=".mp4,.m4v,.mov,.webm,video/mp4,video/x-m4v,video/quicktime,video/webm"'); expect(html).toContain('disabled=""');
     expect(html).toContain('目前沒有分析結果');
   });
   it('labels provisional geometry and research limitations', () => {
