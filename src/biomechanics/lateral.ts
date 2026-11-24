@@ -82,3 +82,53 @@ export function measureLateral(landmarks: readonly Landmark[], width: number, he
     tibiaLean: A.y - K.y <= 0 ? bad('degenerate-geometry') : ok(Math.atan2((K.x - A.x) * forward, A.y - K.y) * DEG),
   };
 }
+
+/**
+ * Side-view baseline (handout p.5 lateral landmarks: lateral malleolus; p.12 Fig 9.4 plumb line).
+ * MediaPipe's ankle point (27/28) stands in for the lateral malleolus. Distances are in shank
+ * lengths (knee→ankle) because a side view has no hip width. Provisional, PT review pending.
+ */
+export const SIDE_PLUMB_POLICY = {
+  version: 'side-ankle-plumb-v1',
+  baselineDefinition: 'near-ankle-image-vertical-v1',
+  offsetDefinition: 'offset-from-side-baseline-shank-length-v1',
+} as const;
+
+/** Near-side ear, shoulder, hip, knee, ankle, heel, toe indices. */
+export const SIDE_PLUMB_INDICES = {
+  left: { ear: 7, shoulder: 11, hip: 23, knee: 25, ankle: 27, heel: 29, toe: 31 },
+  right: { ear: 8, shoulder: 12, hip: 24, knee: 26, ankle: 28, heel: 30, toe: 32 },
+} as const;
+
+/** Near-side ankle (≈ lateral malleolus), shank length and forward direction (+1 = toes toward +x), or why not. */
+export function sideAnchor(landmarks: readonly Landmark[], width: number, height: number, side: 'left' | 'right'): { ankle: Point; shank: number; forward: number } | InvalidReason {
+  const i = SIDE_PLUMB_INDICES[side];
+  const p = sourcePoints(landmarks, [i.knee, i.ankle, i.heel, i.toe], width, height);
+  if (typeof p === 'string') return p;
+  const [K, A, E, T] = p as [Point, Point, Point, Point];
+  const shank = Math.hypot(K.x - A.x, K.y - A.y);
+  const forward = Math.sign(T.x - E.x);
+  if (!(shank > 1e-6) || forward === 0) return 'degenerate-geometry';
+  return { ankle: A, shank, forward };
+}
+
+export interface SidePlumb {
+  /** Horizontal distance from the side baseline in shank lengths; + = in front of the line (toward the toes). */
+  ear: ScalarValue;
+  shoulder: ScalarValue;
+  hip: ScalarValue;
+}
+
+/** Ungated ear/shoulder/hip offsets from the locked side baseline (`baselineX`, source px). */
+export function measureSidePlumb(landmarks: readonly Landmark[], width: number, height: number, side: 'left' | 'right', baselineX: number | null): SidePlumb {
+  const a = sideAnchor(landmarks, width, height, side);
+  if (typeof a === 'string') { const no = bad(a); return { ear: no, shoulder: no, hip: no }; }
+  if (baselineX === null || !Number.isFinite(baselineX)) { const no = bad('baseline-pending'); return { ear: no, shoulder: no, hip: no }; }
+  const i = SIDE_PLUMB_INDICES[side];
+  const at = (idx: number): ScalarValue => {
+    const q = sourcePoints(landmarks, [idx], width, height);
+    return typeof q === 'string' ? bad(q) : ok((q[0]!.x - baselineX) * a.forward / a.shank);
+  };
+  return { ear: at(i.ear), shoulder: at(i.shoulder), hip: at(i.hip) };
+}
+

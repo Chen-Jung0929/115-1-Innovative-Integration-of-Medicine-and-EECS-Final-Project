@@ -1,5 +1,5 @@
 import type { FrontalMetrics } from '../biomechanics/frontal';
-import type { LateralMetrics } from '../biomechanics/lateral';
+import type { LateralMetrics, SidePlumb } from '../biomechanics/lateral';
 
 /**
  * Plain-language prompts for the frontal checks in the Movement analysis handout. Thresholds are
@@ -24,10 +24,12 @@ export const CUE_POLICY = {
   kneeForwardShank: 0.6,
   /** Side view trunk forward lean vs vertical, degrees. */
   trunkForwardDeg: 45,
+  /** Side view: shoulder in front of the ankle (lateral malleolus) baseline, in shank lengths, while squatting. */
+  sideShoulderForwardShank: 0.4,
 } as const;
 
-export type CueId = 'trunk' | 'pelvis' | 'knee-left' | 'knee-right' | 'head' | 'shoulder' | 'shift' | 'knee-forward' | 'trunk-forward';
-export type BodyPart = 'head' | 'shoulder' | 'trunk' | 'pelvis' | 'knee-left' | 'knee-right' | 'side-knee' | 'side-trunk';
+export type CueId = 'trunk' | 'pelvis' | 'knee-left' | 'knee-right' | 'head' | 'shoulder' | 'shift' | 'knee-forward' | 'trunk-forward' | 'side-forward';
+export type BodyPart = 'head' | 'shoulder' | 'trunk' | 'pelvis' | 'knee-left' | 'knee-right' | 'side-knee' | 'side-trunk' | 'side-plumb';
 export interface Cue {
   id: CueId;
   /** Handout page the check comes from. */
@@ -71,13 +73,27 @@ export function instantCues(m: FrontalMetrics, kneeFlexionDeg: { left: number | 
   return cues;
 }
 
-/** Side-view prompts (handout p.12). Knee check only once the near knee is clearly bent. */
-export function lateralCues(m: LateralMetrics, nearKneeFlexionDeg: number | null, p: typeof CUE_POLICY = CUE_POLICY): Cue[] {
+/** Side-view prompts (handout p.12). Knee and baseline checks only once the near knee is clearly bent. */
+export function lateralCues(m: LateralMetrics, nearKneeFlexionDeg: number | null, plumb: SidePlumb | null = null, p: typeof CUE_POLICY = CUE_POLICY): Cue[] {
   const cues: Cue[] = [];
+  const bent = nearKneeFlexionDeg !== null && nearKneeFlexionDeg >= p.kneeMinFlexionDeg;
   if (m.trunkLean.valid && m.trunkLean.value > p.trunkForwardDeg) cues.push({ id: 'trunk-forward', page: 12, text: '上身前傾太多', parts: ['side-trunk'] });
+  // Shoulder far in front of the ankle baseline = weight shifted forward (merged with the lean for display: mergeSideCues).
+  if (bent && plumb && plumb.shoulder.valid && plumb.shoulder.value > p.sideShoulderForwardShank) cues.push({ id: 'side-forward', page: 12, text: '重心偏前（肩膀超過外踝基準線太多）', parts: ['side-plumb'] });
   if (nearKneeFlexionDeg !== null && nearKneeFlexionDeg >= p.kneeMinFlexionDeg && m.kneeForward.valid && m.kneeForward.value > p.kneeForwardShank)
     cues.push({ id: 'knee-forward', page: 12, text: '膝蓋超過腳尖太多', parts: ['side-knee'] });
   return cues;
+}
+
+/**
+ * Leaning too far forward is the usual cause of the weight shifting forward, so when both debounced side
+ * prompts are shown they become one (same idea as the frontal cause merging). Applied AFTER debouncing so
+ * each condition keeps its own hold timer.
+ */
+export function mergeSideCues(cues: readonly Cue[]): Cue[] {
+  const lean = cues.find(c => c.id === 'trunk-forward'), fwd = cues.find(c => c.id === 'side-forward');
+  if (!lean || !fwd) return [...cues];
+  return cues.filter(c => c !== fwd).map(c => c === lean ? { ...lean, text: '上身前傾太多（肩膀超過基準線，重心偏前）', parts: ['side-trunk', 'side-plumb'] } : c);
 }
 
 /**
