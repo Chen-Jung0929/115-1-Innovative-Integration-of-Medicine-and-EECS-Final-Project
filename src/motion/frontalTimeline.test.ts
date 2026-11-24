@@ -137,6 +137,49 @@ describe('side view in the timeline', () => {
     expect(t[8]!.sidePlumb!.shoulder.value).toBeCloseTo(10 / 15, 8);
     expect(t[7]!.cues.map(c => c.text)).toEqual(['重心偏前（肩膀超過外踝基準線太多）']);
   });
+  const bentK = { valid: true as const, rawAngleDeg: 110, invalidReasons: [] as [] };
+  const halfK = { valid: true as const, rawAngleDeg: 155, invalidReasons: [] as [] };
+  /** Side pose with the whole near/far leg moved sideways by dx (normalized), i.e. the foot moved. */
+  const moved = (dx: number, lean = 0) => sidePose(lean).map((q, i) => i >= 25 && i <= 32 ? { ...q, x: q.x + dx } : q);
+  it('side baseline: no whole-video line when no single stance holds ≥ 60% of the upright samples', () => {
+    // Alternating stand / squat (no live 1 s lock); the stands are split between two foot positions 0.67 shank apart.
+    const t = frontalTimeline([0, 1, 2, 3, 4, 5, 6, 7].map(i => i % 2 ? at(i, moved(i < 4 ? 0 : .1)) : at(i, sidePose(), { left: bentK, right: bentK })), 100, 100);
+    expect(t.every(f => f.sideBaseline.state === 'searching' && f.sideCalibration === null)).toBe(true);
+  });
+  it('side baseline: whole-video line from ≤ 35° samples when fewer than 3 are ≤ 20°', () => {
+    const t = frontalTimeline([0, 1, 2, 3, 4, 5].map(i => at(i, sidePose(), i % 2 ? { left: halfK, right: halfK } : { left: bentK, right: bentK })), 100, 100);
+    expect(t.every(f => f.sideCalibration === 'whole-video' && f.sideBaseline.x === 50)).toBe(true);
+  });
+  it('side baseline: whole-video line is not used while the ankle is off it by more than 0.08 shank', () => {
+    const t = frontalTimeline([0, 1, 2, 3, 4, 5].map(i => at(i, sidePose(), i % 2 ? {} : { left: bentK, right: bentK })).concat([at(6, moved(.02), { left: bentK, right: bentK })]), 100, 100);
+    expect(t[5]!.sidePlumb!.shoulder.valid).toBe(true);
+    expect(t[6]!.sideCalibration).toBe('whole-video');
+    expect(t[6]!.sidePlumb!.shoulder.invalidReasons).toEqual(['baseline-pending']); // 2 px / 15 px = 0.13 shank
+  });
+  it('side baseline: the foot moving pauses the offsets, relocks at the new place, never falls back to the whole-video line', () => {
+    const t = frontalTimeline([0, 1, 2, 3, 4, 5].map(i => at(i, sidePose())).concat([6, 7, 8, 9, 10, 11, 12, 13, 14].map(i => at(i, moved(.05)))), 100, 100);
+    expect(t[5]!.sideBaseline).toMatchObject({ state: 'locked', x: 50 });
+    expect(t[6]!.sideBaseline.x).toBe(50); // 5 px = 0.33 shank away, waiting out 600 ms
+    expect(t[6]!.sidePlumb!.shoulder.invalidReasons).toEqual(['baseline-pending']);
+    expect(t[9]!.sideBaseline.state).toBe('searching');
+    expect(t[9]!.sideCalibration).toBeNull();
+    expect(t[13]!.sideBaseline.state).toBe('locked');
+    expect(t[13]!.sideBaseline.x).toBeCloseTo(55, 8);
+  });
+  it('side baseline: a possible person change forgets the line and waits for a new standing lock', () => {
+    const locked = { ...makeSample().tracking, accepted: false, state: 'MANUAL_REVIEW_REQUIRED' as const, identity: 'identity-uncertain' as const };
+    const t = frontalTimeline([0, 1, 2, 3, 4].map(i => at(i, sidePose())).concat([at(5, sidePose(), { tracking: locked }), at(6, sidePose())]), 100, 100);
+    expect(t[4]!.sideBaseline.state).toBe('locked');
+    expect(t[6]!.sideBaseline.state).toBe('searching');
+    expect(t[6]!.sideCalibration).toBeNull();
+  });
+  it('side prompts: adding the trunk lean to "weight forward" merges them without the prompt disappearing', () => {
+    const t = frontalTimeline([0, 1, 2, 3, 4, 5].map(i => at(i, sidePose()))
+      .concat([6, 7].map(i => at(i, sidePose(.1), { left: bentK, right: bentK })), [8, 9].map(i => at(i, sidePose(.4), { left: bentK, right: bentK }))), 100, 100);
+    expect(t[7]!.cues.map(c => c.text)).toEqual(['重心偏前（肩膀超過外踝基準線太多）']);
+    expect(t[8]!.cues.map(c => c.text)).toEqual(['重心偏前（肩膀超過外踝基準線太多）']); // lean still debouncing, forward prompt stays
+    expect(t[9]!.cues.map(c => c.text)).toEqual(['上身前傾太多（肩膀超過基準線，重心偏前）']);
+  });
   it('a frontal clip never draws a side baseline', () => {
     const t = frontalTimeline([0, 1, 2, 3, 4, 5].map(i => at(i, pose())), 100, 100);
     expect(t.every(f => f.sideBaseline.state === 'searching' && f.sidePlumb === null && f.sideCalibration === null)).toBe(true);

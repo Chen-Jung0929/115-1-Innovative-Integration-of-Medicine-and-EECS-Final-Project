@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { classifyView, measureLateral, measureSidePlumb, nearSide, sideAnchor, LATERAL_INDICES, type SidePlumb } from './lateral';
 import type { ScalarValue } from '../domain/measurement';
 import { humanPose } from '../test/fixtures';
-import { lateralCues } from '../motion/frontalCues';
+import { lateralCues, mergeSideCues } from '../motion/frontalCues';
 import type { Landmark } from '../domain/analysis';
 const v = (x: number, y: number, visibility = 1): Landmark => ({ x, y, visibility });
 
@@ -90,7 +90,10 @@ describe('side baseline through the ankle (lateral malleolus)', () => {
     expect(lateralCues(upright, 10, plumb(.5))).toEqual([]); // standing: not judged
     expect(lateralCues(upright, 80, plumb(.3))).toEqual([]);
     const p = side(); p[11] = v(.8, .4);
-    expect(lateralCues(measureLateral(p, 100, 100), 80, plumb(.6)).map(c => c.text)).toEqual(['上身前傾太多（肩膀超過基準線，重心偏前）']);
+    const both = lateralCues(measureLateral(p, 100, 100), 80, plumb(.6));
+    expect(both.map(c => c.id)).toEqual(['trunk-forward', 'side-forward']); // separate ids so each keeps its own hold timer
+    expect(mergeSideCues(both).map(c => c.text)).toEqual(['上身前傾太多（肩膀超過基準線，重心偏前）']);
+    expect(mergeSideCues(both)[0]!.parts).toEqual(['side-trunk', 'side-plumb']);
   });
 });
 

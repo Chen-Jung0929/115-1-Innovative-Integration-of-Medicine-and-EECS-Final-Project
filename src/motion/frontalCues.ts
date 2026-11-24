@@ -77,15 +77,23 @@ export function instantCues(m: FrontalMetrics, kneeFlexionDeg: { left: number | 
 export function lateralCues(m: LateralMetrics, nearKneeFlexionDeg: number | null, plumb: SidePlumb | null = null, p: typeof CUE_POLICY = CUE_POLICY): Cue[] {
   const cues: Cue[] = [];
   const bent = nearKneeFlexionDeg !== null && nearKneeFlexionDeg >= p.kneeMinFlexionDeg;
-  // Shoulder far in front of the ankle baseline = weight shifted forward. Leaning too far forward is the
-  // usual cause, so the two become one prompt (same idea as the frontal cause merging).
-  const forward = bent && !!plumb && plumb.shoulder.valid && plumb.shoulder.value > p.sideShoulderForwardShank;
-  const lean = m.trunkLean.valid && m.trunkLean.value > p.trunkForwardDeg;
-  if (lean) cues.push({ id: 'trunk-forward', page: 12, text: forward ? '上身前傾太多（肩膀超過基準線，重心偏前）' : '上身前傾太多', parts: forward ? ['side-trunk', 'side-plumb'] : ['side-trunk'] });
-  else if (forward) cues.push({ id: 'side-forward', page: 12, text: '重心偏前（肩膀超過外踝基準線太多）', parts: ['side-plumb'] });
+  if (m.trunkLean.valid && m.trunkLean.value > p.trunkForwardDeg) cues.push({ id: 'trunk-forward', page: 12, text: '上身前傾太多', parts: ['side-trunk'] });
+  // Shoulder far in front of the ankle baseline = weight shifted forward (merged with the lean for display: mergeSideCues).
+  if (bent && plumb && plumb.shoulder.valid && plumb.shoulder.value > p.sideShoulderForwardShank) cues.push({ id: 'side-forward', page: 12, text: '重心偏前（肩膀超過外踝基準線太多）', parts: ['side-plumb'] });
   if (nearKneeFlexionDeg !== null && nearKneeFlexionDeg >= p.kneeMinFlexionDeg && m.kneeForward.valid && m.kneeForward.value > p.kneeForwardShank)
     cues.push({ id: 'knee-forward', page: 12, text: '膝蓋超過腳尖太多', parts: ['side-knee'] });
   return cues;
+}
+
+/**
+ * Leaning too far forward is the usual cause of the weight shifting forward, so when both debounced side
+ * prompts are shown they become one (same idea as the frontal cause merging). Applied AFTER debouncing so
+ * each condition keeps its own hold timer.
+ */
+export function mergeSideCues(cues: readonly Cue[]): Cue[] {
+  const lean = cues.find(c => c.id === 'trunk-forward'), fwd = cues.find(c => c.id === 'side-forward');
+  if (!lean || !fwd) return [...cues];
+  return cues.filter(c => c !== fwd).map(c => c === lean ? { ...lean, text: '上身前傾太多（肩膀超過基準線，重心偏前）', parts: ['side-trunk', 'side-plumb'] } : c);
 }
 
 /**

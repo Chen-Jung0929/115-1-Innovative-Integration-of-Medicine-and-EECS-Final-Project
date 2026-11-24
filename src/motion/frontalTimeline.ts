@@ -4,7 +4,7 @@ import { FRONTAL_POLICY, frontalFrame, heelMidpoint, measureFrontal, type Fronta
 import { flexionProxy } from '../biomechanics/knee';
 import { gateReason } from '../tracking/gate';
 import { BASELINE_POLICY, createBaselineAnchor, type BaselinePolicy, type BaselineState } from './baseline';
-import { createCueTracker, instantCues, lateralCues, type Cue } from './frontalCues';
+import { createCueTracker, instantCues, lateralCues, mergeSideCues, type Cue } from './frontalCues';
 import { LATERAL_POLICY, classifyView, measureLateral, measureSidePlumb, nearSide, sideAnchor, viewRatio, type LateralMetrics, type SidePlumb, type ViewKind } from '../biomechanics/lateral';
 
 /**
@@ -46,7 +46,8 @@ export const OBLIQUE_SPLIT_RATIO = (LATERAL_POLICY.sideMaxRatio + LATERAL_POLICY
  * Side-view baseline lock (side-ankle-baseline-lock-v1, 2026-11-24 team decision): a vertical line through the
  * near ankle (≈ lateral malleolus) locked like the frontal line — near knee straight (flexion proxy ≤ 20°)
  * and ankle still for about a second; redrawn only when the foot clearly moves. In this policy the
- * "HipWidths" fields are measured in SHANK lengths (≈ 2 hip widths), so the values are halved. Provisional.
+ * "HipWidths" fields are measured in SHANK lengths (≈ 2 hip widths): lock tolerance 0.08 (frontal 0.15),
+ * relock distance 0.2 (frontal 0.35). Provisional.
  */
 export const SIDE_BASELINE_POLICY: BaselinePolicy = { ...BASELINE_POLICY, version: 'side-ankle-baseline-lock-v1', lockToleranceHipWidths: 0.08, relockDistanceHipWidths: 0.2 };
 const SEARCHING: BaselineState = { state: 'searching', x: null, heelY: null, lockedAtMs: null };
@@ -187,13 +188,16 @@ export function frontalTimeline(samples: readonly Sample[], width: number, heigh
       sideBaseline = useOfflineSide ? offlineSide : live;
       sideCalibration = sideBaseline.state !== 'locked' ? null : useOfflineSide ? 'whole-video' : 'standing-lock';
       // Foot away from the line (about to relock, or not where the whole-video line was made): no offsets against it.
-      const footAway = useOfflineSide ? ok !== null && sideBaseline.state === 'locked' && Math.abs(ok.ankle.x - sideBaseline.x) / ok.shank > SIDE_BASELINE_POLICY.relockDistanceHipWidths : sideLock.away();
+      // The whole-video line is a median over the clip, so it only counts while the ankle is within the lock tolerance of it.
+      const footAway = useOfflineSide ? ok !== null && sideBaseline.state === 'locked' && Math.abs(ok.ankle.x - sideBaseline.x) / ok.shank > SIDE_BASELINE_POLICY.lockToleranceHipWidths : sideLock.away();
       const reason = gateReason(s.tracking, [near]) ?? (footAway ? 'baseline-pending' as const : null);
       const m = measureSidePlumb(s.landmarks, width, height, near, sideBaseline.x);
       sidePlumb = reason ? { ear: blocked(reason), shoulder: blocked(reason), hip: blocked(reason) } : m;
     } else sideLock.update({ timeMs: s.sourceTimeMs, heel: null, hipWidthPx: null });
     const instant = !usable ? [] : view === 'frontal' ? instantCues(metrics, knee) : view === 'side' && lateral ? lateralCues(lateral, knee[lateral.side], sidePlumb) : [];
-    const cues = tracker.update(s.sourceTimeMs, instant);
+    // Side prompts are debounced separately, then merged for display, so adding the trunk lean does not restart the hold.
+    const tracked = tracker.update(s.sourceTimeMs, instant);
+    const cues = view === 'side' ? mergeSideCues(tracked) : tracked;
     return { sampleIndex: s.sampleIndex, tracked: usable, baseline, metrics, neutral: useOffline ? offline.neutral : neutral, view, lateral, cues, calibration, clipView, approximate, relocking: liveOnly && baseline.state !== 'locked', sideBaseline, sidePlumb, sideCalibration };
   });
 }
@@ -249,7 +253,7 @@ function offlineSideCalibration(samples: readonly Sample[], width: number, heigh
   const x = median(chosen.map(c => c.x)), shank = median(chosen.map(c => c.shank));
   const near = chosen.filter(c => Math.abs(c.x - x) / shank <= SIDE_BASELINE_POLICY.relockDistanceHipWidths);
   if (near.length / chosen.length < WHOLE_VIDEO_VIEW_MIN_SHARE) return null;
-  return { state: 'locked', x, heelY: median(near.map(c => c.y)), lockedAtMs: near[0]!.s.sourceTimeMs };
+  return { state: 'locked', x, heelY: median(near.map(c => c.y)), lockedAtMs: Math.min(...near.map(c => c.s.sourceTimeMs)) };
 }
 
 /** The camera view most usable samples agree on, or null when no view reaches the required share. */

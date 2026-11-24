@@ -49,7 +49,8 @@ export function FrontalOverlay({ sample, frame, width, height }: { sample: Sampl
       const sb = frame.sideBaseline;
       if (sb.state === 'locked') {
         const bc = hot.has('side-plumb') ? ALERT : BASE;
-        line({ x: sb.x, y: 0 }, { x: sb.x, y: Math.min(height, sb.heelY + unit * 8) }, bc, unit * 1.1);
+        // Prompted: thicker, so the alert reads even though the alert red is close to the line red.
+        line({ x: sb.x, y: 0 }, { x: sb.x, y: Math.min(height, sb.heelY + unit * 8) }, bc, hot.has('side-plumb') ? unit * 2 : unit * 1.1);
         label('基準線（外踝）', { x: sb.x + unit * 3, y: unit * 6 }, bc);
         const ear = pt(SIDE_PLUMB_INDICES[lat.side].ear);
         if (ear) dot(ear, '#fff', unit * 1.6);
@@ -129,7 +130,9 @@ export function FrontalCuePanel({ frame, hasSample, notice }: { frame: FrontalFr
   let hintUsed = false;
   const OK = <p className="cue-ok">✓ 姿勢在基準線附近</p>, SIDE_OK = <p className="cue-ok">✓ 側面：膝蓋與上身在範圍內</p>;
   // Side baseline not drawn yet: say so, the knee and trunk checks still apply without it.
-  const sidePending = frame?.view === 'side' && frame.tracked && frame.sideBaseline.state !== 'locked' ? <p className="cue-muted">側面基準線：等個案站直、不動約 1 秒</p> : null;
+  const sideMoved = frame?.view === 'side' && frame.tracked && frame.sideBaseline.state === 'locked' && !!frame.sidePlumb && !frame.sidePlumb.shoulder.valid && frame.sidePlumb.shoulder.invalidReasons.some(r => r === 'baseline-pending');
+  const sidePending = frame?.view === 'side' && frame.tracked && frame.sideBaseline.state !== 'locked' ? <p className="cue-muted">側面基準線：等個案站直、不動約 1 秒</p>
+    : sideMoved ? <p className="cue-muted">腳不在基準線的位置：等個案重新站直、不動約 1 秒</p> : null;
   if (!hasSample || !frame) body = <p className="cue-muted">此影格沒有分析結果</p>;
   // Why the person is not tracked, held ≥ 0.5 s so it cannot flicker (src/app/plain.ts trackingNotices).
   else if (notice?.blocking) { body = <p className="cue-muted">{notice.text}</p>; hintUsed = true; }
