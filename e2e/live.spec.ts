@@ -61,6 +61,15 @@ test('live camera starts hands-free, ends a segment on a second person, restarts
   await page.getByRole('button', { name: '即時鏡頭', exact: true }).click();
   await expect(page.getByLabel('選擇量測段')).toBeVisible();
   await expect(page.getByRole('button', { name: '下載影片（原始畫面）', exact: true })).toBeVisible();
+  // Leaving the camera page in the middle of a segment saves that segment instead of dropping it.
+  const before = await page.getByLabel('選擇量測段').locator('option').count();
+  await page.getByRole('button', { name: '開啟鏡頭', exact: true }).click();
+  await expect(page.getByText('量測中', { exact: true })).toBeVisible({ timeout: 15000 });
+  await page.waitForTimeout(1500);
+  await page.getByRole('button', { name: '上傳影片', exact: true }).click();
+  await page.getByRole('button', { name: '即時鏡頭', exact: true }).click();
+  await expect(page.getByLabel('選擇量測段').locator('option')).toHaveCount(before + 1);
+  await expect(page.getByRole('button', { name: '下載影片（含骨架）', exact: true })).toBeVisible({ timeout: 10000 });
 });
 
 test('camera downloads only on start and retries a failed model request', async ({ page }) => {

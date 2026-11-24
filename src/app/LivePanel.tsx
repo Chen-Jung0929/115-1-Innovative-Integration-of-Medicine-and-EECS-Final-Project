@@ -60,7 +60,9 @@ const MAX_VIDEO_SEGMENTS = 3;
 const cameraKey = (s: MediaStream | null) => streamDeviceId(s) || (s?.getVideoTracks()[0]?.label ?? '');
 
 /** Saved live results kept by the parent while the camera page is closed (ADR-092). Mutated in place. */
-export type LiveKeep = { results: Session[]; videos: Record<string, SegmentVideos | 'pending'>; released: Set<string> };
+export type LiveKeep = { results: Session[]; videos: Record<string, SegmentVideos | 'pending'>; released: Set<string>;
+  /** Set by the mounted panel: a recording that finishes after a remount still reaches the visible panel. */
+  onVideo?: ((id: string, videos: SegmentVideos) => void) | undefined };
 export function createLiveKeep(): LiveKeep { return { results: [], videos: {}, released: new Set() }; }
 
 export function LivePanel({ keep, model, side, onSide, disabled, onFullAnalysis }: { keep?: LiveKeep; model: File | null; side: Side; onSide: (side: Side) => void; disabled: boolean; onFullAnalysis?: (file: File) => void }) {
@@ -109,7 +111,13 @@ export function LivePanel({ keep, model, side, onSide, disabled, onFullAnalysis 
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
-  useEffect(() => () => { opening.current?.abort(); halt(); }, []);
+  // Leaving the camera page mid-segment saves that segment into the parent's keep instead of dropping it.
+  useEffect(() => () => { opening.current?.abort(); endSegment(true); halt(); }, []);
+  useEffect(() => {
+    if (!keep) return;
+    keep.onVideo = (id, done) => setVideos(previous => id in previous ? { ...previous, [id]: done } : previous);
+    return () => { keep.onVideo = undefined; };
+  }, [keep]);
   // Drop videos of segments that fell out of the kept list, so memory does not grow without bound.
   useEffect(() => {
     // Videos are large (about 9 MB per minute per video), so only the latest few segments keep them.
@@ -136,7 +144,7 @@ export function LivePanel({ keep, model, side, onSide, disabled, onFullAnalysis 
   }
 
   /** Ends the current live segment and keeps it for review / export. Never edits earlier samples. */
-  function endSegment(): void {
+  function endSegment(unmounting = false): void {
     const a = analyzer.current, info = runInfo.current;
     analyzer.current = null;
     setMeasuring(false);
@@ -145,15 +153,19 @@ export function LivePanel({ keep, model, side, onSide, disabled, onFullAnalysis 
     const finish = Promise.all(recorders.map(r => r ? r.stop() : Promise.resolve(null)));
     if (a && info && a.samples.length) {
       const session = liveSession(a.samples, { ...info, startedAt: segmentStart.current }, performance.now(), perf.current?.summary(), pitchRec.current.summary());
-      setResults(previous => [session, ...previous].slice(0, MAX_KEPT_SEGMENTS)); setShown(0);
       const id = session.metadata.sessionId;
+      if (unmounting && keep) { // State setters do nothing after unmount: write straight into the keep.
+        keep.results = [session, ...keep.results].slice(0, MAX_KEPT_SEGMENTS);
+        if (recorders.some(Boolean)) keep.videos = { ...keep.videos, [id]: 'pending' };
+      } else { setResults(previous => [session, ...previous].slice(0, MAX_KEPT_SEGMENTS)); setShown(0); }
       if (recorders.some(Boolean)) {
-        setVideos(previous => ({ ...previous, [id]: 'pending' }));
+        if (!unmounting) setVideos(previous => ({ ...previous, [id]: 'pending' }));
         void finish.then(([raw, skeleton]) => {
           const done = { raw: raw ?? null, skeleton: skeleton ?? null };
           // Also into the parent's keep, in case the camera page was closed before the video finished.
-          if (keep && id in keep.videos) keep.videos = { ...keep.videos, [id]: done };
-          setVideos(previous => id in previous ? { ...previous, [id]: done } : previous);
+          if (!keep) { setVideos(previous => id in previous ? { ...previous, [id]: done } : previous); return; }
+          if (id in keep.videos) keep.videos = { ...keep.videos, [id]: done };
+          keep.onVideo?.(id, done);
         });
       }
     }
