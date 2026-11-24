@@ -13,6 +13,7 @@ export const LATERAL_POLICY = {
   kneeForwardDefinition: 'knee-ahead-of-toe-plumb-shank-length-v1',
   trunkLeanDefinition: 'trunk-forward-lean-near-side-image-vertical-v1',
   tibiaLeanDefinition: 'shank-forward-lean-near-side-image-vertical-v1',
+  hipDepthDefinition: 'hip-below-knee-near-side-shank-length-v1',
   /** Shoulder width / torso length at or above this = frontal (same as FRONTAL_POLICY). */
   frontalMinRatio: 0.55,
   /** At or below this = side view (body turned roughly 70° or more). */
@@ -64,22 +65,26 @@ export interface LateralMetrics {
   trunkLean: ScalarValue;
   /** Near-side ankle→knee vs image vertical, degrees; + = shank inclined forward. */
   tibiaLean: ScalarValue;
+  /** Near-side hip below the knee in the image, in shank lengths; + = hip lower than the knee (full squat depth). ADR-098 */
+  hipDepth: ScalarValue;
 }
 
 /** Ungated side-view metrics for the near side. Forward = heel→toe direction. Assumes a level camera. */
 export function measureLateral(landmarks: readonly Landmark[], width: number, height: number): LateralMetrics {
   const side = nearSide(landmarks);
   const p = sourcePoints(landmarks, LATERAL_INDICES[side], width, height);
-  if (typeof p === 'string') { const no = bad(p); return { side, kneeForward: no, trunkLean: no, tibiaLean: no }; }
+  if (typeof p === 'string') { const no = bad(p); return { side, kneeForward: no, trunkLean: no, tibiaLean: no, hipDepth: no }; }
   const [S, H, K, A, E, T] = p as [Point, Point, Point, Point, Point, Point];
   const forward = Math.sign(T.x - E.x);
-  if (forward === 0) { const no = bad('degenerate-geometry'); return { side, kneeForward: no, trunkLean: no, tibiaLean: no }; }
+  if (forward === 0) { const no = bad('degenerate-geometry'); return { side, kneeForward: no, trunkLean: no, tibiaLean: no, hipDepth: no }; }
   const shank = Math.hypot(K.x - A.x, K.y - A.y);
   return {
     side,
     kneeForward: shank < 1e-6 ? bad('degenerate-geometry') : ok((K.x - T.x) * forward / shank),
     trunkLean: H.y - S.y <= 0 ? bad('degenerate-geometry') : ok(Math.atan2((S.x - H.x) * forward, H.y - S.y) * DEG),
     tibiaLean: A.y - K.y <= 0 ? bad('degenerate-geometry') : ok(Math.atan2((K.x - A.x) * forward, A.y - K.y) * DEG),
+    // Image y grows downward: hip y > knee y means the hip is lower. Does not need the forward direction.
+    hipDepth: shank < 1e-6 ? bad('degenerate-geometry') : ok((H.y - K.y) / shank),
   };
 }
 

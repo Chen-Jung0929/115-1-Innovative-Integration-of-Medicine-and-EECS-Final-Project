@@ -18,6 +18,7 @@ import { createNoticeHold, noticeText, showAngle, showFlexion, trackingCause, TR
 import { createPitchRecorder, pitchFromOrientation, pitchLabel, requestOrientationPermission } from '../motion/devicePitch';
 import { calibrationNote, liftSession } from '../motion/world3d';
 import { Skeleton3D } from '../visualization/Skeleton3D';
+import { LIVE_TIP_IDS, ShootingTips } from './shootingTips';
 
 type Side = 'left' | 'right' | 'both';
 type Analyzer = ReturnType<typeof createLiveAnalyzer>;
@@ -418,9 +419,10 @@ export function LivePanel({ keep, model, side, onSide, disabled, onFullAnalysis 
         <label className="compact">顯示側別<select value={side} onChange={e => onSide(e.target.value as Side)}><option value="both">左右都看</option><option value="left">只看左邊</option><option value="right">只看右邊</option></select></label>
       </div>
       {error === MODEL_LOAD_ERROR && <p>如需選用本機模型，可到「上傳影片」的進階設定。</p>}{error && <p role="alert" className="error">{error}</p>}{notice && <p role="status" className="notice">{notice}</p>}
-      <details className="fold"><summary>怎麼拍最準？</summary>
+      <ShootingTips ids={LIVE_TIP_IDS} />
+      <details className="fold"><summary>鏡頭與錄影說明</summary>
         <p>開啟鏡頭後，畫面會即時畫出骨架與膝角度（每秒約 {LIVE_SAMPLING_HZ} 次）。影像只在這台裝置上處理，不會上傳。開啟「錄下整段影片」時，從開鏡頭到關鏡頭會錄成兩支影片（原始畫面、含骨架與角度）暫存在這台裝置，保留最近 {MAX_RECORDINGS} 次開鏡頭的錄影，單次最長 {MAX_RECORDING_MS / 60000} 分鐘，關閉網頁就會消失。含骨架影片中的骨架每秒更新約 {LIVE_SAMPLING_HZ} 次，動作快時會略落後身體。</p>
-        <p>建議：鏡頭固定不動、從側面拍、頭到腳完整入鏡、畫面中只有一人。開啟後不用再碰裝置：走到畫面中、站穩約 {(READY_POLICY.holdMs / 1000).toFixed(1)} 秒就會自動開始；有人闖入或你離開畫面時，這一段會自動結束保存，回來站好又會開始新的一段。</p>
+        <p>開啟後不用再碰裝置：走到畫面中、站穩約 {(READY_POLICY.holdMs / 1000).toFixed(1)} 秒就會自動開始；有人闖入或你離開畫面時，這一段會自動結束保存，回來站好又會開始新的一段。</p>
         <p>「畫面像照鏡子」只影響顯示，左右膝仍以個案身體為準。</p>
       </details>
     </section>

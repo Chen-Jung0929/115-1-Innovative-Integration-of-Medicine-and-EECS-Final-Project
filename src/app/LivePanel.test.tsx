@@ -9,6 +9,11 @@ describe('live camera panel', () => {
     expect(html).toContain('開啟鏡頭'); expect(html).toContain('不會上傳'); expect(html).toContain('N/A');
     expect(html).not.toContain('<button>停止</button>');
   });
+  it('shows the side-view filming tips only (the live page has no frontal checks)', () => {
+    const html = renderToStaticMarkup(<LivePanel model={null} side="both" onSide={() => {}} disabled={false} />);
+    expect(html).toContain('怎麼拍最準'); expect(html).toContain('正側面'); expect(html).toContain('貼身長褲');
+    expect(html).not.toContain('從正面拍');
+  });
   it('explains states in plain words, including hands-free waiting', () => {
     const locked = makeSample({ tracking: { ...makeSample().tracking, state: 'MANUAL_REVIEW_REQUIRED', accepted: false } });
     expect(liveStatus(locked)).toContain('已結束');

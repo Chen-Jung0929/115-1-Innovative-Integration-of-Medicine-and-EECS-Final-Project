@@ -244,3 +244,9 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .segment-playback video { display: block; width: 100%; max-height: 70vh; background: var(--stage); border-radius: var(--radius-sm); }
 .recordings { display: grid; gap: 8px; margin: 4px 0 16px; }
 .recording-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+
+/* Filming tips (ADR-098) */
+.shooting-tips { margin: 12px 0 0; padding: 10px 14px; border-left: 3px solid var(--hair); }
+.shooting-tips-title { margin: 0 0 4px; font-weight: 600; }
+.shooting-tips ul { margin: 0; padding-left: 1.2em; color: var(--muted); font-size: .92rem; }
+.shooting-tips li + li { margin-top: 2px; }

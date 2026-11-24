@@ -3,9 +3,10 @@ import type { Sample } from '../domain/analysis';
 import { FRONTAL_LANDMARKS as L, frontalFrame, headPoint } from '../biomechanics/frontal';
 import { sourcePoint, type Point } from '../biomechanics/knee';
 import { LATERAL_INDICES, SIDE_PLUMB_INDICES } from '../biomechanics/lateral';
-import type { BodyPart } from '../motion/frontalCues';
+import { deepEnough, type BodyPart } from '../motion/frontalCues';
 import { OBLIQUE_MIN_SHOULDER_RATIO, type FrontalFrame } from '../motion/frontalTimeline';
 import type { TrackingNotice } from '../app/plain';
+import { OBLIQUE_TIP } from '../app/shootingTips';
 
 const BASE = '#ff5a36', LINE = '#ffd166', ALERT = '#ff2d55', TRUNK = '#5ab0ff', TOE = '#7cf0c0';
 
@@ -133,26 +134,33 @@ export function FrontalCuePanel({ frame, hasSample, notice }: { frame: FrontalFr
   const sideMoved = frame?.view === 'side' && frame.tracked && frame.sideBaseline.state === 'locked' && !!frame.sidePlumb && !frame.sidePlumb.shoulder.valid && frame.sidePlumb.shoulder.invalidReasons.some(r => r === 'baseline-pending');
   const sidePending = frame?.view === 'side' && frame.tracked && frame.sideBaseline.state !== 'locked' ? <p className="cue-muted">側面基準線：等個案站直、不動約 1 秒</p>
     : sideMoved ? <p className="cue-muted">腳不在基準線的位置：等個案重新站直、不動約 1 秒</p> : null;
+  // Manual check type (ADR-098): say so, and that it is reference only when the picture does not look like that view.
+  const viewName = frame?.view === 'side' ? '側面' : '正面';
+  const manualLine = frame?.manual ? <p className="cue-muted">{`已手動指定用${viewName}檢查`}{frame.approximate && <span className="cue-sub">畫面看起來不是{viewName}，僅供參考</span>}</p> : null;
+  const frontalImpossible = frame?.manual && frame.view === 'frontal' && !frame.metrics.trunkSide.valid && frame.metrics.trunkSide.invalidReasons.some(r => r === 'unsupported-view' || r === 'degenerate-geometry');
   if (!hasSample || !frame) body = <p className="cue-muted">此影格沒有分析結果</p>;
   // Why the person is not tracked, held ≥ 0.5 s so it cannot flicker (src/app/plain.ts trackingNotices).
   else if (notice?.blocking) { body = <p className="cue-muted">{notice.text}</p>; hintUsed = true; }
   else if (!frame.tracked) body = <p className="cue-muted">這一格看不清楚個案，暫不判斷</p>;
-  else if (frame.view === 'oblique') body = <p className="cue-muted">{frame.clipView === 'oblique' ? '斜角拍攝：已關閉斜角判斷' : '身體轉得太斜，已關閉斜角判斷'}</p>;
-  else if (frame.view === 'side' && frame.approximate) body = <><p className="cue-muted">斜角拍攝，用側面檢查，僅供參考</p>{sidePending}{frame.cues.length ? cueList(frame.cues) : <p className="cue-ok">✓ 膝蓋與上身在範圍內</p>}</>;
-  else if (frame.view === 'side' && sidePending) body = <>{sidePending}{frame.cues.length ? cueList(frame.cues) : <p className="cue-ok">✓ 膝蓋與上身在範圍內</p>}</>;
-  else if (frame.view === 'side') body = frame.cues.length ? cueList(frame.cues) : SIDE_OK;
+  else if (frontalImpossible) body = <p className="cue-muted">已手動指定用正面檢查，但身體太側面，無法用正面檢查<span className="cue-sub">請改選「側面」或「自動判斷」</span></p>;
+  else if (frame.view === 'oblique') body = <p className="cue-muted">{frame.clipView === 'oblique' ? '斜角拍攝：已關閉斜角判斷' : '身體轉得太斜，已關閉斜角判斷'}<span className="cue-sub">{OBLIQUE_TIP}</span></p>;
+  else if (frame.view === 'side' && frame.approximate) body = <>{manualLine ?? <p className="cue-muted">斜角拍攝，用側面檢查，僅供參考</p>}{sidePending}{frame.cues.length ? cueList(frame.cues) : <p className="cue-ok">✓ 膝蓋與上身在範圍內</p>}</>;
+  else if (frame.view === 'side' && sidePending) body = <>{manualLine}{sidePending}{frame.cues.length ? cueList(frame.cues) : <p className="cue-ok">✓ 膝蓋與上身在範圍內</p>}</>;
+  else if (frame.view === 'side') body = manualLine ? <>{manualLine}{frame.cues.length ? cueList(frame.cues) : SIDE_OK}</> : frame.cues.length ? cueList(frame.cues) : SIDE_OK;
   else if (frame.view !== 'frontal') body = <p className="cue-muted">看不清楚軀幹點位，暫不判斷</p>;
-  else if (frame.approximate && frame.baseline.state === 'locked') body = <><p className="cue-muted">斜角拍攝，用正面檢查，僅供參考</p>{frame.cues.length ? cueList(frame.cues) : <p className="cue-ok">✓ 姿勢在基準線附近</p>}</>;
+  else if (frame.approximate && frame.baseline.state === 'locked') body = <>{manualLine ?? <p className="cue-muted">斜角拍攝，用正面檢查，僅供參考</p>}{frame.cues.length ? cueList(frame.cues) : <p className="cue-ok">✓ 姿勢在基準線附近</p>}</>;
   // Cut-off feet keep the baseline from locking: say that instead of asking to stand still.
   else if (frame.baseline.state !== 'locked' && notice && notice.cause !== 'head-cut') { body = <p className="cue-muted">{notice.text}</p>; hintUsed = true; }
   else if (frame.baseline.state !== 'locked') body = <p className="cue-muted">{frame.relocking ? '重新畫基準線：等個案站直不動約 1 秒' : '還找不到站直的畫面：請個案先站直、不動約 1 秒，才能畫基準線'}</p>;
-  else if (frame.cues.length === 0) body = OK;
-  else body = cueList(frame.cues);
+  else if (frame.cues.length === 0) body = manualLine ? <>{manualLine}{OK}</> : OK;
+  else body = <>{manualLine}{cueList(frame.cues)}</>;
   // Framing hint (head or feet cut off) on a tracked frame: shown above the prompts, which still apply.
   // A green tick next to a framing warning reads as a contradiction: show one combined status instead.
-  if (notice && !notice.blocking && !hintUsed && frame?.tracked && (body === OK || body === SIDE_OK)) return <div className="cue-panel" role="status" aria-live="polite"><p className="cue-hint">{notice.text}<span className="cue-sub">其他部位在範圍內</span></p></div>;
+  // Side view: say when the squat reached full depth (hip lower than the knee). Information, not a warning.
+  const depth = frame?.tracked && frame.view === 'side' && !notice?.blocking && deepEnough(frame.lateral) ? <p className="cue-ok">✓ 蹲得夠深（髖部低於膝蓋）</p> : null;
+  if (notice && !notice.blocking && !hintUsed && frame?.tracked && (body === OK || body === SIDE_OK)) return <div className="cue-panel" role="status" aria-live="polite"><p className="cue-hint">{notice.text}<span className="cue-sub">其他部位在範圍內</span></p>{depth}</div>;
   const hint = notice && !notice.blocking && !hintUsed && frame?.tracked ? <p className="cue-hint">{notice.text}</p> : null;
-  return <div className="cue-panel" role="status" aria-live="polite">{hint}{body}</div>;
+  return <div className="cue-panel" role="status" aria-live="polite">{hint}{body}{depth}</div>;
 }
 
 /** True when the overlay draws check lines for this frame (frontal or side view of a tracked person). */

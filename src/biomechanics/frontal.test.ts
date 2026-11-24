@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FRONTAL_LANDMARKS, frontalFrame, headPoint, heelMidpoint, measureFrontal } from './frontal';
+import { FRONTAL_LANDMARKS, frontalFrame, headPoint, heelMidpoint, measureFrontal, shinTilt } from './frontal';
 import { humanPose } from '../test/fixtures';
 import type { Landmark } from '../domain/analysis';
 const v = (x: number, y: number, visibility = 1): Landmark => ({ x, y, visibility });
@@ -69,5 +69,25 @@ describe('frontal metrics (signed toward the person\'s left)', () => {
   it('reports the landmark reason when a shoulder is unreliable', () => {
     const p = frontal(); p[12] = v(.6, .2, .1);
     expect(measureFrontal(p, 100, 100, 50).pelvisTilt).toEqual({ valid: false, value: null, invalidReasons: ['low-confidence'] });
+  });
+});
+
+describe('shin tilt (ADR-098)', () => {
+  it('0° for a vertical shin; + when the knee is medial of the ankle; same for a mirrored image', () => {
+    expect(shinTilt(frontal(), 'left', 100, 100).value).toBeCloseTo(0, 8);
+    const p = frontal(); p[25] = v(.42, .7); p[26] = v(.56, .7); // both knees 2 / 4 px toward the midline, shank 20 px
+    expect(shinTilt(p, 'left', 100, 100).value).toBeCloseTo(Math.atan2(2, 20) * 180 / Math.PI, 8);
+    expect(shinTilt(p, 'right', 100, 100).value).toBeCloseTo(Math.atan2(4, 20) * 180 / Math.PI, 8);
+    const m = p.map(q => ({ ...q, x: 1 - q.x }));
+    expect(shinTilt(m, 'left', 100, 100).value).toBeCloseTo(Math.atan2(2, 20) * 180 / Math.PI, 8);
+    const out = frontal(); out[25] = v(.37, .7);
+    expect(shinTilt(out, 'left', 100, 100).value).toBeLessThan(0);
+  });
+  it('N/A for an unreliable point or a side view', () => {
+    const p = frontal(); p[27] = v(.4, .9, .1);
+    expect(shinTilt(p, 'left', 100, 100).invalidReasons).toEqual(['low-confidence']);
+    const s = frontal(); s[23] = v(.5, .5); s[24] = v(.505, .5);
+    expect(shinTilt(s, 'left', 100, 100).invalidReasons).toEqual(['degenerate-geometry']);
+    expect(measureFrontal(s, 100, 100, null).shinTilt.left.valid).toBe(false);
   });
 });

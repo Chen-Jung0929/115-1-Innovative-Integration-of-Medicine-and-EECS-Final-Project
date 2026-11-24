@@ -17,6 +17,7 @@ export const FRONTAL_POLICY = {
   shoulderDefinition: 'shoulder-line-tilt-image-v1',
   trunkDefinition: 'trunk-side-lean-image-vertical-v1',
   shiftDefinition: 'pelvis-midpoint-offset-from-baseline-hip-width-v1',
+  shinDefinition: 'shin-medial-tilt-image-vertical-v1',
   pelvisDefinition: 'hip-joint-line-tilt-image-v1',
   /** Hip separation below this means a side view or a collapsed pose. */
   minHipWidthPx: 8,
@@ -47,6 +48,8 @@ export interface FrontalMetrics {
   pelvisTilt: ScalarValue;
   /** Knee vs toe plumb line in hip widths; + = medial (inside). p.11, from posture.ts. */
   kneeToe: { left: ScalarValue; right: ScalarValue };
+  /** Ankle→knee vs image vertical, degrees; + = knee medial of the ankle (shin tilted inward). ADR-098 */
+  shinTilt: { left: ScalarValue; right: ScalarValue };
 }
 
 const DEG = 180 / Math.PI;
@@ -91,6 +94,24 @@ export function feetCutOff(landmarks: readonly Landmark[]): boolean {
   return [29, 30].every(i => { const p = landmarks[i]; return !fin(p) || !(p.visibility >= FRAME_EDGE_POLICY.minVisibility); });
 }
 
+/**
+ * Frontal shin tilt (shin-medial-tilt-image-vertical-v1, ADR-098): angle of the ankle→knee line from the
+ * image vertical, + when the knee sits medial of the ankle (toward the other leg; medial = direction of
+ * the other hip, so it does not depend on mirroring or which way the person faces). Absolute, not
+ * relative to standing. Assumes a level camera: a rolled camera adds its roll to one leg and subtracts
+ * it from the other. 2D image-plane geometry, not a clinical valgus angle.
+ */
+export function shinTilt(landmarks: readonly Landmark[], side: 'left' | 'right', width: number, height: number): ScalarValue {
+  const idx = side === 'left' ? [23, 24, 25, 27] : [24, 23, 26, 28];
+  const p = sourcePoints(landmarks, idx, width, height);
+  if (typeof p === 'string') return bad(p);
+  const [H, O, K, A] = p as [Point, Point, Point, Point];
+  if (Math.abs(O.x - H.x) < FRONTAL_POLICY.minHipWidthPx) return bad('degenerate-geometry');
+  const medial = Math.sign(O.x - H.x), up = A.y - K.y;
+  if (!(up > 0)) return bad('degenerate-geometry');
+  return ok(Math.atan2((K.x - A.x) * medial, up) * DEG);
+}
+
 /** Head reference point: eye midpoint (≈ 眉心) when both eyes are reliable, otherwise the nose. */
 export function headPoint(landmarks: readonly Landmark[], width: number, height: number): Point | InvalidReason {
   const eyes = sourcePoints(landmarks, [FRONTAL_LANDMARKS.leftEye, FRONTAL_LANDMARKS.rightEye], width, height);
@@ -127,11 +148,12 @@ function tilt(left: Point, right: Point): number {
  */
 export function measureFrontal(landmarks: readonly Landmark[], width: number, height: number, baselineX: number | null, minShoulderRatio: number = FRONTAL_POLICY.minFrontalShoulderRatio): FrontalMetrics {
   const kneeToe = { left: kneeToeOffset(landmarks, 'left', width, height), right: kneeToeOffset(landmarks, 'right', width, height) };
+  const shin = { left: shinTilt(landmarks, 'left', width, height), right: shinTilt(landmarks, 'right', width, height) };
   const f = frontalFrame(landmarks, width, height, minShoulderRatio);
   if (typeof f === 'string') {
     const no = bad(f);
     // An oblique/side view also invalidates the frontal knee check.
-    return { head: no, shoulderTilt: no, trunkSide: no, shift: no, pelvisTilt: no, kneeToe: f === 'unsupported-view' ? { left: no, right: no } : kneeToe };
+    return { head: no, shoulderTilt: no, trunkSide: no, shift: no, pelvisTilt: no, kneeToe: f === 'unsupported-view' ? { left: no, right: no } : kneeToe, shinTilt: f === 'unsupported-view' ? { left: no, right: no } : shin };
   }
   const fromBaseline = (x: number) => baselineX === null || !Number.isFinite(baselineX) ? bad('baseline-pending') : ok((x - baselineX) * f.leftDir / f.hipWidth);
   const head = headPoint(landmarks, width, height);
@@ -144,5 +166,6 @@ export function measureFrontal(landmarks: readonly Landmark[], width: number, he
     shift: fromBaseline(f.hipMid.x),
     pelvisTilt: ok(tilt(f.lh, f.rh)),
     kneeToe,
+    shinTilt: shin,
   };
 }

@@ -135,6 +135,7 @@ describe('side view in the timeline', () => {
     expect(t[4]!.sidePlumb!.shoulder.value).toBeCloseTo(0, 8);
     expect(t[8]!.sideBaseline.x).toBe(50);
     expect(t[8]!.sidePlumb!.shoulder.value).toBeCloseTo(10 / 15, 8);
+    // Knee 70°, hip above the knee: not the bottom of the squat, so the ADR-098 trunk–shin check does not apply.
     expect(t[7]!.cues.map(c => c.text)).toEqual(['重心偏前（肩膀超過外踝基準線太多）']);
   });
   const bentK = { valid: true as const, rawAngleDeg: 110, invalidReasons: [] as [] };
@@ -215,5 +216,36 @@ describe('side view in the timeline', () => {
     const t = frontalTimeline([0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => i < 4 ? at(i, oblique()) : at(i, pose(), { left: bent, right: bent })), 100, 100);
     expect(t[0]!.clipView).toBe('oblique');
     expect(t.every(f => f.view === 'oblique')).toBe(true);
+  });
+});
+
+describe('manual check type (ADR-098)', () => {
+  const sidePose = (): Landmark[] => {
+    const p = humanPose();
+    p[11] = v(.5, .3); p[12] = v(.51, .3); p[23] = v(.5, .6); p[24] = v(.51, .6);
+    p[25] = v(.5, .75); p[26] = v(.51, .75); p[27] = v(.5, .9); p[28] = v(.51, .9);
+    p[29] = v(.47, .92); p[30] = v(.48, .92); p[31] = v(.56, .92); p[32] = v(.57, .92);
+    return p;
+  };
+  const oblique = (): Landmark[] => { const p = pose(); p[11] = v(.44, .2); p[12] = v(.56, .2); return p; }; // ratio 0.4
+  it('auto (default) keeps detection; the choice overrides it and flags a mismatch as reference only', () => {
+    const auto = frontalTimeline([0, 1, 2].map(i => at(i, sidePose())), 100, 100);
+    expect(auto.every(f => f.view === 'side' && !f.manual && !f.approximate)).toBe(true);
+    const asSide = frontalTimeline([0, 1, 2].map(i => at(i, pose())), 100, 100, 'standing-trunk', false, 'side');
+    expect(asSide.every(f => f.view === 'side' && f.manual && f.approximate)).toBe(true);
+    const sameSide = frontalTimeline([0, 1, 2].map(i => at(i, sidePose())), 100, 100, 'standing-trunk', false, 'side');
+    expect(sameSide.every(f => f.view === 'side' && f.manual && !f.approximate)).toBe(true);
+  });
+  it('manual frontal measures an oblique pose even with "oblique as reference" off', () => {
+    const t = frontalTimeline([0, 1, 2].map(i => at(i, oblique())), 100, 100, 'standing-trunk', false, 'frontal');
+    expect(t.every(f => f.view === 'frontal' && f.manual && f.approximate)).toBe(true);
+    expect(t[2]!.metrics.pelvisTilt.invalidReasons).not.toContain('unsupported-view');
+    const off = frontalTimeline([0, 1, 2].map(i => at(i, oblique())), 100, 100, 'standing-trunk', false);
+    expect(off.every(f => f.view === 'oblique')).toBe(true);
+  });
+  it('an untracked sample stays unjudged whatever the choice', () => {
+    const lost = { ...makeSample().tracking, accepted: false };
+    const t = frontalTimeline([at(0, pose(), { tracking: lost })], 100, 100, 'standing-trunk', false, 'side');
+    expect(t[0]!.view).toBeNull(); expect(t[0]!.manual).toBe(false);
   });
 });

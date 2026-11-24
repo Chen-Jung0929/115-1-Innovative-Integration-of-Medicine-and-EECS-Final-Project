@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { classifyView, measureLateral, measureSidePlumb, nearSide, sideAnchor, LATERAL_INDICES, type SidePlumb } from './lateral';
 import type { ScalarValue } from '../domain/measurement';
 import { humanPose } from '../test/fixtures';
-import { lateralCues, mergeSideCues } from '../motion/frontalCues';
+import { CUE_POLICY, deepEnough, lateralCues, mergeSideCues } from '../motion/frontalCues';
 import type { Landmark } from '../domain/analysis';
 const v = (x: number, y: number, visibility = 1): Landmark => ({ x, y, visibility });
 
@@ -97,3 +97,38 @@ describe('side baseline through the ankle (lateral malleolus)', () => {
   });
 });
 
+
+describe('literature side checks (provisional, ADR-098)', () => {
+  const val = (value: number): ScalarValue => ({ valid: true, value, invalidReasons: [] });
+  const lat = (trunk: number, tibia: number, hipDepth = -1) => ({ side: 'left' as const, kneeForward: val(0), trunkLean: val(trunk), tibiaLean: val(tibia), hipDepth: val(hipDepth) });
+  it('trunk leaning more than the shin at the bottom of the squat → one prompt; parallel or less → none', () => {
+    expect(CUE_POLICY.trunkTibiaMarginDeg).toBe(0);
+    expect(lateralCues(lat(35, 30), 95).map(c => c.text)).toEqual(['上身比小腿更往前倒（上身應與小腿大致平行）']);
+    expect(lateralCues(lat(35, 30, .1), 60).map(c => c.id)).toEqual(['trunk-tibia']); // hip below the knee = bottom
+    expect(lateralCues(lat(30, 30), 95)).toEqual([]);
+    expect(lateralCues(lat(20, 30), 95)).toEqual([]);
+  });
+  it('on the way down (knee 30–89°, hip above the knee) the trunk normally leans first: not judged', () => {
+    expect(lateralCues(lat(18, 0), 70)).toEqual([]);
+    expect(lateralCues(lat(35, 30), 89)).toEqual([]);
+    expect(lateralCues(lat(35, 30), 90).map(c => c.id)).toEqual(['trunk-tibia']); // boundary: ≥ 90° counts as the bottom
+    expect(lateralCues(lat(35, 30), 10)).toEqual([]);
+  });
+  it('"leaning too far" covers it: only the stronger prompt is shown; with the weight-forward prompt they merge', () => {
+    expect(lateralCues(lat(50, 30), 95).map(c => c.id)).toEqual(['trunk-forward', 'trunk-tibia']);
+    expect(mergeSideCues(lateralCues(lat(50, 30), 95)).map(c => c.id)).toEqual(['trunk-forward']);
+    const plumb: SidePlumb = { ear: val(.6), shoulder: val(.6), hip: val(0) };
+    const merged = mergeSideCues(lateralCues(lat(35, 30), 95, plumb));
+    expect(merged.map(c => c.text)).toEqual(['上身比小腿更往前倒（肩膀超過基準線，重心偏前）']);
+    expect(merged[0]!.parts).toEqual(['side-trunk', 'side-plumb']);
+  });
+  it('hip lower than the knee = full depth (information only, never a prompt)', () => {
+    const p = side(); p[23] = v(.4, .78); p[11] = v(.5, .5); // hip 3 px below the knee, shank 15 px
+    const m = measureLateral(p, 100, 100);
+    expect(m.hipDepth.value).toBeCloseTo(3 / 15, 8);
+    expect(deepEnough(m)).toBe(true);
+    expect(deepEnough(measureLateral(side(), 100, 100))).toBe(false);
+    expect(deepEnough(null)).toBe(false);
+    expect(lateralCues(lat(0, 0, .5), 80)).toEqual([]);
+  });
+});

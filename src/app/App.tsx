@@ -26,10 +26,11 @@ import { calibrationNote, liftSession, poseAt, sessionFlexion } from '../motion/
 import { MANUAL_PITCH_RANGE, manualPitch, pitchLabel } from '../motion/devicePitch';
 import { Skeleton3D } from '../visualization/Skeleton3D';
 import { kneeToeNote, kneeToeValue, lockedBannerText, plainReason, qcStatus, showAngle, showFlexion, trackingNotices } from './plain';
-import { frontalTimeline, type BaselineSource } from '../motion/frontalTimeline';
+import { frontalTimeline, type BaselineSource, type ViewChoice } from '../motion/frontalTimeline';
 import { FrontalOverlay, FrontalCuePanel, FrontalLegend, linesDrawn } from '../visualization/FrontalOverlay';
 import { CUE_POLICY } from '../motion/frontalCues';
 import { createLiveKeep, LivePanel } from './LivePanel';
+import { ShootingTips } from './shootingTips';
 
 export function App() {
   const [pipeline,setPipeline]=useState<PipelineId>(DEFAULT_PIPELINE.id);
@@ -71,6 +72,7 @@ export function App() {
   const [frontalView,setFrontalView]=useState(true);
   const [baselineSource,setBaselineSource]=useState<BaselineSource>('standing-trunk');
   const [obliqueRef,setObliqueRef]=useState(true);
+  const [viewChoice,setViewChoice]=useState<ViewChoice>('auto');
   const [mode, setMode] = useState<'video' | 'camera'>('video');
   // A recorded live segment sent to the upload view (ADR-092) is analyzed as soon as it has loaded.
   const autoRun=useRef(false);
@@ -195,7 +197,7 @@ export function App() {
   const poses3d = lift3d?.poses ?? null;
   const pose3d = poses3d && session && sample ? (held ? poseAt(session.samples, poses3d, timeMs, held, smoothMaxGapMs(hz)) : poses3d.get(sample.sampleIndex)) : undefined;
   const heldGapS = held ? Math.abs(timeMs - (held.decode.timeBasis === 'presentation' ? held.sourceTimeMs : held.requestedTimeMs)) / 1000 : 0;
-  const frontal = useMemo(() => session && info ? frontalTimeline(session.samples, info.width, info.height, baselineSource, obliqueRef) : [], [session, info, baselineSource, obliqueRef]);
+  const frontal = useMemo(() => session && info ? frontalTimeline(session.samples, info.width, info.height, baselineSource, obliqueRef, viewChoice) : [], [session, info, baselineSource, obliqueRef, viewChoice]);
   const frontalFrame = sample ? frontal.find(f => f.sampleIndex === sample.sampleIndex) : undefined;
   const notices = useMemo(() => session ? trackingNotices(session.samples, 'video', session.metadata.sourceWidthPx, session.metadata.sourceHeightPx) : null, [session]);
   const trackNotice = sample ? notices?.get(sample.sampleIndex) ?? null : null;
@@ -222,6 +224,7 @@ export function App() {
     {mode==='camera' && <LivePanel keep={liveKeep.current} model={model} side={side} onSide={setSide} disabled={busy||loading} onFullAnalysis={file=>{setMode('video');autoRun.current=true;void choose(file);}} />}
     <div hidden={mode!=='video'}>
     <section className="card setup" aria-labelledby="input-title"><h2 id="input-title">選擇影片</h2>
+      {!info && <ShootingTips />}
       <div className="setup-row">
         <label className="file-pick"><span className="file-btn">選擇影片</span><span className="hint">MP4 影片（最多 500 MB、10 分鐘）</span><input type="file" accept=".mp4,video/mp4" disabled={busy || loading} onChange={e => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; void choose(f); }} /></label>
         <div className="actions"><button className="primary" disabled={!info || !selection || selecting || busy || loading} onClick={() => void run()}>{error === MODEL_LOAD_ERROR ? '重試分析' : session ? '重新分析' : '開始分析'}</button>{busy && <button className="secondary" onClick={cancel}>取消分析</button>}</div>
@@ -231,6 +234,7 @@ export function App() {
       {busy && <div role="status" className="progress"><p>{progress.phase} · {progress.done} / {progress.total || '準備中'}</p><progress max={progress.total || 1} value={progress.done} /></div>}
       {error && <p role="alert" className="error">{error}</p>}{notice && <p role="status" className="notice">{notice}</p>}
       <p className="muted">適用：單人、鏡頭固定、頭到腳完整入鏡，不需框選。目前模式：{pipeline===DEFAULT_PIPELINE.id&&selection?.correctionSource==='controlled-single-default'?'單人完整影格（主要模式）':info?`${PIPELINE_NAMES[pipeline]}（實驗設定）`:'單人完整影格（主要模式）'}。</p>
+      {info && <details className="fold"><summary>怎麼拍最準</summary><ShootingTips title="" /></details>}
       {info&&(pipeline!==DEFAULT_PIPELINE.id||selection?.correctionSource!=='controlled-single-default')&&<button className="secondary" disabled={busy||loading} onClick={restoreMainMode}>回到單人主要模式</button>}
       <details className="fold"><summary>進階設定：辨識模型</summary>
         <p>影片與鏡頭共用此設定。影像與分析結果只在此瀏覽器處理。</p>
@@ -249,7 +253,8 @@ export function App() {
         <div className="toolbar">
           <label className="switch"><input type="checkbox" role="switch" checked={frontalView} onChange={e=>setFrontalView(e.target.checked)} /><span>姿勢檢查線</span></label>
           {frontalView && <label className="compact">基準線位置<select aria-label="基準線位置" value={baselineSource} onChange={e=>setBaselineSource(e.target.value as BaselineSource)}><option value="standing-trunk">站直時的軀幹中線（預設）</option><option value="heel-midpoint">兩腳跟中點</option></select></label>}
-          {frontalView && <label className="switch"><input type="checkbox" role="switch" checked={obliqueRef} onChange={e=>setObliqueRef(e.target.checked)} /><span>斜角也判斷（僅供參考）</span></label>}
+          {frontalView && <label className="compact">檢查方式<select aria-label="檢查方式" value={viewChoice} onChange={e=>setViewChoice(e.target.value as ViewChoice)}><option value="auto">自動判斷拍攝角度（預設）</option><option value="frontal">一律用正面檢查</option><option value="side">一律用側面檢查</option></select></label>}
+          {frontalView && viewChoice==='auto' && <label className="switch"><input type="checkbox" role="switch" checked={obliqueRef} onChange={e=>setObliqueRef(e.target.checked)} /><span>斜角也判斷（僅供參考）</span></label>}
           <label className="compact">顯示側別<select value={side} onChange={e => setSide(e.target.value as typeof side)}><option value="both">左右都看</option><option value="left">只看左邊</option><option value="right">只看右邊</option></select></label>
         </div>
       </div>

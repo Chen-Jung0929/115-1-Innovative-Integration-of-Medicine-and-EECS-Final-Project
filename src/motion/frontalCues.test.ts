@@ -5,7 +5,7 @@ import type { ScalarValue } from '../domain/measurement';
 
 const n = (value: number): ScalarValue => ({ valid: true, value, invalidReasons: [] });
 const na: ScalarValue = { valid: false, value: null, invalidReasons: ['low-confidence'] };
-const neutral = (): FrontalMetrics => ({ head: n(0), shoulderTilt: n(0), trunkSide: n(0), shift: n(0), pelvisTilt: n(0), kneeToe: { left: n(0), right: n(0) } });
+const neutral = (): FrontalMetrics => ({ head: n(0), shoulderTilt: n(0), trunkSide: n(0), shift: n(0), pelvisTilt: n(0), kneeToe: { left: n(0), right: n(0) }, shinTilt: { left: n(0), right: n(0) } });
 const squat = { left: 80, right: 80 };
 
 describe('frontal prompts (provisional thresholds)', () => {
@@ -32,10 +32,32 @@ describe('frontal prompts (provisional thresholds)', () => {
     expect(instantCues(m, { left: 10, right: null })).toEqual([]);
   });
   it('N/A metrics never trigger a prompt', () => {
-    expect(instantCues({ head: na, shoulderTilt: na, trunkSide: na, shift: na, pelvisTilt: na, kneeToe: { left: na, right: na } }, squat)).toEqual([]);
+    expect(instantCues({ head: na, shoulderTilt: na, trunkSide: na, shift: na, pelvisTilt: na, kneeToe: { left: na, right: na }, shinTilt: { left: na, right: na } }, squat)).toEqual([]);
   });
   it('values exactly at a threshold do not trigger', () => {
     expect(instantCues({ ...neutral(), trunkSide: n(CUE_POLICY.trunkDeg) }, squat)).toEqual([]);
+  });
+});
+
+describe('frontal shin tilt (literature, provisional, ADR-098)', () => {
+  it(`shin tilted inward ≥ ${CUE_POLICY.shinValgusDeg}° gives the knee-inward prompt even when the knee is not past the toe line`, () => {
+    expect(CUE_POLICY.shinValgusDeg).toBe(3);
+    const m = { ...neutral(), shinTilt: { left: n(3), right: n(2.9) } };
+    expect(instantCues(m, squat).map(c => c.text)).toEqual(['左膝往內，小腿往內斜']);
+  });
+  it('one prompt per knee when both signs agree; the toe-line wording wins', () => {
+    const m = { ...neutral(), kneeToe: { left: n(0.6), right: n(0) }, shinTilt: { left: n(8), right: n(0) } };
+    const cues = instantCues(m, squat);
+    expect(cues.map(c => c.id)).toEqual(['knee-left']);
+    expect(cues[0]!.text).toBe('左膝往內，沒有對準腳尖');
+  });
+  it('shin tilted outward (wide stance) or a standing pose never triggers', () => {
+    expect(instantCues({ ...neutral(), shinTilt: { left: n(-10), right: n(-10) } }, squat)).toEqual([]);
+    expect(instantCues({ ...neutral(), shinTilt: { left: n(6), right: n(6) } }, { left: 10, right: 10 })).toEqual([]);
+  });
+  it('existing thresholds set before ADR-098 are unchanged', () => {
+    expect([CUE_POLICY.headHipWidths, CUE_POLICY.shoulderDeg, CUE_POLICY.trunkDeg, CUE_POLICY.shiftHipWidths, CUE_POLICY.pelvisDeg, CUE_POLICY.kneeToeHipWidths, CUE_POLICY.kneeMinFlexionDeg, CUE_POLICY.kneeForwardShank, CUE_POLICY.trunkForwardDeg, CUE_POLICY.sideShoulderForwardShank])
+      .toEqual([0.35, 5, 8, 0.25, 5, 0.45, 30, 0.6, 45, 0.4]);
   });
 });
 

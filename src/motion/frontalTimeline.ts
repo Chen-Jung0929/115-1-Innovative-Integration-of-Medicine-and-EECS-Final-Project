@@ -89,7 +89,11 @@ export interface FrontalFrame {
   sidePlumb: SidePlumb | null;
   /** How the side baseline was found, as for `calibration`. */
   sideCalibration: 'standing-lock' | 'whole-video' | null;
+  /** The user picked the check type (manual view, ADR-098); `approximate` is then true when the detected view differs. */
+  manual: boolean;
 }
+/** User's choice of check type (ADR-098). 'auto' = automatic view detection (default). */
+export type ViewChoice = 'auto' | 'frontal' | 'side';
 export interface Neutral { head: number; shift: number; shoulderTilt: number; pelvisTilt: number; trunkSide: number }
 type Tilt = keyof Neutral;
 const TILTS: Tilt[] = ['head', 'shift', 'shoulderTilt', 'pelvisTilt', 'trunkSide'];
@@ -104,6 +108,7 @@ function gated(m: FrontalMetrics, s: Sample): FrontalMetrics {
     head: g(m.head, subject), shoulderTilt: g(m.shoulderTilt, subject), trunkSide: g(m.trunkSide, subject),
     shift: g(m.shift, subject), pelvisTilt: g(m.pelvisTilt, subject),
     kneeToe: { left: g(m.kneeToe.left, sideReason('left')), right: g(m.kneeToe.right, sideReason('right')) },
+    shinTilt: { left: g(m.shinTilt.left, sideReason('left')), right: g(m.shinTilt.right, sideReason('right')) },
   };
 }
 
@@ -113,12 +118,13 @@ function gated(m: FrontalMetrics, s: Sample): FrontalMetrics {
  * saved session. Only samples whose subject passed QC (and was not rejected by human review) feed
  * the baseline or produce prompts.
  */
-export function frontalTimeline(samples: readonly Sample[], width: number, height: number, source: BaselineSource = 'standing-trunk', obliqueAsFrontal = false): FrontalFrame[] {
-  const ratio = obliqueAsFrontal ? OBLIQUE_MIN_SHOULDER_RATIO : FRONTAL_POLICY.minFrontalShoulderRatio;
+export function frontalTimeline(samples: readonly Sample[], width: number, height: number, source: BaselineSource = 'standing-trunk', obliqueAsFrontal = false, choice: ViewChoice = 'auto'): FrontalFrame[] {
+  // A manual frontal choice also measures oblique poses (as reference); a true side pose still cannot be measured frontally.
+  const ratio = obliqueAsFrontal || choice === 'frontal' ? OBLIQUE_MIN_SHOULDER_RATIO : FRONTAL_POLICY.minFrontalShoulderRatio;
   const offline = offlineCalibration(samples, width, height, source, ratio);
   const anchor = createBaselineAnchor();
   const sideLock = createBaselineAnchor(SIDE_BASELINE_POLICY);
-  const offlineSide = offlineSideCalibration(samples, width, height);
+  const offlineSide = offlineSideCalibration(samples, width, height, choice === 'side');
   let sideLiveOnly = false;
   const clipView = wholeVideoView(samples, width, height);
   const clipRatio = clipView === 'oblique' ? uprightMedianRatio(samples, width, height) : null;
@@ -165,15 +171,17 @@ export function frontalTimeline(samples: readonly Sample[], width: number, heigh
       }
     }
     const detected = usable && rawView !== null ? clipView ?? stableView : null;
-    const approximate = obliqueAsFrontal && detected === 'oblique';
+    // Manual choice overrides detection (the 600 ms hold above still smooths what is reported as detected).
+    const manual = choice !== 'auto' && detected !== null;
+    const approximate = manual ? detected !== choice : obliqueAsFrontal && detected === 'oblique';
     // A fixed-camera oblique clip uses one ratio for the whole clip, so the check type does not flip.
-    const r = approximate ? clipRatio ?? viewRatio(s.landmarks, width, height) : null;
-    const view = approximate ? (r !== null && r < OBLIQUE_SPLIT_RATIO ? 'side' : 'frontal') : detected;
+    const r = approximate && !manual ? clipRatio ?? viewRatio(s.landmarks, width, height) : null;
+    const view: ViewKind | null = manual ? choice : approximate ? (r !== null && r < OBLIQUE_SPLIT_RATIO ? 'side' : 'frontal') : detected;
     let lateral: LateralMetrics | null = null;
     if (view === 'side') {
       const m = measureLateral(s.landmarks, width, height);
       const reason = gateReason(s.tracking, [m.side]);
-      lateral = reason ? { side: m.side, kneeForward: blocked(reason), trunkLean: blocked(reason), tibiaLean: blocked(reason) } : m;
+      lateral = reason ? { side: m.side, kneeForward: blocked(reason), trunkLean: blocked(reason), tibiaLean: blocked(reason), hipDepth: blocked(reason) } : m;
     }
     // Side baseline: fed only in a side view so a frontal clip never locks it (no observation → lost after 2 s).
     let sideBaseline = SEARCHING, sidePlumb: SidePlumb | null = null, sideCalibration: FrontalFrame['sideCalibration'] = null;
@@ -198,7 +206,7 @@ export function frontalTimeline(samples: readonly Sample[], width: number, heigh
     // Side prompts are debounced separately, then merged for display, so adding the trunk lean does not restart the hold.
     const tracked = tracker.update(s.sourceTimeMs, instant);
     const cues = view === 'side' ? mergeSideCues(tracked) : tracked;
-    return { sampleIndex: s.sampleIndex, tracked: usable, baseline, metrics, neutral: useOffline ? offline.neutral : neutral, view, lateral, cues, calibration, clipView, approximate, relocking: liveOnly && baseline.state !== 'locked', sideBaseline, sidePlumb, sideCalibration };
+    return { sampleIndex: s.sampleIndex, tracked: usable, baseline, metrics, neutral: useOffline ? offline.neutral : neutral, view, lateral, cues, calibration, clipView, approximate, relocking: liveOnly && baseline.state !== 'locked', sideBaseline, sidePlumb, sideCalibration, manual };
   });
 }
 
@@ -235,10 +243,11 @@ function offlineCalibration(samples: readonly Sample[], width: number, height: n
  * upright usable side-view samples (near knee flexion proxy ≤ 20°, or ≤ 35° when fewer than 3 exist),
  * line at their median ankle x. Null when there are too few, or no single stance holds most of them.
  */
-function offlineSideCalibration(samples: readonly Sample[], width: number, height: number): Extract<BaselineState, { state: 'locked' }> | null {
+function offlineSideCalibration(samples: readonly Sample[], width: number, height: number, allowOblique = false): Extract<BaselineState, { state: 'locked' }> | null {
   const pool = samples.flatMap(s => {
     if ((s.review !== undefined && s.review.label !== 'correct-target') || !s.tracking.accepted) return [];
-    if (classifyView(s.landmarks, width, height) !== 'side') return [];
+    const v = classifyView(s.landmarks, width, height);
+    if (v !== 'side' && !(allowOblique && v === 'oblique')) return [];
     const near = nearSide(s.landmarks);
     const a = sideAnchor(s.landmarks, width, height, near), flex = flexionProxy(near === 'left' ? s.left : s.right);
     if (typeof a === 'string' || flex === null || gateReason(s.tracking, [near])) return [];
