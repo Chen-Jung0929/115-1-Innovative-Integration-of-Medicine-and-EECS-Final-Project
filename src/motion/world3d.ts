@@ -28,6 +28,22 @@ export function calibrationNote(context: LiftContext | null | undefined): string
   return `${say('left')}；${say('right')}。`;
 }
 
+const FEET = [27, 28, 29, 30, 31, 32];
+/**
+ * Display only (ground-pin-display-v1, ADR-090): the same pose moved so its lowest heel/toe/ankle stands
+ * on the floor grid (y = 0) and the point between the ankles sits at the grid centre (x = z = 0).
+ * The lift puts one floor height on the whole clip, but the feet's own height drifts by 10–60 cm
+ * (scale changes, feet half out of frame) and the live foot lock can slide the body ~1 m in depth, so the
+ * skeleton seemed to float or fly off the grid. A pure translation per frame: every angle is unchanged,
+ * and the pelvis still moves relative to the feet (a squat still goes down and back). Jumps are not shown.
+ */
+export function groundForDisplay(pose: readonly Vec3[] | undefined): Vec3[] | undefined {
+  if (!pose || pose.length < 33 || !FEET.every(i => pose[i]?.every(Number.isFinite))) return pose ? [...pose] : undefined;
+  const floor = Math.max(...FEET.map(i => pose[i]![1])); // y down: the lowest foot point has the largest y
+  const x = (pose[27]![0] + pose[28]![0]) / 2, z = (pose[27]![2] + pose[28]![2]) / 2;
+  return pose.map(p => [p[0] - x, p[1] - floor, p[2] - z] as Vec3);
+}
+
 /** 3D flexion for one sample, or null when it has no lifted pose. */
 export function sessionFlexion(poses: SessionPoses | null | undefined, sample: Sample | undefined, joint: 'knee' | 'hip', side: 'left' | 'right'): number | null {
   return sample && poses ? flexion3D(poses.get(sample.sampleIndex), joint, side) : null;

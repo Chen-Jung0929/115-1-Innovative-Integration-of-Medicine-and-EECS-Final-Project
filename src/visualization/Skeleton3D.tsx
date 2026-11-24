@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from 'react';
 import type { Sample } from '../domain/analysis';
 import * as THREE from 'three';
 import { flexion3D, type Vec3 } from '../biomechanics/lift3d';
 import { createBones, type Bones } from './bones';
+import { groundForDisplay } from '../motion/world3d';
 
 const W = 480, H = 360;
 const BONES: [number, number][] = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [23, 25], [25, 27], [24, 26], [26, 28], [27, 29], [29, 31], [27, 31], [28, 30], [30, 32], [28, 32]];
@@ -21,7 +22,9 @@ const toThree = (w: Vec3 | undefined) => w ? new THREE.Vector3(w[0], -w[1], -w[2
 /** Camera aim: a fixed point above the floor, so a squat is seen as the body going down. */
 const AIM_Y = 0.75;
 
-export function Skeleton3D({ sample, points, note, pitchText, children }: { sample: Sample | undefined; points: Vec3[] | undefined; note?: string | null; pitchText?: string | null; children?: ReactNode }) {
+export function Skeleton3D({ sample, points: rawPoints, note, pitchText, children }: { sample: Sample | undefined; points: Vec3[] | undefined; note?: string | null; pitchText?: string | null; children?: ReactNode }) {
+  // Feet on the grid, body at the grid centre every frame (ADR-090); angles are translation-free.
+  const points = useMemo(() => groundForDisplay(rawPoints), [rawPoints]);
   const ref = useRef<HTMLCanvasElement>(null);
   const gl = useRef<HTMLCanvasElement>(null);
   const labels = useRef<HTMLDivElement>(null);

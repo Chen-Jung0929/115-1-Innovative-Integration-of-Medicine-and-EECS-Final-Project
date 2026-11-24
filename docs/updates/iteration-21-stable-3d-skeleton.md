@@ -1,0 +1,49 @@
+# 第 21 輪：3D 骨架不再飛起來
+
+## 問題
+使用者回報 3D 骨架常「飛起來」。用本機資料集 10 支深蹲影片（subject 001/002/003/005，正面／側面／斜角，Python MediaPipe Full 取 landmarks 後跑同一套 `liftClip`）重現：
+
+- 整段影片只用一個地板高度，但每格腳的高度會漂：腳最多離地 59 cm（003 斜角開頭，腳只有部分入鏡），003 側面 105 / 235 格離地超過 10 cm，005 正面 69 / 228 格。
+- 逐格（即時）版本的腳鎖定會讓身體前後滑動到離格線中心約 1 m。
+
+## 改動（ADR-090）
+- `src/motion/world3d.ts` 新增 `groundForDisplay`：每格把最低腳點放回地板、兩腳踝中點放回格線中心。純平移，角度不變。
+- `src/visualization/Skeleton3D.tsx` 的骨頭與線條兩種畫法都用這個顯示用姿勢。
+- 新增單元測試：浮起 0.4 m、偏移 1 m 的骨架會被放回地板中心，膝／髖 3D 角度與骨盆相對腳的高度完全相同。
+
+## 結果（離地 cm／骨盆離中心 cm，改前 → 改後）
+
+| 影片 | 模式 | 腳離地最大 | 骨盆離中心最大 | 骨盆上下步距中位數 |
+| --- | --- | --- | --- | --- |
+| subject_001_squat_good_diagonal | 影片 | 8 → 0 | 27 → 36 | 6.2 → 5.9 |
+| subject_001_squat_good_diagonal | 即時 | 8 → 0 | 31 → 37 | 6.8 → 5.8 |
+| subject_001_squat_good_front | 影片 | 8 → 0 | 27 → 27 | 6.4 → 6.1 |
+| subject_001_squat_good_front | 即時 | 8 → 0 | 35 → 28 | 6.6 → 6.1 |
+| subject_001_squat_good_side | 影片 | 12 → 0 | 40 → 36 | 6.2 → 6.0 |
+| subject_001_squat_good_side | 即時 | 17 → 0 | 106 → 38 | 6.1 → 5.2 |
+| subject_002_squat_good_diagonal | 影片 | 10 → 0 | 21 → 19 | 4.9 → 4.3 |
+| subject_002_squat_good_diagonal | 即時 | 5 → 0 | 27 → 21 | 5.2 → 4.2 |
+| subject_002_squat_good_front | 影片 | 11 → 0 | 26 → 24 | 3.5 → 3.8 |
+| subject_002_squat_good_front | 即時 | 25 → 0 | 32 → 27 | 3.2 → 3.7 |
+| subject_003_squat_bad_diagonal | 影片 | 59 → 0 | 18 → 22 | 6.5 → 6.3 |
+| subject_003_squat_bad_diagonal | 即時 | 33 → 0 | 31 → 22 | 7.0 → 6.2 |
+| subject_003_squat_bad_front | 影片 | 8 → 0 | 16 → 14 | 6.6 → 6.4 |
+| subject_003_squat_bad_front | 即時 | 7 → 0 | 16 → 15 | 7.2 → 6.3 |
+| subject_003_squat_bad_side | 影片 | 33 → 0 | 42 → 33 | 6.4 → 6.0 |
+| subject_003_squat_bad_side | 即時 | 17 → 0 | 101 → 39 | 6.8 → 6.4 |
+| subject_005_squat_bad_diagonal | 影片 | 14 → 0 | 34 → 30 | 3.4 → 2.6 |
+| subject_005_squat_bad_diagonal | 即時 | 9 → 0 | 47 → 33 | 3.5 → 2.4 |
+| subject_005_squat_bad_front | 影片 | 17 → 0 | 28 → 28 | 3.4 → 2.7 |
+| subject_005_squat_bad_front | 即時 | 10 → 0 | 34 → 31 | 3.3 → 2.6 |
+
+（「影片」= 上傳影片用的整段 lift；「即時」= `createCausalLifter`，目前畫面沒用到，列出供參考。）
+
+瀏覽器實測（Chromium + Lite 模型，005 正面影片，側面視角）：改前骨架在部分格子浮在格線上方，改後腳都踩在格線上，膝角讀數完全相同。
+
+## 檢查
+- `npm run typecheck` 通過；`npm test` 41 個測試檔、287 個測試通過；`npm run build` 通過；`npm run test:browser` 35 通過、2 個既有條件略過。
+
+## 限制與下一步
+- 跳躍動作不會顯示離地。
+- 側面拍攝時前後深度仍是模型估計，上半身偶爾前後晃（與本次無關，未處理）。
+- 測試中 003 側面影片（Lite 模型）2.3 秒起被判為「畫面跳動或換了人」、003 斜角（348×624）偵測不到人，屬追蹤問題，另案。
