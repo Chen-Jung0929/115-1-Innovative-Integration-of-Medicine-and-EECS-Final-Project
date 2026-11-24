@@ -51,6 +51,7 @@ export async function createBones(scene: THREE.Scene, baseUrl: string): Promise<
     place(name, prox, basis(prox.clone().sub(dist), zRef), s);
     return s;
   };
+  const tmp = new THREE.Vector3();
   function update(P: THREE.Vector3[]) {
     const p = (i: number) => P[i]!;
     const up = new THREE.Vector3(0, 1, 0);
@@ -75,6 +76,15 @@ export async function createBones(scene: THREE.Scene, baseUrl: string): Promise<
       limb(`forearm_${s}`, p(el), p(wr), armAxis);
     }
     head.position.copy(midSh).add(new THREE.Vector3(0, 0.2, 0)).lerp(p(0), 0.5);
+    // The landmarks already stand on y = 0 (ADR-090), but the foot meshes sit up to ~11 cm higher or lower than
+    // the heel/toe landmarks; lift the whole group so the lowest foot-mesh point touches the floor.
+    let low = Infinity;
+    for (const s of ['foot_l', 'foot_r']) {
+      const m = seg[s]?.mesh; if (!m) continue;
+      const pos = m.geometry.attributes.position as THREE.BufferAttribute;
+      for (let i = 0; i < pos.count; i += 4) { tmp.fromBufferAttribute(pos, i).applyMatrix4(m.matrix); if (tmp.y < low) low = tmp.y; }
+    }
+    group.position.y = Number.isFinite(low) ? -low : 0;
   }
   return { group, update };
 }

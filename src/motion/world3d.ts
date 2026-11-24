@@ -29,19 +29,25 @@ export function calibrationNote(context: LiftContext | null | undefined): string
 }
 
 const FEET = [27, 28, 29, 30, 31, 32];
+const HEEL_TOE = [[29, 31], [30, 32]] as const;
 /**
  * Display only (ground-pin-display-v1, ADR-090): the same pose moved so its lowest heel/toe/ankle stands
  * on the floor grid (y = 0) and the point between the ankles sits at the grid centre (x = z = 0).
  * The lift puts one floor height on the whole clip, but the feet's own height drifts by 10–60 cm
  * (scale changes, feet half out of frame) and the live foot lock can slide the body ~1 m in depth, so the
- * skeleton seemed to float or fly off the grid. A pure translation per frame: every angle is unchanged,
- * and the pelvis still moves relative to the feet (a squat still goes down and back). Jumps are not shown.
+ * skeleton seemed to float or fly off the grid. Each foot is also drawn flat (heel and toe at the height
+ * of the lower of the two): the model's heel–toe depth is noisy and often tips the foot 30–60° toes-down,
+ * which looked like standing on tiptoe above the floor. Knee/hip angles never use heel or toe and the rest
+ * is a pure translation, so every angle is unchanged; the pelvis still moves relative to the feet (a squat
+ * still goes down and back). Jumps are not shown.
  */
 export function groundForDisplay(pose: readonly Vec3[] | undefined): Vec3[] | undefined {
-  if (!pose || pose.length < 33 || !FEET.every(i => pose[i]?.every(Number.isFinite))) return pose ? [...pose] : undefined;
-  const floor = Math.max(...FEET.map(i => pose[i]![1])); // y down: the lowest foot point has the largest y
-  const x = (pose[27]![0] + pose[28]![0]) / 2, z = (pose[27]![2] + pose[28]![2]) / 2;
-  return pose.map(p => [p[0] - x, p[1] - floor, p[2] - z] as Vec3);
+  if (!pose || pose.length < 33 || !FEET.every(i => pose[i]?.every(Number.isFinite))) return pose ? pose.map(p => [...p] as Vec3) : undefined;
+  const flat = pose.map(p => [...p] as Vec3);
+  for (const [h, t] of HEEL_TOE) { const y = Math.max(flat[h]![1], flat[t]![1]); flat[h]![1] = y; flat[t]![1] = y; } // y down: max = lower
+  const floor = Math.max(...FEET.map(i => flat[i]![1]));
+  const x = (flat[27]![0] + flat[28]![0]) / 2, z = (flat[27]![2] + flat[28]![2]) / 2;
+  return flat.map(p => [p[0] - x, p[1] - floor, p[2] - z] as Vec3);
 }
 
 /** 3D flexion for one sample, or null when it has no lifted pose. */

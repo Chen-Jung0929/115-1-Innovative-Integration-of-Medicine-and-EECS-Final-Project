@@ -21,6 +21,13 @@ const colorOf = (a: number, b: number) => a % 2 === 1 && b % 2 === 1 ? LEFT : a 
 const toThree = (w: Vec3 | undefined) => w ? new THREE.Vector3(w[0], -w[1], -w[2]) : null;
 /** Camera aim: a fixed point above the floor, so a squat is seen as the body going down. */
 const AIM_Y = 0.75;
+/** Contact shadow under each foot (ellipse on the floor along heel→toe), so "standing on the floor" reads at a glance. */
+const FOOT_IDX = { left: [27, 29, 31], right: [28, 30, 32] } as const;
+function footShadow(pts: readonly Vec3[], side: 'left' | 'right') {
+  const [a, h, t] = FOOT_IDX[side].map(i => pts[i]!) as [Vec3, Vec3, Vec3];
+  const cx = (a[0] + h[0] + t[0]) / 3, cz = (a[2] + h[2] + t[2]) / 3, dx = t[0] - h[0], dz = t[2] - h[2], len = Math.hypot(dx, dz);
+  return { cx, cz, angle: Math.atan2(dz, dx), half: Math.max(0.08, len / 2 + 0.04), width: 0.07 };
+}
 
 export function Skeleton3D({ sample, points: rawPoints, note, pitchText, children }: { sample: Sample | undefined; points: Vec3[] | undefined; note?: string | null; pitchText?: string | null; children?: ReactNode }) {
   // Feet on the grid, body at the grid centre every frame (ADR-090); angles are translation-free.
@@ -28,7 +35,7 @@ export function Skeleton3D({ sample, points: rawPoints, note, pitchText, childre
   const ref = useRef<HTMLCanvasElement>(null);
   const gl = useRef<HTMLCanvasElement>(null);
   const labels = useRef<HTMLDivElement>(null);
-  const three = useRef<{ renderer: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.PerspectiveCamera; grid: THREE.GridHelper; bones: Bones | null } | null>(null);
+  const three = useRef<{ renderer: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.PerspectiveCamera; grid: THREE.GridHelper; shadows: THREE.Mesh[]; bones: Bones | null } | null>(null);
   const [mode, setMode] = useState<'bones' | 'lines'>('bones');
   const [bonesReady, setBonesReady] = useState(false);
   const [yaw, setYaw] = useState(30), [pitch, setPitch] = useState(10);
@@ -56,6 +63,14 @@ export function Skeleton3D({ sample, points: rawPoints, note, pitchText, childre
       for (const [a, b] of [[proj(i * .25, floorY, -.5), proj(i * .25, floorY, .5)], [proj(-.5, floorY, i * .25), proj(.5, floorY, i * .25)]] as const) {
         ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
       }
+    }
+    ctx.fillStyle = 'rgba(0,0,0,.25)';
+    for (const side of ['left', 'right'] as const) {
+      if (!FOOT_IDX[side].every(i => pts[i]?.every(Number.isFinite))) continue;
+      const f = footShadow(pts, side), c = Math.cos(f.angle), sn = Math.sin(f.angle);
+      ctx.beginPath();
+      for (let k = 0; k <= 24; k++) { const u = Math.cos(k / 24 * 2 * Math.PI) * f.half, v = Math.sin(k / 24 * 2 * Math.PI) * f.width, q = proj(f.cx + u * c - v * sn, floorY, f.cz + u * sn + v * c); if (k) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y); }
+      ctx.fill();
     }
     const P = pts.map(p => p ? proj(p[0], p[1], p[2]) : null);
     const bones = BONES.filter(([a, b]) => P[a] && P[b]).map(([a, b]) => ({ a, b, z: (P[a]!.z + P[b]!.z) / 2 })).sort((m, n) => n.z - m.z);
@@ -87,7 +102,8 @@ export function Skeleton3D({ sample, points: rawPoints, note, pitchText, childre
     scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 2.2));
     const dl = new THREE.DirectionalLight(0xffffff, 1.6); dl.position.set(2, 4, 3); scene.add(dl);
     const grid = new THREE.GridHelper(2, 8, 0x8e8e93, 0x8e8e93); scene.add(grid);
-    three.current = { renderer, scene, camera, grid, bones: null };
+    const shadows = [0, 1].map(() => { const m = new THREE.Mesh(new THREE.CircleGeometry(1, 32), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3, depthWrite: false })); m.rotation.order = 'YXZ'; scene.add(m); return m; });
+    three.current = { renderer, scene, camera, grid, shadows, bones: null };
     let alive = true;
     createBones(scene, `${import.meta.env.BASE_URL}bones/`).then(b => { if (!alive) return; three.current!.bones = b; setBonesReady(true); }).catch(() => { if (alive) setMode('lines'); });
     return () => { alive = false; renderer.dispose(); three.current = null; setBonesReady(false); };
@@ -101,6 +117,13 @@ export function Skeleton3D({ sample, points: rawPoints, note, pitchText, childre
     t.bones.group.visible = !!ok; t.grid.visible = !!ok;
     const target = new THREE.Vector3(0, AIM_Y, 0);
     if (ok) t.bones.update(P as THREE.Vector3[]);
+    t.shadows.forEach((m, k) => {
+      const side = k ? 'right' : 'left';
+      m.visible = !!ok && FOOT_IDX[side].every(i => points![i]?.every(Number.isFinite)); if (!m.visible) return;
+      // Lifted pose → three.js flips y and z, so the floor ellipse uses x and −z.
+      const f = footShadow(points!, side);
+      m.position.set(f.cx, 0.002, -f.cz); m.rotation.set(-Math.PI / 2, f.angle, 0); m.scale.set(f.half, f.width, 1);
+    });
     const y0 = yaw * Math.PI / 180, p0 = pitch * Math.PI / 180, d = 4.6;
     t.camera.position.set(target.x + d * Math.sin(y0) * Math.cos(p0), target.y + d * Math.sin(p0), target.z + d * Math.cos(y0) * Math.cos(p0));
     t.camera.lookAt(target);
@@ -108,7 +131,7 @@ export function Skeleton3D({ sample, points: rawPoints, note, pitchText, childre
     if (!ok || !box) return;
     for (const [side, i] of [['left', 25], ['right', 26]] as const) {
       const f = flexion3D(points, 'knee', side); if (f === null) continue;
-      const v = (P![i] as THREE.Vector3).clone().project(t.camera);
+      const v = (P![i] as THREE.Vector3).clone().add(t.bones.group.position).project(t.camera);
       const el = document.createElement('span');
       el.className = `skeleton3d-label ${side}`; el.textContent = `${side === 'left' ? '左' : '右'}膝 ${Math.round(f)}°`;
       el.style.left = `${(v.x + 1) / 2 * 100}%`; el.style.top = `${(1 - v.y) / 2 * 100}%`;

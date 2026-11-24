@@ -44,6 +44,9 @@ describe('session 3D poses', () => {
     // The pelvis keeps its height above the feet (a squat still goes down).
     const hipAboveFeet = (P: Vec3[]) => Math.max(...[27, 28].map(i => P[i]![1])) - (P[23]![1] + P[24]![1]) / 2;
     expect(hipAboveFeet(shown)).toBeCloseTo(hipAboveFeet(pose), 9);
+    // Each foot is drawn flat: heel and toe at the same height.
+    expect(shown[29]![1]).toBeCloseTo(shown[31]![1], 9);
+    expect(shown[30]![1]).toBeCloseTo(shown[32]![1], 9);
     expect(groundForDisplay(undefined)).toBeUndefined();
     expect(floating[27]![1]).toBeCloseTo(pose[27]![1] - 0.4, 9); // input untouched
   });
