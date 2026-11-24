@@ -30,7 +30,7 @@ export async function analyze(url: string, filename: string, model: File | null,
   let searchUnavailable:string|undefined;
   let searchEngine: Awaited<ReturnType<typeof createPoseEngine>> | undefined;
   try {
-    progress(0, 0, '讀取影片與模型');
+    progress(0, 0, '正在準備姿態辨識功能');
     await loadVideo(decoder, url, signal);
     const prepareStart=performance.now();
     const asset = options.asset??await modelBytes(model, signal, allowOfficialDownload);

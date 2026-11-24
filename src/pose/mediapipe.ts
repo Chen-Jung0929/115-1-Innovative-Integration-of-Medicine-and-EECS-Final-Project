@@ -4,12 +4,25 @@ import pkg from '../../package.json';
 export const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
 export const PROJECT_MODEL_URL = `${import.meta.env.BASE_URL}models/pose_landmarker_lite.task`;
 export const MODEL_VERSION = pkg.dependencies['@mediapipe/tasks-vision'];
+export const MODEL_LOAD_ERROR = '模型載入失敗，請確認網路後重試';
+type ModelAsset = { bytes: Uint8Array; hash: string; id: string };
+let cachedModel: { file: File | null; asset: ModelAsset } | undefined;
+let fileset: ReturnType<typeof FilesetResolver.forVisionTasks> | undefined;
+
 export interface PoseEngine { detect(frame: HTMLCanvasElement, timeMs: number): Landmark[][]; close(): void }
 export async function createPoseEngine(bytes: Uint8Array, numPoses = 1): Promise<PoseEngine> {
-  const files = await FilesetResolver.forVisionTasks(`${import.meta.env.BASE_URL}mediapipe/wasm`);
+  // Each independent VIDEO stream needs its own tracking history and timestamp clock.
+  fileset ??= FilesetResolver.forVisionTasks(`${import.meta.env.BASE_URL}mediapipe/wasm`).catch(() => {
+    fileset = undefined;
+    throw new Error(MODEL_LOAD_ERROR);
+  });
+  const files = await fileset;
   const pose = await PoseLandmarker.createFromOptions(files, {
     baseOptions: { modelAssetBuffer: bytes, delegate: 'CPU' }, runningMode: 'VIDEO', numPoses,
     minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.5, minTrackingConfidence: 0.5,
+  }).catch(() => {
+    if (cachedModel?.asset.bytes === bytes) cachedModel = undefined;
+    throw new Error(MODEL_LOAD_ERROR);
   });
   return { detect: (frame, timeMs) => {
     const result = pose.detectForVideo(frame, timeMs);
@@ -19,7 +32,23 @@ export async function createPoseEngine(bytes: Uint8Array, numPoses = 1): Promise
     }));
   }, close: () => pose.close() };
 }
-export async function modelBytes(file: File | null, signal: AbortSignal, allowOfficialDownload = false): Promise<{ bytes: Uint8Array; hash: string; id: string }> {
+export async function modelBytes(file: File | null, signal: AbortSignal, allowOfficialDownload = true): Promise<ModelAsset> {
+  signal.throwIfAborted();
+  if (cachedModel?.file === file && (allowOfficialDownload || cachedModel.asset.id !== MODEL_URL)) {
+    return cachedModel.asset;
+  }
+  try {
+    const asset = await readModel(file, signal, allowOfficialDownload);
+    signal.throwIfAborted();
+    cachedModel = { file, asset };
+    return asset;
+  } catch {
+    signal.throwIfAborted();
+    throw new Error(MODEL_LOAD_ERROR);
+  }
+}
+
+async function readModel(file: File | null, signal: AbortSignal, allowOfficialDownload: boolean): Promise<ModelAsset> {
   let buffer: ArrayBuffer;
   let id = 'local-task-file';
   if (file) {
@@ -30,7 +59,7 @@ export async function modelBytes(file: File | null, signal: AbortSignal, allowOf
     // SPA servers often return index.html with HTTP 200 for a missing public asset.
     const missing = response.status === 404 || (response.ok && response.headers.get('content-type')?.includes('text/html'));
     if (missing) {
-      if (!allowOfficialDownload) throw new Error('找不到專案本機模型。請將官方模型放在 public/models/pose_landmarker_lite.task，或在模型設定選取 Mac 上的 .task 檔；也可明確勾選允許官方下載。');
+      if (!allowOfficialDownload) throw new Error(MODEL_LOAD_ERROR);
       const official = await fetch(MODEL_URL, { signal: AbortSignal.any([signal, AbortSignal.timeout(30000)]) });
       if (!official.ok) throw new Error(`官方模型下載失敗（${official.status}），請改選本機 .task 模型。`);
       buffer = await official.arrayBuffer(); id = MODEL_URL;
