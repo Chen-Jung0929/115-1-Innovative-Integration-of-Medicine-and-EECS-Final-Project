@@ -4,7 +4,7 @@
  */
 export type SegmentVideos = { raw: Blob | null; skeleton: Blob | null };
 
-/** Safari records MP4 (H.264); Chrome / Edge / Firefox record WebM. Returns '' when none is supported. */
+/** MP4 (H.264) when the browser supports it (Safari, recent Chrome), otherwise WebM. Returns '' when none is supported. */
 export function pickRecorderMime(isSupported: (type: string) => boolean): string {
   const candidates = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
   return candidates.find(type => { try { return isSupported(type); } catch { return false; } }) ?? '';
@@ -19,20 +19,23 @@ export function canRecord(): boolean {
 export type SegmentRecorder = { stop(): Promise<Blob | null> };
 
 /** Starts recording a stream; stop() resolves with the whole video, or null if nothing was recorded. */
-export function startRecorder(stream: MediaStream): SegmentRecorder | null {
+export function startRecorder(stream: MediaStream, videoBitsPerSecond = 1_200_000): SegmentRecorder | null {
   if (!canRecord()) return null;
   const mimeType = pickRecorderMime(t => MediaRecorder.isTypeSupported(t));
   let recorder: MediaRecorder;
-  try { recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2_500_000 }); } catch { return null; }
+  try { recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond }); } catch { return null; }
   const chunks: Blob[] = [];
   recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
   try { recorder.start(1000); } catch { return null; } // 1 s chunks: a crash mid-segment still leaves earlier data.
   return {
     stop: () => new Promise(resolve => {
-      if (recorder.state === 'inactive') { resolve(chunks.length ? new Blob(chunks, { type: mimeType }) : null); return; }
-      recorder.onstop = () => resolve(chunks.length ? new Blob(chunks, { type: recorder.mimeType || mimeType }) : null);
-      recorder.onerror = () => resolve(null);
-      recorder.stop();
+      // Whatever was recorded is kept, even after an error; a missing stop event times out instead of hanging.
+      let done = false;
+      const finish = () => { if (done) return; done = true; clearTimeout(timer); resolve(chunks.length ? new Blob(chunks, { type: recorder.mimeType || mimeType }) : null); };
+      const timer = setTimeout(finish, 5000);
+      if (recorder.state === 'inactive') { finish(); return; }
+      recorder.onstop = finish; recorder.onerror = finish;
+      try { recorder.stop(); } catch { finish(); }
     }),
   };
 }

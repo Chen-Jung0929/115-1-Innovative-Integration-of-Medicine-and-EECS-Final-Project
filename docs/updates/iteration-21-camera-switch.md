@@ -4,7 +4,7 @@
 
 ## 改動
 
-- `src/input/camera.ts`：開鏡頭後檢查實際方向（`getSettings().facingMode`，沒有時看鏡頭名稱）。方向不對且裝置有 2 個以上鏡頭時，依名稱挑出正確鏡頭，以 `deviceId: exact` 重開。新增 `listCameras`、`facingFromLabel`、`pickCamera`。不判斷裝置類型（ADR-090）。
+- `src/input/camera.ts`：開鏡頭後檢查實際方向（`getSettings().facingMode`，沒有時看鏡頭名稱）。方向不對且裝置有 2 個以上鏡頭時，依名稱挑出正確鏡頭，以 `deviceId: exact` 重開。新增 `listCameras`、`facingFromLabel`、`pickCamera`。後鏡頭優先選一般廣角，不選超廣角／望遠。不判斷裝置類型（ADR-090）。切換後仍是同一顆鏡頭時，恢復原設定並隱藏切換按鈕。
 - `src/app/LivePanel.tsx`：開啟鏡頭後計算鏡頭數；有 2 個以上時顯示「切換到前／後鏡頭」，切換前先保存這一段。只有前鏡頭鏡像。選項改為「前鏡頭（自拍）」「後鏡頭（手機或平板架在旁邊）」，傾斜感測器按鈕改為「手機／平板」。
 - README 使用步驟同步說明。
 

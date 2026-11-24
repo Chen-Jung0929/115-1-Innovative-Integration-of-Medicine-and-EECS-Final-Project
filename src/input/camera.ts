@@ -24,7 +24,12 @@ export function facingFromLabel(label: string): Facing | null {
  */
 export function pickCamera(cameras: CameraInfo[], facing: Facing, currentId?: string): CameraInfo | null {
   const byLabel = cameras.filter(c => facingFromLabel(c.label) === facing);
-  if (byLabel.length) return byLabel.find(c => c.deviceId !== currentId) ?? byLabel[0] ?? null;
+  // iPhone / iPad Pro also list ultra-wide, telephoto and multi-lens cameras; the ultra-wide distorts 2D angles.
+  const plain = byLabel.filter(c => !/ultra|tele|dual|triple|超廣角|望遠|雙鏡頭|三鏡頭/i.test(c.label));
+  for (const group of [plain, byLabel]) {
+    const pick = group.find(c => c.deviceId !== currentId) ?? group[0];
+    if (pick) return pick;
+  }
   return cameras.find(c => c.deviceId && c.deviceId !== currentId) ?? null;
 }
 
@@ -34,7 +39,7 @@ export async function listCameras(): Promise<CameraInfo[]> {
   return devices.filter(d => d.kind === 'videoinput').map(d => ({ deviceId: d.deviceId, label: d.label }));
 }
 
-function trackFacing(stream: MediaStream): Facing | null {
+export function trackFacing(stream: MediaStream): Facing | null {
   const track = stream.getVideoTracks()[0];
   const setting = track?.getSettings?.().facingMode;
   if (setting === 'user' || setting === 'environment') return setting;
@@ -91,6 +96,11 @@ export async function openCamera(video: HTMLVideoElement, facing: Facing, signal
     signal.throwIfAborted();
     return stream;
   } catch (e) { stopCamera(stream, video); throw e; }
+}
+
+/** The device id of the camera a stream came from ('' when the browser does not say). */
+export function streamDeviceId(stream: MediaStream | null): string {
+  return stream?.getVideoTracks()[0]?.getSettings?.().deviceId ?? '';
 }
 
 export function stopCamera(stream: MediaStream | null, video: HTMLVideoElement | null): void {

@@ -34,6 +34,9 @@ describe('camera input adapter', () => {
     const ipad = [{ deviceId: 'f', label: 'Front Camera' }, { deviceId: 'b', label: 'Back Camera' }, { deviceId: 'u', label: 'Back Ultra Wide Camera' }];
     expect(pickCamera(ipad, 'environment', 'f')?.deviceId).toBe('b');
     expect(pickCamera(ipad, 'user', 'b')?.deviceId).toBe('f');
+    const pro = [{ deviceId: 'uw', label: 'Back Ultra Wide Camera' }, { deviceId: 'tr', label: 'Back Triple Camera' }, { deviceId: 'b', label: 'Back Camera' }, { deviceId: 'f', label: 'Front Camera' }];
+    expect(pickCamera(pro, 'environment', 'f')?.deviceId).toBe('b'); // not the ultra-wide listed first
+    expect(pickCamera([{ deviceId: 'uw', label: 'Back Ultra Wide Camera' }, { deviceId: 'f', label: 'Front Camera' }], 'environment', 'f')?.deviceId).toBe('uw');
     const unlabeled = [{ deviceId: 'a', label: '' }, { deviceId: 'z', label: '' }];
     expect(pickCamera(unlabeled, 'environment', 'a')?.deviceId).toBe('z');
     expect(pickCamera([{ deviceId: 'a', label: '' }], 'environment', 'a')).toBeNull();
