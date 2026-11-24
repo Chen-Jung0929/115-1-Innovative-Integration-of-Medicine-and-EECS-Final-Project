@@ -249,9 +249,10 @@ function offlineSideCalibration(samples: readonly Sample[], width: number, heigh
   if (chosen.length < OFFLINE_CALIBRATION.minSamples) return null;
   const median = (v: number[]) => { const a = [...v].sort((x, y) => x - y); return a[Math.floor(a.length / 2)]!; };
   // Line at the median standing ankle position; the foot drifting a little over a long clip is normal, so the
-  // line needs most (≥ 60%) standing samples within the relock distance of it, otherwise there is no single stance.
+  // line needs most (≥ 60%) standing samples within the lock tolerance of it (the same 0.08 shank used for measuring
+  // against it), otherwise there is no single stance.
   const x = median(chosen.map(c => c.x)), shank = median(chosen.map(c => c.shank));
-  const near = chosen.filter(c => Math.abs(c.x - x) / shank <= SIDE_BASELINE_POLICY.relockDistanceHipWidths);
+  const near = chosen.filter(c => Math.abs(c.x - x) / shank <= SIDE_BASELINE_POLICY.lockToleranceHipWidths);
   if (near.length / chosen.length < WHOLE_VIDEO_VIEW_MIN_SHARE) return null;
   return { state: 'locked', x, heelY: median(near.map(c => c.y)), lockedAtMs: Math.min(...near.map(c => c.s.sourceTimeMs)) };
 }

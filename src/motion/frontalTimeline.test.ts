@@ -150,7 +150,7 @@ describe('side view in the timeline', () => {
     const t = frontalTimeline([0, 1, 2, 3, 4, 5].map(i => at(i, sidePose(), i % 2 ? { left: halfK, right: halfK } : { left: bentK, right: bentK })), 100, 100);
     expect(t.every(f => f.sideCalibration === 'whole-video' && f.sideBaseline.x === 50)).toBe(true);
   });
-  it('side baseline: whole-video line is not used while the ankle is off it by more than 0.08 shank', () => {
+  it('side baseline: the whole-video line stays drawn, but offsets are not measured while the ankle is off it by more than 0.08 shank', () => {
     const t = frontalTimeline([0, 1, 2, 3, 4, 5].map(i => at(i, sidePose(), i % 2 ? {} : { left: bentK, right: bentK })).concat([at(6, moved(.02), { left: bentK, right: bentK })]), 100, 100);
     expect(t[5]!.sidePlumb!.shoulder.valid).toBe(true);
     expect(t[6]!.sideCalibration).toBe('whole-video');
