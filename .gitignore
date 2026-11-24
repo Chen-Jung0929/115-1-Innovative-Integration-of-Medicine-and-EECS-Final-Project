@@ -38,3 +38,6 @@ __pycache__/
 *.task
 /playwright-report/
 /test-results/
+
+# Reproducible one-second red/blue test pattern used by the Pages gate.
+!/quality/fixtures/color-bars.mp4

@@ -1,3 +1,4 @@
+import { makeSyntheticVideo, expectAlignedPicture } from './fixtures';
 import { test, expect, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -57,7 +58,7 @@ let synthetic: string;
 test.beforeAll(() => {
   folder = mkdtempSync(join(tmpdir(), 'knee-smoke-'));
   synthetic = join(folder, 'synthetic-no-human.mp4');
-  execFileSync('ffmpeg', ['-v','error','-f','lavfi','-i','color=c=blue:s=320x180:r=25:d=1,drawbox=x=0:y=0:w=160:h=180:color=red:t=fill','-c:v','libx264','-pix_fmt','yuv420p',synthetic]);
+  makeSyntheticVideo(synthetic);
 });
 test.afterAll(() => rmSync(folder, { recursive: true, force: true }));
 
@@ -504,15 +505,7 @@ test('the playback picture and skeleton share one rectangle at phone, tablet and
     await expect(page.locator('.file-info')).toContainText(file === portrait ? '180 × 320' : '320 × 180');
     for (const [width, height] of [[390,844], [768,1024], [1024,768], [1440,900], [1920,1080]] as const) {
       await page.setViewportSize({ width, height });
-      const picture = await page.locator('.video-stage video').boundingBox();
-      const skeleton = await page.locator('.video-stage .overlay').boundingBox();
-      expect(picture).not.toBeNull();
-      expect(skeleton).not.toBeNull();
-      for (const key of ['x','y','width','height'] as const) {
-        expect(Math.abs(skeleton![key] - picture![key])).toBeLessThan(1);
-      }
-      const aspect = file === portrait ? 180 / 320 : 320 / 180;
-      expect(Math.abs(picture!.width - picture!.height * aspect)).toBeLessThan(1);
+      await expectAlignedPicture(page.locator('.video-stage:visible'), file === portrait ? 180 / 320 : 320 / 180);
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
     }
   }

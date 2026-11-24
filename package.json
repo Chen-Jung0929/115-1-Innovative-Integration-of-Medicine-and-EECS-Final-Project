@@ -15,7 +15,9 @@
     "check": "npm run typecheck && npm test && npm run build",
     "postinstall": "node scripts/setup-assets.mjs",
     "test:browser": "playwright test",
-    "qc:replay": "node scripts/qc-replay.mjs"
+    "qc:replay": "node scripts/qc-replay.mjs",
+    "test:smoke": "playwright test -c playwright.quality.config.ts --grep @smoke --project=chromium",
+    "test:official": "playwright test -c playwright.quality.config.ts --grep @official --project=chromium"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "1.2.3",

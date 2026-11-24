@@ -15,25 +15,15 @@ concurrency:
 jobs:
   build:
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
-        env:
-          PAGES_BASE_PATH: /${{ github.event.repository.name }}/
-      - uses: actions/upload-pages-artifact@v4
-        with:
-          path: dist
+    uses: ./.github/workflows/ci.yml
+    with:
+      upload_pages: true
 
   deploy:
     needs: build
+    timeout-minutes: 10
+    outputs:
+      page_url: ${{ steps.publish.outputs.page_url }}
     runs-on: ubuntu-latest
     permissions:
       pages: write
@@ -44,3 +34,35 @@ jobs:
     steps:
       - id: publish
         uses: actions/deploy-pages@v4
+
+  verify:
+    name: Verify published site and revision
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --only-shell chromium
+      - name: Verify the deployed HTTPS URL
+        env:
+          DEPLOYED_URL: ${{ needs.deploy.outputs.page_url }}
+        run: |
+          test -n "$DEPLOYED_URL"
+          npx playwright test -c playwright.quality.config.ts published.spec.ts --project=chromium
+      - name: Report failed post-deployment verification
+        if: failure()
+        run: echo "::error::Pages has already deployed. Verification failed for $GITHUB_SHA. Inspect the verify job and published site."
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: published-site-diagnostics
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore
