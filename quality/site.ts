@@ -10,7 +10,7 @@ export async function verifySite(page: Page, site: string) {
   home.searchParams.set('verify', revision);
   const response = await page.goto(home.href);
   expect(response?.status()).toBe(200);
-  await expect(page.getByRole('heading', { name: '關節動作分析', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '關節動作分析研究工作台', exact: true })).toBeVisible();
   await expect(page.locator('meta[name="build-revision"]')).toHaveAttribute('content', revision);
 
   const assets = await page.locator('script[type=module][src], link[rel=modulepreload], link[rel=stylesheet]').evaluateAll(nodes =>
