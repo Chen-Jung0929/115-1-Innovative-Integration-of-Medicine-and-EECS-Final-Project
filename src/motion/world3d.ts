@@ -10,7 +10,7 @@ const trusted = (s: Sample) => s.tracking.accepted && (!s.review || s.review.lab
 export interface SessionLift {
   /** context (gravity, floorY, origin) stays in the lift's own frame; poses are additionally turned by uprightDeg. */
   poses: SessionPoses; context: LiftContext | null;
-  /** Degrees the whole clip was turned to stand upright from its standing frames (ADR-091), or null when not applied. */
+  /** Degrees the whole clip was turned to stand upright from its standing frames (ADR-094), or null when not applied. */
   uprightDeg: number | null;
 }
 const mid = (P: readonly Vec3[], a: number, b: number): Vec3 => [(P[a]![0] + P[b]![0]) / 2, (P[a]![1] + P[b]![1]) / 2, (P[a]![2] + P[b]![2]) / 2];
@@ -19,7 +19,7 @@ const UPRIGHT_NEAR_MAX = 0.97;
 /** Larger tilts are not trusted as a camera/gravity error (自訂). */
 const UPRIGHT_MAX_DEG = 28; // dataset clips needed ≤ 22.4°
 /**
- * Standing-frame upright (upright-from-standing-v1, ADR-091, 自訂). Without the phone's tilt the lifted
+ * Standing-frame upright (upright-from-standing-v1, ADR-094, 自訂). Without the phone's tilt the lifted
  * skeleton keeps the camera's view of "up": on the dataset squat clips a still-standing person leans
  * 15–22° (all camera angles), which reads as a forward lean. In the clip's most extended frames the line
  * from the ankle midpoint to the shoulder midpoint is taken as vertical, and the whole clip is turned by
@@ -65,7 +65,7 @@ export function calibrationNote(context: LiftContext | null | undefined): string
 const FEET = [27, 28, 29, 30, 31, 32];
 const HEEL_TOE = [[29, 31], [30, 32]] as const;
 /**
- * Display only (ground-pin-display-v1, ADR-090): the same pose moved so its lowest heel/toe/ankle stands
+ * Display only (ground-pin-display-v1, ADR-093): the same pose moved so its lowest heel/toe/ankle stands
  * on the floor grid (y = 0) and the point between the ankles sits at the grid centre (x = z = 0).
  * The lift puts one floor height on the whole clip, but the feet's own height drifts by 10–60 cm
  * (scale changes, feet half out of frame) and the live foot lock can slide the body ~1 m in depth, so the

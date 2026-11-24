@@ -30,7 +30,7 @@ function footShadow(pts: readonly Vec3[], side: 'left' | 'right') {
 }
 
 export function Skeleton3D({ sample, points: rawPoints, note, pitchText, uprightDeg, children }: { sample: Sample | undefined; points: Vec3[] | undefined; note?: string | null; pitchText?: string | null; uprightDeg?: number | null; children?: ReactNode }) {
-  // Feet on the grid, body at the grid centre every frame (ADR-090); angles are translation-free.
+  // Feet on the grid, body at the grid centre every frame (ADR-093); angles are translation-free.
   const points = useMemo(() => groundForDisplay(rawPoints), [rawPoints]);
   const ref = useRef<HTMLCanvasElement>(null);
   const gl = useRef<HTMLCanvasElement>(null);

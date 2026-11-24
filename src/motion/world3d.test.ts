@@ -32,7 +32,7 @@ describe('session 3D poses', () => {
     expect(calibrationNote(null)).toBeNull();
   });
 
-  it('display pose stands on the floor grid at its centre, without changing any angle (ADR-090)', () => {
+  it('display pose stands on the floor grid at its centre, without changing any angle (ADR-093)', () => {
     const pose = liftSession([at(0)], 640, 480).poses.get(0)!;
     // Float the skeleton 0.4 m above the floor and 1 m sideways / back, as a drifting lift could.
     const floating = pose.map(p => [p[0] + 1, p[1] - 0.4, p[2] + 1] as Vec3);
@@ -51,7 +51,7 @@ describe('session 3D poses', () => {
     expect(floating[27]![1]).toBeCloseTo(pose[27]![1] - 0.4, 9); // input untouched
   });
 
-  it('turns a clip upright from its standing frames with one rigid rotation (ADR-091)', () => {
+  it('turns a clip upright from its standing frames with one rigid rotation (ADR-094)', () => {
     const pose = liftSession([at(0)], 640, 480).poses.get(0)!;
     const r = 20 * Math.PI / 180, c = Math.cos(r), sn = Math.sin(r);
     const tilted = pose.map(p => [p[0], c * p[1] - sn * p[2], sn * p[1] + c * p[2]] as Vec3); // lean 20° toward the camera
