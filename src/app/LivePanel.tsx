@@ -428,7 +428,7 @@ export function LivePanel({ keep, model, side, onSide, disabled, onFullAnalysis 
           <p className="muted small">播放或拖動影片時，下方曲線的直線和 3D 骨架會跟著影片時間移動（大約對齊，誤差約 0.1–0.2 秒）。</p>
         </div>}
         <AngleChart samples={result.samples} side={side} timeMs={playMs ?? result.samples.at(-1)?.sourceTimeMs ?? 0} />
-        {resultLift && resultLast && <Skeleton3D sample={resultLast} points={resultLift.poses.get(resultLast.sampleIndex)} note={calibrationNote(resultLift.context)} pitchText={pitchLabel(result.cameraPitch)} />}
+        {resultLift && resultLast && <Skeleton3D sample={resultLast} points={resultLift.poses.get(resultLast.sampleIndex)} note={calibrationNote(resultLift.context)} pitchText={pitchLabel(result.cameraPitch)} uprightDeg={resultLift.uprightDeg} />}
         <div className="actions">
           <button className="secondary" onClick={() => downloadFile(`knee-live-${result.metadata.sessionId}.csv`, toCsv(result), 'text/csv;charset=utf-8')}>下載 CSV</button>
           <button className="secondary" onClick={() => downloadFile(`research-live-${result.metadata.sessionId}.json`, JSON.stringify(result, null, 2), 'application/json')}>下載研究 JSON（含 landmarks）</button>

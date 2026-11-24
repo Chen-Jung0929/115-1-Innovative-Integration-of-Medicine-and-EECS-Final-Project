@@ -270,7 +270,7 @@ export function App() {
         {frontalView && session && !selecting && <FrontalCuePanel {...cue} />}
         {frontalView && session && !selecting && linesDrawn(frontalFrame) && <FrontalLegend view={frontalFrame?.view} />}
         {frontalView && session && !selecting && frontalFrame?.calibration==='whole-video' && frontalFrame.view==='frontal' && !everStoodStill && <p className="muted small">這段影片裡沒有「站直不動 1 秒」的片段，基準線改用整段影片中站得最直的幾格來定。</p>}
-        {session && !selecting && <Skeleton3D sample={drawn} points={pose3d} note={calibrationNote(lift3d?.context)} pitchText={pitchLabel(session.cameraPitch)}>
+        {session && !selecting && <Skeleton3D sample={drawn} points={pose3d} note={calibrationNote(lift3d?.context)} pitchText={pitchLabel(session.cameraPitch)} uprightDeg={lift3d?.uprightDeg ?? null}>
           <label className="compact pitch-input">拍攝時手機俯角（°）<input type="number" inputMode="decimal" min={MANUAL_PITCH_RANGE.min} max={MANUAL_PITCH_RANGE.max} step={1} placeholder="未提供" disabled={session.cameraPitch?.source === 'device-orientation'}
             value={session.cameraPitch ? String(Math.round(session.cameraPitch.deg)) : ''} onChange={e => { if (!storedSession) return; const p = manualPitch(e.target.value); const { cameraPitch: _old, ...rest } = storedSession; setSession(p ? { ...rest, cameraPitch: p } : rest); }} /></label>
           <p className="muted small">影片檔沒有手機感測器資料。可在拍攝前用手機的水平儀 App 量俯角（鏡頭往下為正，0–30°）填在這裡，或改用「即時鏡頭」模式自動讀取；不填就照原本方式估計。</p>
