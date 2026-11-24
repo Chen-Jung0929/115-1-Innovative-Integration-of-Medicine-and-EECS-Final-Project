@@ -37,8 +37,9 @@ test('live camera starts hands-free, ends a segment on a second person, restarts
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: '下載 CSV', exact: true }).click();
   expect((await download).suggestedFilename()).toMatch(/^knee-live-.*\.csv$/);
-  // Each segment is recorded twice on this device only: the raw camera picture and a copy with the skeleton drawn on.
-  for (const [name, pattern] of [['下載影片（原始畫面）', /^video-live-[0-9a-f-]{36}\.(webm|mp4)$/], ['下載影片（含骨架）', /^video-live-skeleton-.*\.(webm|mp4)$/]] as const) {
+  // One recording from opening to closing the camera, on this device only: raw picture and a skeleton copy.
+  await expect(page.getByText(/開始 · \d+ 秒/)).toBeVisible({ timeout: 10000 });
+  for (const [name, pattern] of [['下載整段影片（原始畫面）', /^video-live-[0-9T-]+Z\.(webm|mp4)$/], ['下載整段影片（含骨架）', /^video-live-.*-skeleton\.(webm|mp4)$/]] as const) {
     const button = page.getByRole('button', { name, exact: true });
     await expect(button).toBeVisible({ timeout: 10000 });
     const video = page.waitForEvent('download');
@@ -51,16 +52,27 @@ test('live camera starts hands-free, ends a segment on a second person, restarts
   }
   // In-page playback of the recording, then the same full analysis view as an uploaded video.
   await expect(page.getByLabel('這一段的錄影')).toBeVisible();
+  // Both segments live in the same camera recording; the later one starts later in it.
+  const offset = async () => Number((await page.getByText(/已跳到這一段開始的位置/).textContent())!.match(/第 ([\d.]+) 秒/)![1]);
+  const latestOffset = await offset();
+  expect(latestOffset).toBeGreaterThan(0.5);
+  const at = () => page.getByLabel('這一段的錄影').evaluate((v: HTMLVideoElement) => v.currentTime);
+  await expect.poll(at).toBeCloseTo(latestOffset, 0);
+  await page.getByLabel('選擇量測段').selectOption({ index: 1 });
+  const earlierOffset = await offset();
+  expect(earlierOffset).toBeLessThan(latestOffset);
+  await expect.poll(at).toBeCloseTo(earlierOffset, 0); // the shared video really moved, not only the caption
+  await page.getByLabel('選擇量測段').selectOption({ index: 0 });
   await page.getByRole('button', { name: '看原始畫面', exact: true }).click();
   await expect(page.getByRole('button', { name: '看原始畫面', exact: true })).toHaveAttribute('aria-pressed', 'true');
-  await page.getByRole('button', { name: '用完整分析畫面看這一段', exact: true }).click();
+  await page.getByRole('button', { name: '用完整分析畫面看整段', exact: true }).click();
   await expect(page.getByText('MP4 影片（最多 500 MB、10 分鐘）')).toBeVisible();
-  await expect(page.getByText(/^live-.*\.mp4 · /)).toBeVisible({ timeout: 15000 });
+  await expect(page.getByText(/^video-live-.*\.mp4 · /)).toBeVisible({ timeout: 15000 });
   await expect(page.getByText(/分析完成/)).toBeVisible({ timeout: 60000 });
   // Saved live segments survive the trip to the upload view.
   await page.getByRole('button', { name: '即時鏡頭', exact: true }).click();
   await expect(page.getByLabel('選擇量測段')).toBeVisible();
-  await expect(page.getByRole('button', { name: '下載影片（原始畫面）', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '下載整段影片（原始畫面）', exact: true })).toBeVisible();
   // Leaving the camera page in the middle of a segment saves that segment instead of dropping it.
   const before = await page.getByLabel('選擇量測段').locator('option').count();
   await page.getByRole('button', { name: '開啟鏡頭', exact: true }).click();
@@ -69,7 +81,7 @@ test('live camera starts hands-free, ends a segment on a second person, restarts
   await page.getByRole('button', { name: '上傳影片', exact: true }).click();
   await page.getByRole('button', { name: '即時鏡頭', exact: true }).click();
   await expect(page.getByLabel('選擇量測段').locator('option')).toHaveCount(before + 1);
-  await expect(page.getByRole('button', { name: '下載影片（含骨架）', exact: true })).toBeVisible({ timeout: 10000 });
+  await expect(page.getByRole('button', { name: '下載整段影片（含骨架）', exact: true })).toHaveCount(2, { timeout: 10000 }); // a second recording, finished after the remount
 });
 
 test('camera downloads only on start and retries a failed model request', async ({ page }) => {

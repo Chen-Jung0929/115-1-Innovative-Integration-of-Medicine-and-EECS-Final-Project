@@ -241,4 +241,5 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .skeleton3d-empty { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: var(--muted); font-size: .9rem; }
 .segment-playback { display: grid; gap: 8px; margin: 12px 0; }
 .segment-playback video { display: block; width: 100%; max-height: 70vh; background: var(--stage); border-radius: var(--radius-sm); }
-.full-analysis { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 12px 0; }
+.recordings { display: grid; gap: 8px; margin: 4px 0 16px; }
+.recording-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
